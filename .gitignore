@@ -1,0 +1,8 @@
+*.pyc
+# Spyder project settings
+.spyderproject
+.spyproject
+.*/
+__pycache__/
+re-mesh-editor_updater/
+TextureCache/
