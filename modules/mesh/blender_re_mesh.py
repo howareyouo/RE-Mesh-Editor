@@ -1020,24 +1020,25 @@ def splitSharpEdges():
 	else:
 		selection = bpy.context.scene.objects
 	for selectedObj in selection:
-		if selectedObj.type == "MESH":
-			isHidden = selectedObj.hide_viewport
-			if isHidden:
-				selectedObj.hide_viewport = False
-			context.view_layer.objects.active = selectedObj
-
-			bpy.ops.object.mode_set(mode='EDIT')
-			obj = bpy.context.edit_object
-			me = obj.data
-			bm = bmesh.from_edit_mesh(me)
-			# old seams
-			sharp = [e for e in bm.edges if not e.smooth]
-			if sharp != []:
-				print(f"Split Sharp Edges on {selectedObj.name}")
-			bmesh.ops.split_edges(bm, edges=sharp)
-			bmesh.update_edit_mesh(me)
-			bpy.ops.object.mode_set(mode='OBJECT')
-			selectedObj.hide_viewport = isHidden
+		if selectedObj.type != "MESH":
+			continue
+		isHidden = selectedObj.hide_viewport
+		if isHidden:
+			selectedObj.hide_viewport = False
+		me = selectedObj.data
+		# Non-EDIT bmesh round trip: same split_edges result as the old
+		# EDIT-mode path but skips the two mode_set() operator calls (which
+		# dominated time on large meshes). bmesh keeps weights automatically.
+		bm = bmesh.new()
+		bm.from_mesh(me)
+		bm.edges.ensure_lookup_table()
+		sharp = [e for e in bm.edges if not e.smooth]
+		if sharp != []:
+			print(f"Split Sharp Edges on {selectedObj.name}")
+		bmesh.ops.split_edges(bm, edges=sharp)
+		bm.to_mesh(me)
+		bm.free()
+		selectedObj.hide_viewport = isHidden
 
 
 # End split sharp edges
@@ -1406,11 +1407,16 @@ def exportREMeshFile(filePath, options):
 			# Only the unique verts are actually processed, so materialize their positions
 			# (instead of converting the whole positions array to a list of python floats).
 			pos_unique = vert_positions[unique_verts].tolist()
-			for pos_idx, vi in enumerate(unique_verts.tolist()):
-				# When UV solve rebuilt the vertices, weights live on the ORIGINAL
-				# verts (new verts have empty deform data), so read through remap.
-				vi_old = uvRemap[vi] if uvRemap is not None else vi
-				vert = evaluatedSubMeshData.vertices[vi_old]
+			# Resolve UV-rebuild remap ONCE outside the loop: when UV solve split
+			# vertices, weights live on the ORIGINAL verts (new verts have empty
+			# deform data); otherwise vertex index is the original index.
+			if uvRemap is not None:
+				vert_ids = uvRemap[unique_verts].tolist()
+			else:
+				vert_ids = unique_verts.tolist()
+			verts = evaluatedSubMeshData.vertices
+			for pos_idx, vi_old in enumerate(vert_ids):
+				vert = verts[vi_old]
 				prim = []  # (raw group idx, weight)
 				sec = []   # (raw group idx, weight) for shapekeys
 				for g in vert.groups:
