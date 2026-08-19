@@ -1,10 +1,6 @@
 import bpy
 
-from bpy.types import (Panel,
-					   Menu,
-					   Operator,
-					   PropertyGroup,
-					   )
+from bpy.types import (Panel, Menu, Operator, PropertyGroup)
 
 
 def tag_redraw(context, space_type="PROPERTIES", region_type="WINDOW"):
@@ -23,6 +19,7 @@ class OBJECT_PT_REModWorkspacePanel(Panel):
 	bl_region_type = "UI"
 	bl_category = "RE Mesh"   
 	bl_context = "objectmode"
+	bl_options = {'DEFAULT_CLOSED'}
 
 	@classmethod
 	def poll(self,context):

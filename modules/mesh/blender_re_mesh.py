@@ -348,6 +348,8 @@ def _importWeightsToGroup(boneIndicesList, weightList, boneToGroupMap, weightFil
 	for s, e in zip(starts, ends):
 		bi = int(sorted_bones[s])
 		w = float(sorted_weights[s])
+		# .tolist() is required: some Blender builds strictly check that
+		# VertexGroup.add() receives Python ints and reject numpy int64 items.
 		verts = sorted_vi[s:e].tolist()
 		vg = boneToGroupMap[bi]
 		vg.add(verts, w, 'ADD')
@@ -382,30 +384,101 @@ def buildBoneNameMaps(boneNameList):
 	return boneNameMap, secBoneNameMap
 
 
+# --- lightweight import phase profiler (accumulated across submeshes, printed
+# once per import) ---
+_IMPORT_PHASES = {}
+_IMPORT_PHASE_CUR = None
+_IMPORT_PHASE_T0 = None
+
+
+def _phase_switch(name):
+	global _IMPORT_PHASE_CUR, _IMPORT_PHASE_T0
+	now = time.perf_counter()
+	if _IMPORT_PHASE_CUR is not None:
+		_IMPORT_PHASES[_IMPORT_PHASE_CUR] = _IMPORT_PHASES.get(_IMPORT_PHASE_CUR, 0.0) + (
+					now - _IMPORT_PHASE_T0)
+	_IMPORT_PHASE_CUR = name
+	_IMPORT_PHASE_T0 = now
+
+
+def _phase_reset():
+	global _IMPORT_PHASE_CUR, _IMPORT_PHASE_T0
+	_IMPORT_PHASES.clear()
+	_IMPORT_PHASE_CUR = None
+	_IMPORT_PHASE_T0 = None
+
+
 def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=[], vertexColor0List=[],
                vertexColor1List=[], UV0List=[], UV1List=[], UV2List=[], boneNameList=[],
                vertexGroupWeightList=[], vertexGroupBoneIndicesList=[], extraVertexGroupWeightList=[],
                extraVertexGroupBoneIndicesList=[], vertexGroupWeightListSecondary=[],
                vertexGroupBoneIndicesListSecondary=[], boneNameRemapList=[], material="Material",
                armature=None, collection=None, rotate90=True, blendShapeList=[]):
+	_phase_switch("construct")
 	meshData = bpy.data.meshes.new(meshName)
 	# Import vertices and faces
 	if len(vertexList) == 0:
 		raise Exception("Invalid mesh, submesh has no vertices")
 	if len(faceList) == 0:
 		raise Exception("Invalid mesh, submesh has no faces")
-	meshData.from_pydata(vertexList, [], faceList)
+	# Bulk-construct the mesh with add() + foreach_set instead of from_pydata
+	# (same philosophy as the vectorized export gathering): numpy buffers are
+	# handed straight to Blender with no per-vertex/per-face Python conversion.
+	vertexArr = np.asarray(vertexList, dtype=np.float32)
+	try:
+		faceArr = np.asarray(faceList)
+	except ValueError:  # Ragged Python list (non-uniform face sizes) - handled by the fallback below
+		faceArr = faceList
+	n_verts = len(vertexArr)
+	n_polys = len(faceArr)
+	if hasattr(faceArr, "ndim") and faceArr.ndim == 2 and faceArr.shape[1] == 3:  # Standard RE mesh: all triangles
+		n_loops = n_polys * 3
+		loop_start = np.arange(n_polys, dtype=np.int32) * 3
+		loop_total = np.full(n_polys, 3, dtype=np.int32)
+		loop_vert = faceArr.reshape(-1)
+	else:  # Defensive fallback for non-uniform face sizes
+		loop_sizes = np.asarray([len(f) for f in faceArr], dtype=np.int32)
+		loop_start = np.concatenate([[0], np.cumsum(loop_sizes)[:-1]]).astype(np.int32)
+		loop_total = loop_sizes
+		loop_vert = np.concatenate([np.asarray(f, dtype=np.int32) for f in faceArr])
+	meshData.vertices.add(n_verts)
+	meshData.vertices.foreach_set("co", vertexArr.reshape(-1))
+	if n_polys > 0:
+		meshData.loops.add(n_loops)
+		meshData.loops.foreach_set("vertex_index", loop_vert.astype(np.int32, copy=False))
+		meshData.polygons.add(n_polys)
+		meshData.polygons.foreach_set("loop_start", loop_start)
+		meshData.polygons.foreach_set("loop_total", loop_total)
+	# from_pydata used to compute edges internally. Blender <4.0's
+	# calc_normals_split() needs edge data, so keep calc_edges there; on 4.0+
+	# edges are computed lazily by Blender and nothing in this addon reads
+	# mesh.edges (export/solve-UVs/split-sharp all work on loops/bmesh), so the
+	# expensive per-submesh edge build is skipped on big imports.
+	meshData.update(calc_edges=(bpy.app.version < (4, 0, 0)))
 	# Import vertex normals
 	if len(vertexNormalList) > 0:
-		meshData.update(calc_edges=True)
-		meshData.polygons.foreach_set("use_smooth", [True] * len(meshData.polygons))
-		meshData.validate()  # Must call validate before setting custom normals or it can cause rare crashes when importing
+		_phase_switch("normals_prep")
+		meshData.polygons.foreach_set("use_smooth", np.ones(len(meshData.polygons), dtype=bool))
+		if bpy.app.version < (4, 0, 0):
+			# Validate before setting custom normals to avoid rare crashes on old
+			# Blender. The mesh is bulk-constructed and well-formed (exact array
+			# sizes, in-range indices) and RE files have no loose vertices, so on
+			# 4.0+ this O(n) full-mesh sanity pass is pure overhead (~0.5s on a
+			# 460k-vert import) and is skipped.
+			meshData.validate()
 		# Vectorized normal normalization - much faster than Python loop
 		normals = np.asarray(vertexNormalList, dtype=np.float32)
 		norms = np.linalg.norm(normals, axis=1, keepdims=True)
 		norms[norms == 0] = 1.0  # Avoid division by zero
-		normalized_normals = (normals / norms).tolist()
-		meshData.normals_split_custom_set_from_vertices(normalized_normals)
+		normalized_normals = normals / norms
+		_phase_switch("normals_c")
+		# Blender's normals_split_custom_set_from_vertices() iterates every vertex
+		# through the Python sequence protocol IN C: passing a numpy array forces
+		# a slow per-row PySequence_Fast + numpy-scalar float conversion for each
+		# vertex (~575ms on 460k verts). Feeding .tolist() gives pure Python
+		# floats, which the C code reads directly - counterintuitive but measured
+		# ~2x faster than handing it the numpy array.
+		meshData.normals_split_custom_set_from_vertices(normalized_normals.tolist())
 
 		# print(f"DEBUG:\tSet custom normals")
 		if bpy.app.version < (4, 0, 0):
@@ -418,8 +491,15 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		meshData.normals_split_custom_set_from_vertices(vertexNormalList)
 		"""
 	# Import UV Layers and Vertex Colors - precompute loop indices once
-	loop_vertex_indices = np.zeros(len(meshData.loops), dtype=np.int32)
-	meshData.loops.foreach_get("vertex_index", loop_vertex_indices)
+	_phase_switch("uv_color")
+	if bpy.app.version >= (4, 0, 0):
+		# No validate() on 4.0+ (see normals phase), so the loop->vertex indices
+		# are exactly what was written during construction - reuse them instead
+		# of paying a multi-million element foreach_get per submesh.
+		loop_vertex_indices = loop_vert.astype(np.int32, copy=False)
+	else:
+		loop_vertex_indices = np.zeros(len(meshData.loops), dtype=np.int32)
+		meshData.loops.foreach_get("vertex_index", loop_vertex_indices)
 
 	UVLayerList = (UV0List, UV1List, UV2List)
 	for layerIndex, layer in enumerate(UVLayerList):
@@ -439,6 +519,7 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 	meshObj = bpy.data.objects.new(meshName, meshData)
 
 	# Import Weights
+	_phase_switch("weights")
 	if len(vertexGroupWeightList) > 0 and len(boneNameList) > 0:
 		# Precompute bone name mapping to avoid repeated hashing (single pass for both primary + secondary)
 		boneNameMap, secBoneNameMap = buildBoneNameMaps(boneNameList)
@@ -496,6 +577,7 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 			vg = meshObj.vertex_groups.new(name=secBoneNameMap[0])
 			vg.add(np.arange(len(meshObj.data.vertices)).tolist(), 1.0, 'REPLACE')
 
+	_phase_switch("finalize")
 	if armature != None:
 		meshObj.parent = armature
 		mod = meshObj.modifiers.new(name='Armature', type='ARMATURE')
@@ -530,7 +612,85 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 			new_co = basis_co + deltas.ravel()
 			sk.data.foreach_set("co", new_co)
 
+	_phase_switch(None)
 	return meshObj
+
+
+# Opt-in: build ONE Blender mesh per (viscon group, material) instead of one per
+# submesh, by concatenating same-material submeshes in numpy before creating the
+# mesh. The dominant import cost on many-submesh files is the per-submesh Blender
+# build (mesh create + normals + uv layers + link), so collapsing N submeshes
+# into ~N/materials builds speeds up large imports substantially.
+# NOTE: merged meshes lose per-submesh identity, so the exported file structure
+# differs from the original on re-export. Reused meshes, blend shapes, extra
+# weights and DD2 secondary weights are never merged (they keep the safe path).
+MERGE_SAME_MATERIAL_SUBMESHES = True
+
+
+def _subMeshMergeProfile(subMesh):
+	"""Return a (buffer-presence) profile for a submesh if it is safe to merge
+	into a combined mesh, or None if it must be imported individually.
+
+	Submeshes carrying blend shapes, extra (MH Wilds) weights or DD2 secondary
+	weights can't be merged without losing data, so they keep the per-submesh path.
+	"""
+	if subMesh.blendShapeList:
+		return None
+	if getattr(subMesh, "extraWeightList", None):
+		return None
+	if getattr(subMesh, "secondaryWeightList", None):
+		return None
+	has = lambda x: x is not None and len(x) > 0
+	return (
+		has(subMesh.normalList),
+		has(subMesh.uvList),
+		has(subMesh.uv2List),
+		has(subMesh.colorList),
+		has(subMesh.weightList),
+	)
+
+
+def _importMergedSubMeshes(subMeshList, materialName, LODNum, groupNum, boneNameList,
+                           materialDict, armatureObj, collection, rotate90):
+	"""Concatenate same-material submeshes (vertex buffers + face indices offset
+	per submesh) and import them as a single Blender mesh."""
+	vertParts = []
+	faceParts = []
+	offsets = []
+	offset = 0
+	for subMesh in subMeshList:
+		offsets.append(offset)
+		offset += len(subMesh.vertexPosList)
+	for subMesh, vertOffset in zip(subMeshList, offsets):
+		vertParts.append(np.asarray(subMesh.vertexPosList, dtype=np.float32))
+		faces = np.asarray(subMesh.faceList)
+		# Promote before offsetting so uint16 face buffers can't wrap around
+		faceParts.append((faces.astype(np.int64) + vertOffset).astype(np.uint32))
+
+	def _cat(attr, dtype=None):
+		return np.concatenate([np.asarray(getattr(s, attr), dtype=dtype) for s in subMeshList])
+
+	firstSub = subMeshList[0]
+	mergedName = (f"{LODNum}Group_{str(groupNum)}_Sub_{str(firstSub.subMeshIndex)}_"
+	              f"{str(len(subMeshList))}__{materialName}")
+	has = lambda x: x is not None and len(x) > 0
+	return importMesh(
+		meshName=mergedName,
+		vertexList=np.concatenate(vertParts),
+		faceList=np.concatenate(faceParts),
+		vertexNormalList=_cat("normalList", np.float32) if has(firstSub.normalList) else [],
+		vertexColor0List=_cat("colorList", np.float32) if has(firstSub.colorList) else [],
+		UV0List=_cat("uvList", np.float32) if has(firstSub.uvList) else [],
+		UV1List=_cat("uv2List", np.float32) if has(firstSub.uv2List) else [],
+		UV2List=[],
+		boneNameList=boneNameList,
+		vertexGroupWeightList=_cat("weightList", np.float32) if has(firstSub.weightList) else [],
+		vertexGroupBoneIndicesList=_cat("weightIndicesList") if has(firstSub.weightList) else [],
+		material=materialDict[materialName],
+		armature=armatureObj,
+		collection=collection,
+		rotate90=rotate90,
+	)
 
 
 def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureObj, hiddenCollectionSet,
@@ -558,10 +718,22 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 	if not importAllLODs and targetLODList != []:
 		targetLODList = [targetLODList[0]]
 
+	# Offsets that are referenced by isReusedMesh consumers must stay reachable
+	# through meshOffsetDict, so their source submeshes are never merged.
+	reuseSourceOffsets = set()
+	if MERGE_SAME_MATERIAL_SUBMESHES:
+		for lod in targetLODList:
+			for visconGroup in lod.visconGroupList:
+				for subMesh in visconGroup.subMeshList:
+					if subMesh.isReusedMesh:
+						reuseSourceOffsets.add(subMesh.meshVertexOffset)
+
 	if parsedMesh.isMPLY:
 		MPLYRoot = createEmpty(
 			f"Meshlet Root" + f" - {meshCollection.name}" if meshCollection != None else "",
 			[("~TYPE", "RE_MESH_MPLY_ROOT")], collection=meshCollection)
+	totalMergedSubMeshes = 0
+	totalMergedMeshes = 0
 	for lodIndex, lod in enumerate(targetLODList):
 		shadowLODString = ""
 		if importShadowMeshes:
@@ -580,17 +752,41 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 		for visconGroup in lod.visconGroupList:
 			# print(f"DEBUG: Group {visconGroup.visconGroupNum}")
 			objMergeList = []
+			LODNum = f"LOD_{str(lodIndex)}_" if importAllLODs else ""
+			mergedSubMeshIDs = set()
+			if MERGE_SAME_MATERIAL_SUBMESHES and not parsedMesh.isMPLY:
+				# Pre-pass: bucket mergeable same-material submeshes and build each
+				# bucket as ONE larger mesh (fewer Blender builds = faster import).
+				mergeBuckets = {}
+				for subMesh in visconGroup.subMeshList:
+					if subMesh.isReusedMesh:
+						continue
+					profile = _subMeshMergeProfile(subMesh)
+					if profile is None or subMesh.meshVertexOffset in reuseSourceOffsets:
+						continue
+					materialName = parsedMesh.materialNameList[subMesh.materialIndex]
+					mergeBuckets.setdefault((materialName, profile), []).append(subMesh)
+				for (materialName, _), mergeList in mergeBuckets.items():
+					if len(mergeList) < 2:
+						continue
+					meshObj = _importMergedSubMeshes(
+						mergeList, materialName, LODNum, visconGroup.visconGroupNum,
+						boneNameList, materialDict, armatureObj, lodCollection, rotate90)
+					if mergeGroups:
+						objMergeList.append(meshObj)
+					totalMergedSubMeshes += len(mergeList)
+					totalMergedMeshes += 1
+					for subMesh in mergeList:
+						mergedSubMeshIDs.add(id(subMesh))
 			for subMesh in visconGroup.subMeshList:
+				if id(subMesh) in mergedSubMeshIDs:
+					continue
 				if subMesh.isReusedMesh:
 					lodCollection.objects.link(meshOffsetDict[subMesh.meshVertexOffset])
 				else:
 					materialName = parsedMesh.materialNameList[subMesh.materialIndex]
 					# print(subMesh.vertexPosList)
 					# print(f"DEBUG:\t Sub {subMesh.subMeshIndex}")
-					if importAllLODs:
-						LODNum = f"LOD_{str(lodIndex)}_"
-					else:
-						LODNum = ""
 					meshObj = importMesh(
 						# meshName=f"LOD_{str(lodIndex)}_{shortName}_Group_{str(visconGroup.visconGroupNum)}_Sub_{str(subMesh.subMeshIndex)}__{materialName}",
 						meshName=f"{LODNum}Group_{str(visconGroup.visconGroupNum)}_Sub_{str(subMesh.subMeshIndex)}__{materialName}",
@@ -639,6 +835,9 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 				joinObjects(objMergeList)
 		# print(f"DEBUG: End Group {visconGroup.visconGroupNum}")
 		firstLOD = False
+	if totalMergedMeshes:
+		print(f"Merged {totalMergedSubMeshes} submeshes into {totalMergedMeshes} meshes "
+		      f"(MERGE_SAME_MATERIAL_SUBMESHES).")
 
 
 def importBoundingBox(bbox, bboxName, meshCollection, armatureObj=None, boneParent=None, rotate90=True):
@@ -814,10 +1013,16 @@ def importREMeshFile(filePath, options):
 
 	if not options["importArmatureOnly"]:
 		# print("DEBUG: Importing main mesh")
+		meshBuildStartTime = time.time()
 		importLODGroup(parsedMesh, "Main Mesh", meshCollection, materialDict, armatureObj,
 		               hiddenCollectionSet, meshOffsetDict, options["importAllLODs"],
 		               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
 		               options["mergeGroups"], options["importBoundingBoxes"])
+		print(f"Mesh build took {timeFormat % ((time.time() - meshBuildStartTime) * 1000)} ms.")
+		if _IMPORT_PHASES:
+			phaseStr = ", ".join(f"{name} {sec * 1000:.0f}ms" for name, sec in sorted(_IMPORT_PHASES.items()))
+			print(f"  importMesh phases: {phaseStr}")
+			_phase_reset()
 	# print("DEBUG: Finished importing main mesh")
 	"""
 	if options["importShadowMeshes"] and parsedMesh.shadowMeshLODList != []:
