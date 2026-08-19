@@ -2012,8 +2012,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 				reMesh.lodHeader.lodGroupOffsetList[mainMeshLODIndex])
 
 		# currentOffset = LOD Group 0 offset
-		currentOffset = getPaddedPos(reMesh.shadowHeader.offsetOffset + 8 * reMesh.shadowHeader.lodGroupCount,
-		                             16)
+		currentOffset = getPaddedPos(reMesh.shadowHeader.offsetOffset + 8 * reMesh.shadowHeader.lodGroupCount, 16)
 	# It turns out shadow meshes can only use existing lods from the main mesh so this was pointless
 	"""
 	if parsedMesh.shadowMeshLODList != []:

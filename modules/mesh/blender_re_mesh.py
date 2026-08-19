@@ -1108,7 +1108,6 @@ def exportREMeshFile(filePath, options):
 	parsedMesh.boundingBox = None
 	parsedMesh.boundingSphere = None
 	vertexGroupsSet = set()
-	weightedBonesSet = set()
 	cloneMeshNameDict = {}
 	deleteCopiedMeshList = []
 	boundingBoxCollection = None
@@ -1306,11 +1305,13 @@ def exportREMeshFile(filePath, options):
 
 	def _gatherSubMesh(task):
 		(parsedSubMesh, evaluatedSubMeshData, rawName, meshHasUV, meshHasUV2, meshHasColor,
-		 vertexGroupCount, vertexGroupIndexToRemapDict, shapeKeyGroupIndices,
+		 vertexGroupCount, vgNameList, shapeKeyGroupIndices,
 		 hasWeight, hasSecondaryWeight) = task
 		errs = []  # (code, name) collected locally, merged on main thread
-		bbox = []  # (bone idx, x, y, z) bounding box contributions
+		bbox_gi = []   # raw group index for every weighted-bone assignment (for bone bbox)
+		bbox_xyz = []  # flat x,y,z positions, parallel to bbox_gi
 		hasExtraWeightOverflow = False
+		used_names = set()  # unprefixed vertex-group names actually referenced (drives weightedBones/remap build)
 
 		loop_vert_idx = np.zeros(len(evaluatedSubMeshData.loops), dtype=np.int32)
 		evaluatedSubMeshData.loops.foreach_get("vertex_index", loop_vert_idx)
@@ -1380,7 +1381,7 @@ def exportREMeshFile(filePath, options):
 		# foreach_get for vertex-group weights, and numpy has high per-call overhead
 		# on the tiny (<=8 element) per-vertex slices, so plain lists are fastest.
 		if hasWeight:
-			vg_remap = vertexGroupIndexToRemapDict
+			vg_name_list = vgNameList
 			shapekey_set = shapeKeyGroupIndices
 			min_w = MIN_WEIGHT
 			secondary = hasSecondaryWeight
@@ -1389,17 +1390,18 @@ def exportREMeshFile(filePath, options):
 			pos_unique = vert_positions[unique_verts].tolist()
 			for pos_idx, vi in enumerate(unique_verts.tolist()):
 				vert = evaluatedSubMeshData.vertices[vi]
-				prim = []  # (remapped bone idx, weight)
-				sec = []   # (remapped bone idx, weight) for shapekeys
+				prim = []  # (raw group idx, weight)
+				sec = []   # (raw group idx, weight) for shapekeys
 				for g in vert.groups:
 					gidx = g.group
 					if gidx >= vertexGroupCount:
 						continue
-					ridx = vg_remap.get(gidx, 0)
+					rawN = vg_name_list[gidx]
+					used_names.add(rawN[9:] if rawN.startswith("SHAPEKEY_") else rawN)
 					if secondary and gidx in shapekey_set:
-						sec.append((ridx, g.weight))
+						sec.append((gidx, g.weight))
 					elif g.weight >= min_w:
-						prim.append((ridx, g.weight))
+						prim.append((gidx, g.weight))
 				if prim:
 					prim.sort(key=lambda t: t[1], reverse=True)
 					prim_w = [w for _, w in prim]
@@ -1421,8 +1423,9 @@ def exportREMeshFile(filePath, options):
 					if main_n < 8:
 						parsedSubMesh.weightIndicesList[pos_idx, main_n:] = padding_idx
 					px, py, pz = pos_unique[pos_idx]
-					for bi in prim_idx[:main_n]:
-						bbox.append((bi, px, py, pz))
+					for gi in prim_idx[:main_n]:
+						bbox_gi.append(gi)
+						bbox_xyz.extend((px, py, pz))
 				if secondary and sec:
 					sec.sort(key=lambda t: t[1], reverse=True)
 					sec_w = [w for _, w in sec]
@@ -1434,17 +1437,25 @@ def exportREMeshFile(filePath, options):
 					parsedSubMesh.secondaryWeightList[pos_idx, :sec_n] = sec_w[:sec_n]
 					parsedSubMesh.secondaryWeightIndicesList[pos_idx, :sec_n] = sec_idx[:sec_n]
 					px, py, pz = pos_unique[pos_idx]
-					for si in sec_idx[:sec_n]:
-						bbox.append((si, px, py, pz))
+					for gi in sec_idx[:sec_n]:
+						bbox_gi.append(gi)
+						bbox_xyz.extend((px, py, pz))
 		if len(unique_verts) < len(evaluatedSubMeshData.vertices):
 			errs.append(("LooseVerticesOnSubMesh", rawName))
-		return parsedSubMesh, errs, bbox, hasExtraWeightOverflow
+		if bbox_gi:
+			bbox = (np.asarray(bbox_gi, dtype=np.int32),
+			        np.asarray(bbox_xyz, dtype=np.float32).reshape(-1, 3))
+		else:
+			bbox = (np.zeros(0, dtype=np.int32), np.zeros((0, 3), dtype=np.float32))
+		return parsedSubMesh, errs, bbox, hasExtraWeightOverflow, used_names, vgNameList
 
 	# Loop through all lod collections, or the scene collection if there is no collections
 	meshDataStartTime = time.time()
 	isFirstLOD = True
 	remapDict = dict()
-	shapeKeyBoneSet = set()  # DD2 secondary weights
+	# Aggregated across the parallel submesh extraction for the current LOD:
+	all_used_names = set()      # unprefixed group names actually referenced -> builds weightedBones/remap
+	all_submesh_vg = []         # (parsedSubMesh, vgNameList, bbox) -> raw weight indices remapped later
 	for lodIndex, lod in enumerate(meshLODCollectionList):
 		print(f"LOD {lodIndex} collection:{lod.name}")
 		parsedLODLevel = LODLevel()
@@ -1455,7 +1466,6 @@ def exportREMeshFile(filePath, options):
 
 		# Store all groups as a key in dictionary with submesh list as value
 		visconDict = dict()
-		boneRemapStartTime = time.time()
 		# Get all meshes inside the collection
 		doubledUVList = []
 		sharpEdgeSplitList = []
@@ -1499,46 +1509,6 @@ def exportREMeshFile(filePath, options):
 					print(f"Could not parse group ID in {obj.name}, setting to 0")
 					groupID = 0
 
-				# Build bone remap table from first LOD by first finding all bones that have vertex groups weighted to them
-
-				if armatureObj != None:
-					armatureBoneDict = armatureObj.data.bones
-				else:
-					armatureBoneDict = dict()
-
-				if isFirstLOD:
-					hasWeights = False
-					# Collect which vertex-group INDICES are actually painted on the clone mesh,
-					# then resolve them to bone names via the CLONE's vertex groups. Group indices
-					# read from clone vertices are in the clone's own index space, which can differ
-					# from the original object's after new_from_object() -- so remap by NAME here.
-					mesh_data = cloneObj.data
-					# Vertex-group definitions live on the OBJECT, not on the Mesh (Mesh has no vertex_groups).
-					vgNameByIndex = [vg.name for vg in cloneObj.vertex_groups]
-					used = set()
-					for v in mesh_data.vertices:
-						for g in v.groups:
-							used.add(g.group)
-					for gidx in used:
-						if gidx >= len(vgNameByIndex):
-							continue
-						rawN = vgNameByIndex[gidx]
-						if rawN.startswith("SHAPEKEY_"):
-							vgName = rawN[9:]
-							shapeKeyBoneSet.add(vgName)
-						else:
-							vgName = rawN
-						if vgName in armatureBoneDict:
-							weightedBonesSet.add(vgName)
-							hasWeights = True
-						else:
-							remapDict[vgName] = 0
-					if armatureObj != None and not hasWeights:
-						raiseWarning(f"No valid vertex weights found on {obj.name}!")
-						showWarningMessage = True
-					# addErrorToDict(errorDict, "NoWeightsOnMesh", obj.name)
-					if armatureObj == None and len(remapDict) != 0:
-						addErrorToDict(errorDict, "NoArmatureInCollection", obj.name)
 				if not visconDict.get(groupID):
 					visconDict[groupID] = [obj]
 				else:
@@ -1588,27 +1558,8 @@ def exportREMeshFile(filePath, options):
 			for obj in previousSelection:
 				obj.select_set(True)
 
-		# Build remap dict once all objects of the first lod are looped through
-
-		if isFirstLOD and armatureObj != None:
-			remapIndex = 0
-			for bone in armatureObj.data.bones:
-				if bone.name in weightedBonesSet:
-					parsedMesh.skeleton.weightedBones.append(bone.name)
-					remapDict[bone.name] = remapIndex
-					remapIndex += 1
-			if len(parsedMesh.skeleton.weightedBones) == 0:
-				raiseWarning(
-					f"No bones have any weights assigned to them. Defaulting all weights to {armatureObj.data.bones[0].name}")
-				parsedMesh.skeleton.weightedBones = [armatureObj.data.bones[0].name]
-			boneRemapEndTime = time.time()
-			boneRemapTime = boneRemapEndTime - boneRemapStartTime
-			# Track per-bone min/max inline instead of collecting all positions
-			boneMin = {}
-			boneMax = {}
-			for name in parsedMesh.skeleton.weightedBones:
-				boneMin[name] = [math.inf, math.inf, math.inf]
-				boneMax[name] = [-math.inf, -math.inf, -math.inf]
+		# The weighted bones / remap table is now built AFTER the parallel submesh extraction
+		# (from the group names each worker reports back), so no serial vertex scan is needed.
 
 		# Once all viscons have been added, sort them, then parse the submeshes
 		for visconGroupID in sorted(visconDict.keys()):
@@ -1691,13 +1642,10 @@ def exportREMeshFile(filePath, options):
 				faceCount += len(evaluatedSubMeshData.polygons)
 
 				# Resolve weight-remap and shapekey indices in the CLONE mesh's vertex-group
-				# index space (where the weight group indices are actually read from), linking
-				# to the original via vertex-group NAME instead of index.
+				# index space (where the weight group indices are actually read from). The raw
+				# group indices are stored during extraction and remapped on the main thread
+				# once the weighted-bone table is known.
 				vgNameList = [vg.name for vg in cloneObj.vertex_groups]
-				vertexGroupIndexToRemapDict = {
-					idx: remapDict.get((name[9:] if name.startswith("SHAPEKEY_") else name), 0)
-					for idx, name in enumerate(vgNameList)
-				}
 
 				# DD2 shape key vertex group indices
 				shapeKeyGroupIndices = set(
@@ -1705,7 +1653,6 @@ def exportREMeshFile(filePath, options):
 				if len(shapeKeyGroupIndices) != 0:
 					parsedMesh.bufferHasSecondaryWeight = True
 
-				# print(vertexGroupIndexToRemapDict)
 				parsedMesh.bufferHasPosition = True
 				parsedSubMesh.vertexPosList = np.zeros((len(evaluatedSubMeshData.vertices), 3))
 				parsedMesh.bufferHasNorTan = True
@@ -1766,7 +1713,7 @@ def exportREMeshFile(filePath, options):
 				subMeshTasks.append((
 					parsedSubMesh, evaluatedSubMeshData, rawsubmesh.name,
 					meshHasUV, meshHasUV2, meshHasColor,
-					vertexGroupCount, vertexGroupIndexToRemapDict, shapeKeyGroupIndices,
+					vertexGroupCount, vgNameList, shapeKeyGroupIndices,
 					armatureObj != None, parsedMesh.bufferHasSecondaryWeight,
 				))
 
@@ -1775,23 +1722,17 @@ def exportREMeshFile(filePath, options):
 			# the GIL, so worker threads overlap in real time (near-linear on multicore).
 
 			def _mergeSubMeshResult(res):
-				# Serial merge: bbox update must not run concurrently.
-				ps, errs, bb, fl = res
+				# Serial merge (runs on main thread). Remap + bbox are deferred until the
+				# weighted-bone table is built from all groups' used_names.
+				ps, errs, bb, fl, used, vgNames = res
 				if fl:
 					parsedMesh.bufferHasExtraWeight = True
 				for code, name in errs:
 					addErrorToDict(errorDict, code, name)
-				for bi, cx, cy, cz in bb:
-					_name = parsedMesh.skeleton.weightedBones[bi]
-					_bmin = boneMin[_name]
-					_bmax = boneMax[_name]
-					if cx < _bmin[0]: _bmin[0] = cx
-					if cy < _bmin[1]: _bmin[1] = cy
-					if cz < _bmin[2]: _bmin[2] = cz
-					if cx > _bmax[0]: _bmax[0] = cx
-					if cy > _bmax[1]: _bmax[1] = cy
-					if cz > _bmax[2]: _bmax[2] = cz
 				visconGroup.subMeshList.append(ps)
+				if used and armatureObj != None:
+					all_used_names.update(used)
+					all_submesh_vg.append((ps, vgNames, bb))
 
 			workers = min(len(subMeshTasks), os.cpu_count() if os.cpu_count() else 4)
 			if len(subMeshTasks) == 0:
@@ -1812,6 +1753,61 @@ def exportREMeshFile(filePath, options):
 			# End submesh
 			parsedLODLevel.visconGroupList.append(visconGroup)
 		# End viscon
+
+		# Build the weighted-bone table from the (parallel) extracted used_names, then
+		# remap every submesh's raw group indices and fold bone bounding-box contributions
+		# in. This replaces the old serial all-vertex scan (which took ~900ms for a full LOD).
+		if armatureObj != None:
+			boneRemapStartTime = time.time()  # measure only the (now cheap) remap build+apply
+			if isFirstLOD:
+				armatureBoneDict = armatureObj.data.bones
+				remapIndex = 0
+				for bone in armatureBoneDict:
+					if bone.name in all_used_names:
+						parsedMesh.skeleton.weightedBones.append(bone.name)
+						remapDict[bone.name] = remapIndex
+						remapIndex += 1
+				if len(parsedMesh.skeleton.weightedBones) == 0:
+					raiseWarning(
+						f"No bones have any weights assigned to them. Defaulting all weights to {armatureBoneDict[0].name}")
+					parsedMesh.skeleton.weightedBones = [armatureBoneDict[0].name]
+				# Vectorized per-bone min/max accumulation (indexed by weighted-bone order)
+				_numWB = len(parsedMesh.skeleton.weightedBones)
+				boneMinArr = np.full((_numWB, 3), np.inf, dtype=np.float32)
+				boneMaxArr = np.full((_numWB, 3), -np.inf, dtype=np.float32)
+
+			if isFirstLOD or remapDict:  # always on first LOD (remap table now known), and on later LODs once built
+				# Remap raw group indices -> weighted-bone index (vectorized per submesh)
+				for ps, vgNames, bb in all_submesh_vg:
+					n = len(vgNames)
+					lookup = np.asarray([
+						remapDict.get(vgNames[i][9:] if vgNames[i].startswith("SHAPEKEY_") else vgNames[i], 0)
+						for i in range(n)], dtype=np.int32)
+					weightIdx = ps.weightIndicesList
+					if weightIdx is not None and len(weightIdx):
+						weightIdx[:] = lookup[weightIdx]
+						extra = ps.extraWeightIndicesList
+						if extra is not None and len(extra):
+							extra[:] = lookup[extra]
+						sec = ps.secondaryWeightIndicesList
+						if sec is not None and len(sec):
+							sec[:] = lookup[sec]
+					# Bone bounding-box: vectorized min/max scatter into per-bone boxes
+					bbox_gi, bbox_pos = bb
+					if len(bbox_gi):
+						rb = lookup[bbox_gi]
+						np.minimum.at(boneMinArr, rb, bbox_pos)
+						np.maximum.at(boneMaxArr, rb, bbox_pos)
+			# Materialize name-keyed bone boxes for the downstream bounding-box pass
+			if isFirstLOD:
+				boneMin = {name: boneMinArr[i].tolist()
+				           for i, name in enumerate(parsedMesh.skeleton.weightedBones)}
+				boneMax = {name: boneMaxArr[i].tolist()
+				           for i, name in enumerate(parsedMesh.skeleton.weightedBones)}
+				boneRemapTime = time.time() - boneRemapStartTime
+			all_used_names.clear()
+			all_submesh_vg.clear()
+
 		if "+ Shadow LOD" in lod.name:
 			parsedMesh.shadowMeshLinkedLODList.append(parsedLODLevel)
 			print(
