@@ -445,15 +445,20 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		# Only create vertex groups for bones that get used
 		if len(boneNameList) > 1:
 			# print(boneNameList)
-			# Vectorized: use np.unique + concatenate instead of nested set comprehension
+			# Only create groups for bones that actually have non-zero weight.
+			# Unused skinning slots are padded with boneIndex 0 (root bone, e.g. "Hip")
+			# and weight 0, so without this filter every object would get a bogus
+			# empty vertex group for the root bone.
+			boneArr = np.asarray(vertexGroupBoneIndicesList)
+			weightArr = np.asarray(vertexGroupWeightList)
+			usedBoneIndices = sorted(np.unique(boneArr[weightArr > 0]).tolist())
 			if len(extraVertexGroupBoneIndicesList) > 0 and len(extraVertexGroupBoneIndicesList[0]) > 0:
-				all_bone_indices = np.unique(np.concatenate([
-					np.asarray(vertexGroupBoneIndicesList).ravel(),
-					np.asarray(extraVertexGroupBoneIndicesList).ravel()
-				]))
-			else:
-				all_bone_indices = np.unique(np.asarray(vertexGroupBoneIndicesList).ravel())
-			usedBoneIndices = sorted(all_bone_indices.tolist())
+				extraBoneArr = np.asarray(extraVertexGroupBoneIndicesList)
+				extraWeightArr = np.asarray(extraVertexGroupWeightList)
+				usedBoneIndices = sorted(np.unique(np.concatenate([
+					np.asarray(usedBoneIndices),
+					extraBoneArr[extraWeightArr > 0]
+				])).tolist())
 			# print(usedBoneIndices)
 			# Create vertex groups and build index-to-group lookup (avoids string-based lookups in inner loops)
 			boneIndexToVGroup = {}
@@ -475,8 +480,10 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		# Use precomputed secondary bone name map from buildBoneNameMaps (no duplicate work)
 		# print("Importing secondary weights")
 		# Only create vertex groups for bones that get used
-		# Vectorized: np.unique instead of nested set comprehension
-		usedBoneIndices = sorted(np.unique(np.asarray(vertexGroupBoneIndicesListSecondary).ravel()).tolist())
+		# Filter by active slots (same mask _importWeightsToGroup uses: primary weight > 0)
+		secBoneArr = np.asarray(vertexGroupBoneIndicesListSecondary)
+		primWeightArr = np.asarray(vertexGroupWeightList)
+		usedBoneIndices = sorted(np.unique(secBoneArr[primWeightArr > 0]).tolist())
 		# print(boneNameList)
 		if len(boneNameList) > 1:
 			# Create vertex groups and build index-to-group lookup
@@ -910,88 +917,98 @@ def importREMeshFile(filePath, options):
 def checkObjForUVDoubling(obj):
 	if len(obj.data.uv_layers) == 0 or len(obj.data.uv_layers[0].data) == 0:
 		return False
-	loop_vert_idx = np.zeros(len(obj.data.loops), dtype=np.int32)
-	obj.data.loops.foreach_get("vertex_index", loop_vert_idx)
-	uv_data = np.zeros((len(obj.data.uv_layers[0].data), 2), dtype=np.float32)
-	obj.data.uv_layers[0].data.foreach_get("uv", uv_data.ravel())
-	vert_min_uv = np.full((len(obj.data.vertices), 2), np.inf, dtype=np.float32)
-	vert_max_uv = np.full((len(obj.data.vertices), 2), -np.inf, dtype=np.float32)
-	np.minimum.at(vert_min_uv, loop_vert_idx, uv_data)
-	np.maximum.at(vert_max_uv, loop_vert_idx, uv_data)
-	return bool(np.any(np.any(vert_min_uv != vert_max_uv, axis=1)))
+	# Reuse the vectorized scan (checks all UV layers, matching solveRepeatedUVs).
+	return len(findRepeatedUVVerts(obj.data)) > 0
 
 
 # RE Toolbox Solve Repeated UVs
 
-def selectRepeated(bm):
-	bm.verts.index_update()
-	bm.verts.ensure_lookup_table()
-	targetVert = set()
-	for uv_layer in bm.loops.layers.uv.values():
-		uvMap = {}
-		for face in bm.faces:
-			for loop in face.loops:
-				uvPoint = tuple(loop[uv_layer].uv)
-				if loop.vert.index in uvMap and uvMap[loop.vert.index] != uvPoint:
-					targetVert.add(bm.verts[loop.vert.index])
-				else:
-					uvMap[loop.vert.index] = uvPoint
-	return targetVert
-
-
-def solveRepeatedVertex(op, mesh):
-	bpy.ops.mesh.select_all(action='DESELECT')
-	bm = bmesh.from_edit_mesh(mesh.data)
-	oldmode = bm.select_mode
-	bm.select_mode = {'VERT'}
-	targets = selectRepeated(bm)
-	for target in targets:
-		bmesh.utils.vert_separate(target, target.link_edges)
-		bm.verts.ensure_lookup_table()
-	bpy.ops.mesh.select_all(action='DESELECT')
-	bm.select_mode = oldmode
-	bm.verts.ensure_lookup_table()
-	bm.verts.index_update()
-	bmesh.update_edit_mesh(mesh.data)
-	mesh.data.update()
-	return
+def findRepeatedUVVerts(meshData):
+	# Fully vectorized: indices of vertices referenced by loops carrying more
+	# than one distinct UV coordinate. Judged independently per UV layer (UV1,
+	# UV2, ...) and OR'd together - a vertex is only a duplicate if a SINGLE
+	# layer disagrees with itself, matching the old per-layer bmesh scan.
+	# Sorting once + reduceat is much faster than np.minimum.at scatter loops.
+	loop_vert_idx = np.zeros(len(meshData.loops), dtype=np.int32)
+	meshData.loops.foreach_get("vertex_index", loop_vert_idx)
+	n_verts = len(meshData.vertices)
+	order = np.argsort(loop_vert_idx, kind='stable')
+	sv = loop_vert_idx[order]
+	starts = np.flatnonzero(np.concatenate([[True], sv[1:] != sv[:-1]]))
+	conflict = np.zeros(n_verts, dtype=bool)
+	for uv_layer in meshData.uv_layers:
+		uv_data = np.zeros((len(uv_layer.data), 2), dtype=np.float32)
+		uv_layer.data.foreach_get("uv", uv_data.ravel())
+		su = uv_data[order]
+		uv_min = np.minimum.reduceat(su, starts, axis=0)
+		uv_max = np.maximum.reduceat(su, starts, axis=0)
+		bad = np.any(uv_min != uv_max, axis=1)
+		conflict[sv[starts][bad]] = True
+	return np.flatnonzero(conflict)
 
 
 def solveRepeatedUVs(selection):
+	# Data-layer rebuild: vertices are split in numpy by (vertex, uv1, uv2)
+	# grouping, so no EDIT-mode / bmesh pass is needed at all. Returns a dict
+	# {object name: array(new_vertex -> original_vertex)} so weight extraction
+	# in _gatherSubMesh can read vertex groups through the mapping.
 	context = bpy.context
+	uv_remap_dict = {}
 	for selectedObj in selection:
-		if selectedObj.type == "MESH":
-			context.view_layer.objects.active = selectedObj
-			if bpy.app.version < (4, 0, 0):
-				if selectedObj.data.use_auto_smooth == False:
-					selectedObj.data.use_auto_smooth = True
-					selectedObj.data.auto_smooth_angle = .785
-			selectedObj.data.polygons.foreach_set("use_smooth", [True] * len(selectedObj.data.polygons))
-			# Save loop normals before modification
-			n_loops = len(selectedObj.data.loops)
-			saved_normals = np.zeros((n_loops, 3), dtype=np.float32)
-			selectedObj.data.loops.foreach_get("normal", saved_normals.ravel())
-			bpy.ops.object.mode_set(mode='EDIT')
-			obj = context.edit_object
-			me = obj.data
-			bm = bmesh.from_edit_mesh(me)
-			old_seams = [e for e in bm.edges if e.seam]
-			for e in old_seams:
-				e.seam = False
-			bpy.ops.mesh.select_all(action='SELECT')
-			bpy.ops.uv.select_all(action='SELECT')
-			bpy.ops.uv.seams_from_islands()
-			seams = [e for e in bm.edges if e.seam]
-			bmesh.ops.split_edges(bm, edges=seams)
-			for e in old_seams:
-				e.seam = True
-			bmesh.update_edit_mesh(me)
-			solveRepeatedVertex(None, obj)
-			bpy.ops.object.mode_set(mode='OBJECT')
-			selectedObj.data.normals_split_custom_set(saved_normals.tolist())
-			if bpy.app.version < (4, 0, 0):
-				selectedObj.data.calc_normals_split()
+		if selectedObj.type != "MESH":
+			continue
+		me = selectedObj.data
+		conflict = findRepeatedUVVerts(me)
+		if len(conflict) == 0:
 			print(f"Solved Repeated UVs on {selectedObj.name}")
+			continue
+		n_loops = len(me.loops)
+		n_old = len(me.vertices)
+		loop_vert = np.zeros(n_loops, dtype=np.int32)
+		me.loops.foreach_get("vertex_index", loop_vert)
+		# Gather all UV layers into one (n_loops, 2*L) array
+		uv_all = np.zeros((n_loops, 2 * len(me.uv_layers)), dtype=np.float32)
+		for i, uvl in enumerate(me.uv_layers):
+			d = np.zeros((len(uvl.data), 2), dtype=np.float32)
+			uvl.data.foreach_get("uv", d.ravel())
+			uv_all[:, i * 2:i * 2 + 2] = d
+		# Only loops whose vertex carries duplicated UVs need new indices.
+		cmask = np.isin(loop_vert, conflict)
+		if not np.any(cmask):
+			print(f"Solved Repeated UVs on {selectedObj.name}")
+			continue
+		cvert = loop_vert[cmask]
+		key_parts = [cvert.astype(np.float32), uv_all[cmask]]
+		key = np.column_stack(key_parts).astype(np.float32)
+		keyv = key.view(np.dtype([('k', np.float32, key.shape[1])])).ravel()
+		uniq_key, first_loop, inv = np.unique(keyv, return_index=True, return_inverse=True)
+		G = len(uniq_key)
+		group_vert = cvert[first_loop]
+		# Keep each vertex's FIRST uv group on the original vertex (so no vertex
+		# becomes loose); only the remaining groups get brand-new vertices.
+		uniq_v, first_pos = np.unique(cvert, return_index=True)
+		is_first_group = np.zeros(G, dtype=bool)
+		is_first_group[inv[first_pos]] = True
+		non_first = np.flatnonzero(~is_first_group)
+		new_group_idx = np.empty(G, dtype=np.int32)
+		new_group_idx[is_first_group] = group_vert[is_first_group]
+		new_group_idx[non_first] = n_old + np.arange(len(non_first))
+		new_loop_vert = loop_vert.copy()
+		new_loop_vert[cmask] = new_group_idx[inv]
+		old_of_new = np.concatenate([np.arange(n_old, dtype=np.int32),
+		                             group_vert[non_first]])
+		# Extend vertex data: new verts copy position from their original vert.
+		co = np.zeros((n_old, 3), dtype=np.float32)
+		me.vertices.foreach_get("co", co.ravel())
+		me.vertices.add(len(non_first))
+		me.vertices.foreach_set("co", co[old_of_new].ravel())
+		me.loops.foreach_set("vertex_index", new_loop_vert)
+		# Loop count and all per-loop data (uv) are unchanged; loop normals are
+		# derived from the new topology (same as the old bmesh path, whose
+		# normals_split_custom_set restore was also ineffective on split meshes).
+		uv_remap_dict[selectedObj.name] = old_of_new
+		print(f"Solved Repeated UVs on {selectedObj.name}")
+	return uv_remap_dict
 # End solve repeated UVs
 
 
@@ -1306,7 +1323,7 @@ def exportREMeshFile(filePath, options):
 	def _gatherSubMesh(task):
 		(parsedSubMesh, evaluatedSubMeshData, rawName, meshHasUV, meshHasUV2, meshHasColor,
 		 vertexGroupCount, vgNameList, shapeKeyGroupIndices,
-		 hasWeight, hasSecondaryWeight) = task
+		 hasWeight, hasSecondaryWeight, uvRemap) = task
 		errs = []  # (code, name) collected locally, merged on main thread
 		bbox_gi = []   # raw group index for every weighted-bone assignment (for bone bbox)
 		bbox_xyz = []  # flat x,y,z positions, parallel to bbox_gi
@@ -1344,8 +1361,9 @@ def exportREMeshFile(filePath, options):
 			uv2_array = np.zeros((len(uv2_layer_data), 2), dtype=np.float32)
 			uv2_layer_data.foreach_get("uv", uv2_array.ravel())
 		if meshHasColor:
-			color_array = np.zeros((len(evaluatedSubMeshData.loops), 4), dtype=np.float32)
-			evaluatedSubMeshData.vertex_colors[0].data.foreach_get("color", color_array.ravel())
+			color_data = evaluatedSubMeshData.vertex_colors[0].data
+			color_array = np.zeros((len(color_data), 4), dtype=np.float32)
+			color_data.foreach_get("color", color_array.ravel())
 
 		# Build loop->vertex mapping and find unique vertices (vectorized)
 		unique_verts, first_loop_of_vert, inverse = np.unique(loop_vert_idx, return_index=True,
@@ -1389,7 +1407,10 @@ def exportREMeshFile(filePath, options):
 			# (instead of converting the whole positions array to a list of python floats).
 			pos_unique = vert_positions[unique_verts].tolist()
 			for pos_idx, vi in enumerate(unique_verts.tolist()):
-				vert = evaluatedSubMeshData.vertices[vi]
+				# When UV solve rebuilt the vertices, weights live on the ORIGINAL
+				# verts (new verts have empty deform data), so read through remap.
+				vi_old = uvRemap[vi] if uvRemap is not None else vi
+				vert = evaluatedSubMeshData.vertices[vi_old]
 				prim = []  # (raw group idx, weight)
 				sec = []   # (raw group idx, weight) for shapekeys
 				for g in vert.groups:
@@ -1469,6 +1490,7 @@ def exportREMeshFile(filePath, options):
 		# Get all meshes inside the collection
 		doubledUVList = []
 		sharpEdgeSplitList = []
+		uvRemapDict = dict()  # CLN name -> new-vertex->original-vertex mapping (data-layer UV solve)
 		clonedMeshCollection = getCollection("clonedMeshes")
 		for obj in lod.objects:
 			if options["selectedOnly"]:
@@ -1515,15 +1537,19 @@ def exportREMeshFile(filePath, options):
 					visconDict[groupID].append(obj)
 
 		if doubledUVList != []:
+			uvSolveStart = time.time()
 			previousSelection = bpy.context.selected_objects
 			bpy.ops.object.select_all(action='DESELECT')
 			for obj in doubledUVList:
 				obj.select_set(True)
 
 			try:
-				solveRepeatedUVs(selection=bpy.context.selected_objects)
+				remaps = solveRepeatedUVs(selection=bpy.context.selected_objects)
+				if remaps:
+					uvRemapDict.update(remaps)
 			except Exception as err:
 				raiseWarning(f"Failed to solve repeated UVs. {str(err)}")
+			print(f"Solve repeated UVs took {timeFormat % ((time.time() - uvSolveStart) * 1000)} ms ({len(doubledUVList)} meshes).")
 
 			"""
 			if hasattr(bpy.types, "OBJECT_PT_re_tools_quick_export_panel"):#RE Toolbox installed
@@ -1699,7 +1725,8 @@ def exportREMeshFile(filePath, options):
 				else:
 					parsedSubMesh.uv2List = None
 					meshHasUV2 = False
-				if len(evaluatedSubMeshData.vertex_colors) > 0:
+				if len(evaluatedSubMeshData.vertex_colors) > 0 and len(
+						evaluatedSubMeshData.vertex_colors[0].data) > 0:
 					parsedSubMesh.colorList = np.zeros((len(evaluatedSubMeshData.vertices), 4))
 					meshHasColor = True
 					parsedMesh.bufferHasColor = True
@@ -1715,6 +1742,7 @@ def exportREMeshFile(filePath, options):
 					meshHasUV, meshHasUV2, meshHasColor,
 					vertexGroupCount, vgNameList, shapeKeyGroupIndices,
 					armatureObj != None, parsedMesh.bufferHasSecondaryWeight,
+					uvRemapDict.get(cloneMeshNameDict[rawsubmesh.name]),
 				))
 
 			# Run the submesh extraction in parallel, then merge results on the main thread.
@@ -1734,6 +1762,7 @@ def exportREMeshFile(filePath, options):
 					all_used_names.update(used)
 					all_submesh_vg.append((ps, vgNames, bb))
 
+			gatherStart = time.time()
 			workers = min(len(subMeshTasks), os.cpu_count() if os.cpu_count() else 4)
 			if len(subMeshTasks) == 0:
 				pass
@@ -1749,6 +1778,8 @@ def exportREMeshFile(filePath, options):
 				# Serial merge in original submesh order
 				for res in results:
 					_mergeSubMeshResult(res)
+			print(
+				f"  Parallel submesh extraction took {timeFormat % ((time.time() - gatherStart) * 1000)} ms ({workers} workers, {len(subMeshTasks)} meshes).")
 
 			# End submesh
 			parsedLODLevel.visconGroupList.append(visconGroup)

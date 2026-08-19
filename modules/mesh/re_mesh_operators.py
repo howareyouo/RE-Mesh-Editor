@@ -1,5 +1,6 @@
 # Author: NSA Cloud
 import bpy
+import bmesh
 import os
 import numpy as np
 from bpy.types import Operator
@@ -22,20 +23,60 @@ class WM_OT_DeleteLoose(Operator):
 	bl_idname = "re_mesh.delete_loose"
 	bl_description = "Deletes loose vertices and edges with no faces on selected meshes"
 
+	def deleteLooseFast(self, me):
+		"""Deletes loose verts/edges on a Mesh in OBJECT space without mode switching.
+
+		Fast path: a vertex is loose iff it is not referenced by any polygon loop.
+		We detect this with numpy first and skip the heavy bmesh rebuild entirely
+		when there is nothing loose. Only vertices/edges actually loose trigger
+		a bmesh delete on the Mesh data directly.
+		"""
+		vertCount = len(me.vertices)
+		if vertCount == 0:
+			return
+		# --- numpy pre-check: is any vertex unreferenced by faces? ---
+		loopCount = len(me.loops)
+		if loopCount == 0:
+			# All vertices are loose -> clear the whole geometry.
+			me.clear_geometry()
+			# clear_geometry also clears UV/attributes generically in modern Blender.
+			return
+		loop_vi = np.empty(loopCount, dtype=np.uint32)
+		me.loops.foreach_get("vertex_index", loop_vi)
+		if np.unique(loop_vi).size == vertCount:
+			# Every vertex is referenced by at least one face: nothing to delete.
+			return
+		# --- slow path only when loose geometry actually exists ---
+		bm = bmesh.new()
+		bm.from_mesh(me)
+		# Loose = not referenced by any face. bmesh.ops.delete_loose is not public,
+		# so tag loose verts/edges and remove them with bmesh.ops.delete().
+		looseVerts = [v for v in bm.verts if not v.link_faces]
+		if looseVerts:
+			bmesh.ops.delete(bm, geom=looseVerts, context='VERTS')
+		# After loose verts go, also drop any remaining edges that have no face
+		# (their two endpoints still belong to other faces).
+		looseEdges = [e for e in bm.edges if not e.link_faces]
+		if looseEdges:
+			bmesh.ops.delete(bm, geom=looseEdges, context='EDGES')
+		bm.to_mesh(me)
+		bm.free()
+
 	def execute(self, context):
 		if context.selected_objects != []:
 			selection = context.selected_objects
 		else:
 			selection = bpy.context.scene.objects
+		processed = 0
 		for selectedObj in selection:
-			if selectedObj.type == "MESH":
-				context.view_layer.objects.active = selectedObj
-				bpy.ops.object.mode_set(mode='EDIT')
-				bpy.ops.mesh.select_all(action='SELECT')
-				print(f"Deleted loose geometry on {selectedObj.name}")
-				bpy.ops.mesh.delete_loose()
-				bpy.ops.object.mode_set(mode='OBJECT')
-		if context.selected_objects == []:
+			if selectedObj.type != "MESH":
+				continue
+			self.deleteLooseFast(selectedObj.data)
+			processed += 1
+			print(f"Deleted loose geometry on {selectedObj.name}")
+		if processed == 0:
+			self.report({"WARNING"}, "No mesh objects found to process")
+		elif context.selected_objects == []:
 			self.report({"INFO"}, "Deleted loose geometry on all objects")
 		else:
 			self.report({"INFO"}, "Deleted loose geometry on selected objects")
