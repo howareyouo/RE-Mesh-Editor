@@ -305,7 +305,6 @@ class AddItemOperator(bpy.types.Operator):
 	bl_idname = "re_mesh.chunk_path_list_add_item"
 	bl_description = "Add path to the extracted chunk's natives\STM\ folder.\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
 	bl_label = "Add Path"
-	
 
 	def execute(self, context):
 		# Add an item to the list
@@ -319,7 +318,6 @@ class RemoveItemOperator(bpy.types.Operator):
 	bl_label = "Remove Selected Path"
 
 	def execute(self, context):
-		
 		chunkList = bpy.context.preferences.addons[__name__].preferences.chunkPathList_items
 		index = bpy.context.preferences.addons[__name__].preferences.chunkPathList_index
 		chunkList.remove(index)
@@ -389,7 +387,6 @@ class REMeshPreferences(AddonPreferences):
 		description = "Use DDS textures when loading textures instead of converting to PNG.\nThis greatly improves mesh import speed but is only usable on Blender 4.2 or higher.\nIf the Blender version is less than 4.2, this option will do nothing",
 		default = False if bpy.app.version < (4,2,0) else True
 	)
-	
 	convertTexToPNG: BoolProperty(
 		name="Convert Tex to PNG",
 		description = "When converting a tex file, convert it to a .png file instead of .dds",
@@ -399,8 +396,8 @@ class REMeshPreferences(AddonPreferences):
 		name = "Mod File Tracking Polling Rate",
 		description = "Amount of seconds between checking for changes made to files when mod file tracking is enabled",
 		min = 1,
-		default = 5)
-	
+		default = 5
+	)
 	saveChunkPaths: BoolProperty(
 		name="Save Chunk Paths Automatically",
 		description = "If a chunk path is detected when a mesh is imported, add it to the chunk path list automatically",
@@ -414,7 +411,6 @@ class REMeshPreferences(AddonPreferences):
 	    description = "If enabled, auto-check for updates using an interval",
 	    default = False,
 	)
-	
 	updater_interval_months: bpy.props.IntProperty(
 	    name='Months',
 	    description = "Number of months between checking for updates",
@@ -440,18 +436,16 @@ class REMeshPreferences(AddonPreferences):
 	    default=0,
 	    min=0,
 	    max=59
-		
-	
-	
 	)
 	#Internal properties for grouping import/export settings
 	showImportOptions : BoolProperty(
 	   name = "Show Default Import Settings",
-	   default = False)
+	   default = False
+	)
 	showExportOptions : BoolProperty(
 	   name = "Show Default Export Settings",
-	   default = False)
-	
+	   default = False
+	)
 	textureCacheSizeString: bpy.props.StringProperty(
 	    default="",
 	)
@@ -460,7 +454,6 @@ class REMeshPreferences(AddonPreferences):
 	)
 	
 	#Default import settings
-	
 	default_clearScene : BoolProperty(
 	   name = "Clear Scene",
 	   description = "Clears all objects before importing the mesh file",
@@ -468,18 +461,15 @@ class REMeshPreferences(AddonPreferences):
 	default_loadMaterials : BoolProperty(
 	   name = "Load Materials",
 	   description = "Load materials from the MDF2 file. This may increase the time the mesh takes to import",
-	   default = True)
-	
+	   default = False)
 	default_loadMDFData : BoolProperty(
 	   name = "Load MDF Material Data",
 	   description = "Imports the MDF materials as objects inside a collection in the outliner.\nYou can make changes to MDF materials by selecting the Material objects in the outliner.\nUnder the Object Properties tab (orange square), there's a panel called \"RE MDF Material Settings\".\nMake any changes to MDF materials there.\nIf you're not modding an RE Engine game, you can uncheck this option since it won't be needed",
 	   default = True)
-	
 	default_loadShellFur : BoolProperty(
 	   name = "Load Shell Fur",
 	   description = "Load shell fur data from sfur file if present",
-	   default = True)
-	
+	   default = False)
 	default_loadUnusedTextures : BoolProperty(
 	   name = "Load Unused Textures",
 	   description = "Loads textures that have no function assigned to them in the material shader graph.\nLeaving this disabled will make materials load faster.\nOnly enable this if you plan on editing the material shader graph",
@@ -492,17 +482,14 @@ class REMeshPreferences(AddonPreferences):
 	   name = "Use Backface Culling",
 	   description = "Enables backface culling on materials. May improve Blender's performance on high poly meshes.\nBackface culling will only be enabled on materials without the two sided flag",
 	   default = False)
-
 	default_reloadCachedTextures : BoolProperty(
 	   name = "Reload Cached Textures",
 	   description = "Convert all textures again instead of reading from already converted textures. Use this if you make changes to textures and need to reload them",
 	   default = False)
-	
 	default_createCollections : BoolProperty(
 	   name = "Create Collections",
 	   description = "Create a collection for the mesh and for each LOD level. Note that collections are required for exporting LODs and applying MDF changes. Leaving this option enabled is recommended",
 	   default = True)
-	
 	default_importArmatureOnly : BoolProperty(
 	   name = "Only Import Armature",
 	   description = "Imports the armature of the mesh file, but not any of the meshes",
@@ -541,7 +528,6 @@ class REMeshPreferences(AddonPreferences):
 	   name = "Selected Objects Only",
 	   description = "Limit export to selected objects",
 	   default = False)
-
 	default_exportAllLODs : BoolProperty(
 	   name = "Export All LODs",
 	   description = "Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
@@ -583,9 +569,9 @@ class REMeshPreferences(AddonPreferences):
 		col2 = split.column()
 		col3 = split.column()
 		op = col2.operator(
-        'wm.url_open',
-        text='Donate on Ko-fi',
-        icon='FUND'
+			'wm.url_open',
+			text='Donate on Ko-fi',
+			icon='FUND'
         )
 		layout.prop(self, "dragDropImportOptions")
 		layout.prop(self, "showConsole")
@@ -610,9 +596,6 @@ class REMeshPreferences(AddonPreferences):
 		row.label(text=f"Cache Size: {self.textureCacheSizeString}")
 		row.operator("re_mesh.check_texture_cache_size",icon = "FILE_REFRESH",text = "")
 		box.label(text=f"Last Checked: {self.textureCacheCheckDate}")
-		
-		
-		
 		box.operator("re_mesh.open_texture_cache_folder")
 		box.operator("re_mesh.clear_texture_cache_folder")
 		
@@ -670,6 +653,7 @@ class REMeshPreferences(AddonPreferences):
 		row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Up").direction = 'UP'
 		row.operator("re_mesh.chunk_path_list_reorder_item", text="Move Down").direction = 'DOWN'
 		addon_updater_ops.update_settings_ui(self,context)
+
 class ImportREMesh(Operator, ImportHelper):
 	'''Import RE Engine Mesh File'''
 	bl_idname = "re_mesh.importfile"
@@ -693,12 +677,10 @@ class ImportREMesh(Operator, ImportHelper):
 	   name = "Load Materials",
 	   description = "Load materials from the MDF2 file. This may increase the time the mesh takes to import",
 	   default = True)
-	
 	loadMDFData : BoolProperty(
 	   name = "Load MDF Material Data",
 	   description = "Imports the MDF materials as objects inside a collection in the outliner.\nYou can make changes to MDF materials by selecting the Material objects in the outliner.\nUnder the Object Properties tab (orange square), there's a panel called \"RE MDF Material Settings\".\nMake any changes to MDF materials there.\nIf you're not modding an RE Engine game, you can uncheck this option since it won't be needed",
 	   default = True)
-	
 	loadShellFur : BoolProperty(
 	   name = "Load Shell Fur",
 	   description = "Load shell fur data from sfur file if present",
@@ -715,7 +697,6 @@ class ImportREMesh(Operator, ImportHelper):
 	   name = "Use Backface Culling",
 	   description = "Enables backface culling on materials. May improve Blender's performance on high poly meshes.\nBackface culling will only be enabled on materials without the two sided flag",
 	   default = False)
-
 	reloadCachedTextures : BoolProperty(
 	   name = "Reload Cached Textures",
 	   description = "Convert all textures again instead of reading from already converted textures. Use this if you make changes to textures and need to reload them",
@@ -782,15 +763,10 @@ class ImportREMesh(Operator, ImportHelper):
 		layout = self.layout
 		row = layout.row()
 		row.prop(self, "clearScene")
-		
-		
 		row.enabled = self.mergeArmature == ""
 		
 		#layout.prop(self, "importBlendShapes")
-		
 		layout.label(text = "Merge With Armature")
-		
-		
 		layout.prop_search(self, "mergeArmature",bpy.data,"armatures")
 		
 		row = layout.row()
@@ -1079,7 +1055,6 @@ class ExportREMesh(Operator, ExportHelper):
 		row2 = layout.row()
 		#row2.enabled = hasREToolbox
 		row2.prop(self,"preserveSharpEdges")
-		
 
 		layout.prop(self, "rotate90")
 		layout.prop(self, "useBlenderMaterialName")
@@ -1611,7 +1586,6 @@ classes = [
 	OBJECT_PT_MDFMaterialGPBFDataListPanel,
 	
 	
-	
 	#operators
 	WM_OT_NewMDFHeader,
 	WM_OT_ReindexMaterials,
@@ -1668,9 +1642,6 @@ classes = [
 	
 	#RE asset extra tools
 	OBJECT_PT_REAssetExtensionPanel,
-	
-	
-	
 	]
 
 
@@ -1810,18 +1781,13 @@ def register():
 	bpy.types.Scene.re_mdf_toolpanel = PointerProperty(type=MDFToolPanelPropertyGroup)
 	bpy.types.Scene.re_modworkspace_toolpanel = PointerProperty(type=ModWorkspaceToolPanelPropertyGroup)
 	bpy.types.Object.re_mdf_material = PointerProperty(type=MDFMaterialPropertyGroup)
-	
 	bpy.types.Object.re_sfur_data = PointerProperty(type=SFurEntryPropertyGroup)
-	
 	bpy.types.WindowManager.re_mdf_findreplace = PointerProperty(type=FindReplacePropertyGroup)
-	
-	
 	
 	#bpy.types.TOPBAR_MT_file_import.append(re_mesh_import)
 	#bpy.types.TOPBAR_MT_file_export.append(re_mesh_export)
 	#bpy.types.TOPBAR_MT_file_import.append(re_mdf_import)
 	#bpy.types.TOPBAR_MT_file_export.append(re_mdf_export)
-	
 	bpy.types.TOPBAR_MT_file_import.append(re_mesh_editor_import)
 	bpy.types.TOPBAR_MT_file_export.append(re_mesh_editor_export)
 
@@ -1847,12 +1813,10 @@ def unregister():
 	if (3, 3, 0) > bpy.app.version:
 		bpy.utils.unregister_class(GU_PT_collection_custom_properties)
 		
-	
 	#bpy.types.TOPBAR_MT_file_import.remove(re_mesh_import)
 	#bpy.types.TOPBAR_MT_file_export.remove(re_mesh_export)
 	#bpy.types.TOPBAR_MT_file_import.remove(re_mdf_import)
 	#bpy.types.TOPBAR_MT_file_export.remove(re_mdf_export)
-	
 	bpy.types.TOPBAR_MT_file_import.remove(re_mesh_editor_import)
 	bpy.types.TOPBAR_MT_file_export.remove(re_mesh_editor_export)
 	
