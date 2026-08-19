@@ -21,6 +21,25 @@ _struct_uint64 = struct.Struct('<Q')
 _struct_float = struct.Struct('<f')
 _struct_double = struct.Struct('<d')
 
+
+class ClampNameList(list):
+	"""代理 list: 读取时自动把越界索引钳制到最后一个有效项,
+	用于兼容被故意填坏名称表的 mesh, 让下游解析不越界崩溃."""
+
+	def __getitem__(self, index):
+		# 切片按原样返回(仍是 ClampNameList)
+		if isinstance(index, slice):
+			return ClampNameList(list.__getitem__(self, index))
+		if not isinstance(index, int):
+			return list.__getitem__(self, index)
+		if self:
+			if index >= len(self):
+				index = len(self) - 1
+			elif index < -len(self):
+				index = 0
+		return list.__getitem__(self, index)
+
+
 #---General Functions---#
 os.system("color")#Enable console colors
 class textColors:

@@ -1493,7 +1493,7 @@ class REMesh():
 		self.meshBufferHeader = None
 		self.floatsHeader = None
 		self.rawNameOffsetList = []
-		self.rawNameList = []
+		self.rawNameList = ClampNameList()
 		self.materialNameRemapList = []
 		self.boneNameRemapList = []
 		self.blendShapeNameRemapList = []
@@ -1575,7 +1575,13 @@ class REMesh():
 					string_region = file.read()  # Read all remaining bytes (string table is last)
 					for name_offset in self.rawNameOffsetList:
 						rel_offset = name_offset - first_offset
-						end = string_region.index(b'\x00', rel_offset)
+						if rel_offset < 0 or rel_offset > len(string_region):
+							# 跳过坏偏移, 继续读取后面的名称
+							continue
+						end = string_region.find(b'\x00', rel_offset)
+						if end == -1:
+							# No null terminator found: treat rest of region as the string
+							end = len(string_region)
 						self.rawNameList.append(string_region[rel_offset:end].decode('utf-8'))
 
 		if self.fileHeader.materialNameRemapOffset and self.lodHeader != None:
