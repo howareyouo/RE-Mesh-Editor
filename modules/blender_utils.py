@@ -16,6 +16,21 @@ def showErrorMessageBox(message):
 	print(textColors.FAIL + "ERROR: " + message + textColors.ENDC)
 	showMessageBox(message,title = "Error", icon = "ERROR")
 
+def createRECollection(collectionName, parentCollection=None, color_tag=None, customProps=None):
+	"""创建并链接一个 RE 标记集合 (MDF/SFur/Mesh 共用).
+	返回新建的 collection; 自定义属性(如 ~TYPE)通过 customProps 传入."""
+	collection = bpy.data.collections.new(collectionName)
+	if color_tag:
+		collection.color_tag = color_tag
+	if customProps:
+		for key, value in customProps.items():
+			collection[key] = value
+	if parentCollection is not None:
+		parentCollection.children.link(collection)
+	else:
+		bpy.context.scene.collection.children.link(collection)
+	return collection
+
 class ContextExecuterOverride:
 	def __init__(self, window, screen, area, region):
 		self.window, self.screen, self.area, self.region = window, screen, area, region

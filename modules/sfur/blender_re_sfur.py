@@ -3,7 +3,7 @@ import bpy
 import glob
 from mathutils import Vector,Quaternion,Matrix
 from math import radians
-from ..blender_utils import showMessageBox
+from ..blender_utils import showMessageBox,createRECollection
 from ..gen_functions import textColors,raiseWarning,splitNativesPath
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
@@ -16,13 +16,9 @@ def checkNameUsage(baseName,checkSubString = True, objList = None):
 		return baseName in [obj.name for obj in objList]
 
 def createSFurCollection(collectionName,parentCollection = None):
-	collection = bpy.data.collections.new(collectionName)
-	collection.color_tag = "COLOR_08"
-	collection["~TYPE"] = "RE_SFUR_COLLECTION"
-	if parentCollection != None:
-		parentCollection.children.link(collection)
-	else:
-		bpy.context.scene.collection.children.link(collection)
+	collection = createRECollection(
+		collectionName, parentCollection,
+		color_tag="COLOR_08", customProps={"~TYPE": "RE_SFUR_COLLECTION"})
 	bpy.context.scene.re_mdf_toolpanel.sFurCollection = collection
 	return collection
 

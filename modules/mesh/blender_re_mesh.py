@@ -28,6 +28,7 @@ from ..hashing.mmh3.pymmh3 import hashUTF8
 import time
 import numpy as np
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 timeFormat = "%d"
 rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
@@ -1293,6 +1294,152 @@ def exportREMeshFile(filePath, options):
 	meshLODCollectionList.sort(key=lambda col: col.name)
 	if not options["exportAllLODs"]:
 		meshLODCollectionList = [meshLODCollectionList[0]]
+	# --- Parallel submesh extraction worker ---
+	# Runs the heavy, READ-ONLY portion of extracting a single submesh (foreach_get
+	# bulk reads + numpy vectorization + per-vertex weight loop) on a worker thread.
+	# It must NOT mutate any shared Blender/Mesh state - everything it produces is
+	# returned and merged back on the main thread. This is safe to parallelize because
+	# all mesh-mutating prep (triangulate / transform / calc_tangents) for a viscon is
+	# completed serially BEFORE any worker starts, and foreach_get / numpy / bytes IO
+	# release the GIL, so worker threads overlap in real time across meshes.
+	MIN_WEIGHT = 0.002
+
+	def _gatherSubMesh(task):
+		(parsedSubMesh, evaluatedSubMeshData, rawName, meshHasUV, meshHasUV2, meshHasColor,
+		 vertexGroupCount, vertexGroupIndexToRemapDict, shapeKeyGroupIndices,
+		 hasWeight, hasSecondaryWeight) = task
+		errs = []  # (code, name) collected locally, merged on main thread
+		bbox = []  # (bone idx, x, y, z) bounding box contributions
+		hasExtraWeightOverflow = False
+
+		loop_vert_idx = np.zeros(len(evaluatedSubMeshData.loops), dtype=np.int32)
+		evaluatedSubMeshData.loops.foreach_get("vertex_index", loop_vert_idx)
+		n_polys = len(evaluatedSubMeshData.polygons)
+		if n_polys > 0:
+			loop_total = np.zeros(n_polys, dtype=np.int32)
+			evaluatedSubMeshData.polygons.foreach_get("loop_total", loop_total)
+			if np.any(loop_total != 3):
+				errs.append(("NonTriangulatedFace", rawName))
+			parsedSubMesh.faceList = loop_vert_idx.reshape(-1, 3).astype(np.uint32)
+			if n_polys > MAX_FACES:
+				errs.append(("MaxFacesExceeded", rawName))
+		else:
+			parsedSubMesh.faceList = []
+
+		vert_positions = np.zeros((len(evaluatedSubMeshData.vertices), 3), dtype=np.float32)
+		evaluatedSubMeshData.vertices.foreach_get("co", vert_positions.ravel())
+		loop_normals = np.zeros((len(evaluatedSubMeshData.loops), 3), dtype=np.float32)
+		evaluatedSubMeshData.loops.foreach_get("normal", loop_normals.ravel())
+		loop_tangents = np.zeros((len(evaluatedSubMeshData.loops), 3), dtype=np.float32)
+		evaluatedSubMeshData.loops.foreach_get("tangent", loop_tangents.ravel())
+		loop_bitangent_signs = np.zeros(len(evaluatedSubMeshData.loops), dtype=np.float32)
+		evaluatedSubMeshData.loops.foreach_get("bitangent_sign", loop_bitangent_signs)
+		if meshHasUV:
+			uv_layer_data = evaluatedSubMeshData.uv_layers[0].data
+			uv_array = np.zeros((len(uv_layer_data), 2), dtype=np.float32)
+			uv_layer_data.foreach_get("uv", uv_array.ravel())
+		if meshHasUV2:
+			uv2_layer_data = evaluatedSubMeshData.uv_layers[1].data
+			uv2_array = np.zeros((len(uv2_layer_data), 2), dtype=np.float32)
+			uv2_layer_data.foreach_get("uv", uv2_array.ravel())
+		if meshHasColor:
+			color_array = np.zeros((len(evaluatedSubMeshData.loops), 4), dtype=np.float32)
+			evaluatedSubMeshData.vertex_colors[0].data.foreach_get("color", color_array.ravel())
+
+		# Build loop->vertex mapping and find unique vertices (vectorized)
+		unique_verts, first_loop_of_vert, inverse = np.unique(loop_vert_idx, return_index=True,
+		                                                      return_inverse=True)
+		parsedSubMesh.vertexPosList[unique_verts] = vert_positions[unique_verts]
+		parsedSubMesh.normalList[unique_verts] = loop_normals[first_loop_of_vert]
+
+		# Vectorized tangent extraction (no Python loop)
+		lt = loop_tangents[first_loop_of_vert] * 1.001 * 127
+		lt_int = np.floor(lt).astype(np.int32)
+		sign_int = np.floor(loop_bitangent_signs[first_loop_of_vert] * 127.0).astype(np.int32)
+		parsedSubMesh.tangentList[unique_verts] = np.column_stack([
+			lt_int[:, 0] & 0xFF,
+			lt_int[:, 1] & 0xFF,
+			lt_int[:, 2] & 0xFF,
+			sign_int & 0xFF
+		]).astype(np.uint8)
+
+		if meshHasUV:
+			parsedSubMesh.uvList[unique_verts] = uv_array[first_loop_of_vert]
+			uv_ref = uv_array[first_loop_of_vert[inverse]]
+			if np.any(uv_array != uv_ref):
+				errs.append(("MultipleUVsAssignedToVertex", rawName))
+		if meshHasUV2:
+			parsedSubMesh.uv2List[unique_verts] = uv2_array[first_loop_of_vert]
+			uv2_ref = uv2_array[first_loop_of_vert[inverse]]
+			if np.any(uv2_array != uv2_ref):
+				errs.append(("MultipleUVsAssignedToVertex", rawName))
+		if meshHasColor:
+			parsedSubMesh.colorList[unique_verts] = color_array[first_loop_of_vert]
+
+		# Bone Weights - pure Python per-vertex processing. Blender offers no
+		# foreach_get for vertex-group weights, and numpy has high per-call overhead
+		# on the tiny (<=8 element) per-vertex slices, so plain lists are fastest.
+		if hasWeight:
+			vg_remap = vertexGroupIndexToRemapDict
+			shapekey_set = shapeKeyGroupIndices
+			min_w = MIN_WEIGHT
+			secondary = hasSecondaryWeight
+			# Only the unique verts are actually processed, so materialize their positions
+			# (instead of converting the whole positions array to a list of python floats).
+			pos_unique = vert_positions[unique_verts].tolist()
+			for pos_idx, vi in enumerate(unique_verts.tolist()):
+				vert = evaluatedSubMeshData.vertices[vi]
+				prim = []  # (remapped bone idx, weight)
+				sec = []   # (remapped bone idx, weight) for shapekeys
+				for g in vert.groups:
+					gidx = g.group
+					if gidx >= vertexGroupCount:
+						continue
+					ridx = vg_remap.get(gidx, 0)
+					if secondary and gidx in shapekey_set:
+						sec.append((ridx, g.weight))
+					elif g.weight >= min_w:
+						prim.append((ridx, g.weight))
+				if prim:
+					prim.sort(key=lambda t: t[1], reverse=True)
+					prim_w = [w for _, w in prim]
+					prim_idx = [i for i, _ in prim]
+					n_prim = len(prim)
+					padding_idx = prim_idx[-1] if padWithLastWeightIndex else 0
+					if n_prim > maxWeightsPerVertex:
+						hasExtraWeightOverflow = True
+						if gameName not in EXTENDED_WEIGHT_GAMES:
+							errs.append(("MaxWeightsPerVertexExceeded", rawName))
+						extra_n = min(n_prim - maxWeightsPerVertex, 8)
+						parsedSubMesh.extraWeightList[pos_idx, :extra_n] = prim_w[maxWeightsPerVertex:maxWeightsPerVertex + extra_n]
+						parsedSubMesh.extraWeightIndicesList[pos_idx, :extra_n] = prim_idx[maxWeightsPerVertex:maxWeightsPerVertex + extra_n]
+						if n_prim > maxWeightsPerVertexExtended:
+							errs.append(("ExtendedMaxWeightsPerVertexExceeded", rawName))
+					main_n = min(n_prim, maxWeightsPerVertex)
+					parsedSubMesh.weightList[pos_idx, :main_n] = prim_w[:main_n]
+					parsedSubMesh.weightIndicesList[pos_idx, :main_n] = prim_idx[:main_n]
+					if main_n < 8:
+						parsedSubMesh.weightIndicesList[pos_idx, main_n:] = padding_idx
+					px, py, pz = pos_unique[pos_idx]
+					for bi in prim_idx[:main_n]:
+						bbox.append((bi, px, py, pz))
+				if secondary and sec:
+					sec.sort(key=lambda t: t[1], reverse=True)
+					sec_w = [w for _, w in sec]
+					sec_idx = [i for i, _ in sec]
+					n_sec = len(sec)
+					if n_sec > maxWeightsPerVertex:
+						errs.append(("MaxWeightsPerVertexExceeded", rawName))
+					sec_n = min(n_sec, 8)
+					parsedSubMesh.secondaryWeightList[pos_idx, :sec_n] = sec_w[:sec_n]
+					parsedSubMesh.secondaryWeightIndicesList[pos_idx, :sec_n] = sec_idx[:sec_n]
+					px, py, pz = pos_unique[pos_idx]
+					for si in sec_idx[:sec_n]:
+						bbox.append((si, px, py, pz))
+		if len(unique_verts) < len(evaluatedSubMeshData.vertices):
+			errs.append(("LooseVerticesOnSubMesh", rawName))
+		return parsedSubMesh, errs, bbox, hasExtraWeightOverflow
+
 	# Loop through all lod collections, or the scene collection if there is no collections
 	meshDataStartTime = time.time()
 	isFirstLOD = True
@@ -1361,23 +1508,27 @@ def exportREMeshFile(filePath, options):
 
 				if isFirstLOD:
 					hasWeights = False
-					# Collect all group indices from all vertices
+					# Collect which vertex-group INDICES are actually painted on the clone mesh,
+					# then resolve them to bone names via the CLONE's vertex groups. Group indices
+					# read from clone vertices are in the clone's own index space, which can differ
+					# from the original object's after new_from_object() -- so remap by NAME here.
 					mesh_data = cloneObj.data
-					all_groups_flat = []
+					# Vertex-group definitions live on the OBJECT, not on the Mesh (Mesh has no vertex_groups).
+					vgNameByIndex = [vg.name for vg in cloneObj.vertex_groups]
+					used = set()
 					for v in mesh_data.vertices:
 						for g in v.groups:
-							all_groups_flat.append(g.group)
-					used_group_indices = set(all_groups_flat) if all_groups_flat else set()
-
-					for vg in obj.vertex_groups:  # If weight is applied to any vertex groups, add them to weighted bone set
-
-						if vg.name.startswith("SHAPEKEY_"):
-
-							vgName = vg.name.split("SHAPEKEY_")[1]
+							used.add(g.group)
+					for gidx in used:
+						if gidx >= len(vgNameByIndex):
+							continue
+						rawN = vgNameByIndex[gidx]
+						if rawN.startswith("SHAPEKEY_"):
+							vgName = rawN[9:]
 							shapeKeyBoneSet.add(vgName)
 						else:
-							vgName = vg.name
-						if vg.index in used_group_indices and vgName in armatureBoneDict:
+							vgName = rawN
+						if vgName in armatureBoneDict:
 							weightedBonesSet.add(vgName)
 							hasWeights = True
 						else:
@@ -1464,12 +1615,19 @@ def exportREMeshFile(filePath, options):
 			print(f"  Group:{visconGroupID}")
 			visconGroup = VisconGroup()
 			visconGroup.visconGroupNum = visconGroupID
+			subMeshTasks = []  # heavy (read-only) extraction tasks, run in a thread pool after prep
 			# Sort by submesh number
 			for submeshIndex, rawsubmesh in enumerate(
 					sorted(visconDict[visconGroupID], key=lambda obj: obj.name)):
 				print(f"    Sub Mesh {str(submeshIndex)}:{rawsubmesh.name}")
 				evaluatedSubMeshData = bpy.data.objects[cloneMeshNameDict[rawsubmesh.name]].data
-				vertexGroupCount = len(rawsubmesh.vertex_groups)  # For checking out of bound weight indices
+				# Weight data is read from the CLONE mesh (evaluatedSubMeshData), whose vertex-group
+				# index space may differ from the original object after new_from_object(). Use the
+				# clone's own vertex groups for the count, bounds check, remap and shapekey indices.
+				# NOTE: vertex-group NAMES/indices live on the OBJECT, not on the Mesh (Mesh has no vertex_groups),
+				# so read those from the clone object.
+				cloneObj = bpy.data.objects[cloneMeshNameDict[rawsubmesh.name]]
+				vertexGroupCount = len(cloneObj.vertex_groups)
 				triangulateMesh(evaluatedSubMeshData)
 				if len((evaluatedSubMeshData.vertices)) == 0:
 					addErrorToDict(errorDict, "NoVerticesOnSubMesh", rawsubmesh.name)
@@ -1532,12 +1690,18 @@ def exportREMeshFile(filePath, options):
 
 				faceCount += len(evaluatedSubMeshData.polygons)
 
-				vertexGroupIndexToRemapDict = {vgroup.index: remapDict[vgroup.name.removeprefix("SHAPEKEY_")]
-				                               for vgroup in rawsubmesh.vertex_groups}
+				# Resolve weight-remap and shapekey indices in the CLONE mesh's vertex-group
+				# index space (where the weight group indices are actually read from), linking
+				# to the original via vertex-group NAME instead of index.
+				vgNameList = [vg.name for vg in cloneObj.vertex_groups]
+				vertexGroupIndexToRemapDict = {
+					idx: remapDict.get((name[9:] if name.startswith("SHAPEKEY_") else name), 0)
+					for idx, name in enumerate(vgNameList)
+				}
 
 				# DD2 shape key vertex group indices
-				shapeKeyGroupIndices = set([vgroup.index for vgroup in rawsubmesh.vertex_groups if
-				                            vgroup.name.startswith("SHAPEKEY_")])
+				shapeKeyGroupIndices = set(
+					idx for idx, name in enumerate(vgNameList) if name.startswith("SHAPEKEY_"))
 				if len(shapeKeyGroupIndices) != 0:
 					parsedMesh.bufferHasSecondaryWeight = True
 
@@ -1596,198 +1760,54 @@ def exportREMeshFile(filePath, options):
 					meshHasColor = False
 					parsedSubMesh.colorList = None
 
-				# Pre-extract mesh data with foreach_get for performance (bulk C API access)
-				vert_positions = np.zeros((len(evaluatedSubMeshData.vertices), 3), dtype=np.float32)
-				evaluatedSubMeshData.vertices.foreach_get("co", vert_positions.ravel())
-				loop_normals = np.zeros((len(evaluatedSubMeshData.loops), 3), dtype=np.float32)
-				evaluatedSubMeshData.loops.foreach_get("normal", loop_normals.ravel())
-				loop_tangents = np.zeros((len(evaluatedSubMeshData.loops), 3), dtype=np.float32)
-				evaluatedSubMeshData.loops.foreach_get("tangent", loop_tangents.ravel())
-				loop_bitangent_signs = np.zeros(len(evaluatedSubMeshData.loops), dtype=np.float32)
-				evaluatedSubMeshData.loops.foreach_get("bitangent_sign", loop_bitangent_signs)
-				if meshHasUV:
-					uv_layer_data = evaluatedSubMeshData.uv_layers[0].data
-					uv_array = np.zeros((len(uv_layer_data), 2), dtype=np.float32)
-					uv_layer_data.foreach_get("uv", uv_array.ravel())
-				if meshHasUV2:
-					uv2_layer_data = evaluatedSubMeshData.uv_layers[1].data
-					uv2_array = np.zeros((len(uv2_layer_data), 2), dtype=np.float32)
-					uv2_layer_data.foreach_get("uv", uv2_array.ravel())
-				if meshHasColor:
-					color_array = np.zeros((len(evaluatedSubMeshData.loops), 4), dtype=np.float32)
-					evaluatedSubMeshData.vertex_colors[0].data.foreach_get("color", color_array.ravel())
-				# Build loop->vertex mapping and find unique vertices (vectorized)
-				unique_verts, first_loop_of_vert, inverse = np.unique(loop_vert_idx, return_index=True,
-				                                                      return_inverse=True)
+				# Heavy (read-only) extraction is deferred to `_gatherSubMesh`, which runs
+				# in a thread pool after ALL mesh-mutating prep above has finished. We only
+				# record the task here; results are merged in submesh order below.
+				subMeshTasks.append((
+					parsedSubMesh, evaluatedSubMeshData, rawsubmesh.name,
+					meshHasUV, meshHasUV2, meshHasColor,
+					vertexGroupCount, vertexGroupIndexToRemapDict, shapeKeyGroupIndices,
+					armatureObj != None, parsedMesh.bufferHasSecondaryWeight,
+				))
 
-				# Per-vertex data using first loop per vertex
-				parsedSubMesh.vertexPosList[unique_verts] = vert_positions[unique_verts]
-				parsedSubMesh.normalList[unique_verts] = loop_normals[first_loop_of_vert]
+			# Run the submesh extraction in parallel, then merge results on the main thread.
+			# Mesh-mutating prep is already done, and foreach_get / numpy / bytes IO release
+			# the GIL, so worker threads overlap in real time (near-linear on multicore).
 
-				# Vectorized tangent extraction (no Python loop)
-				lt = loop_tangents[first_loop_of_vert] * 1.001 * 127
-				lt_int = np.floor(lt).astype(np.int32)
-				sign_int = np.floor(loop_bitangent_signs[first_loop_of_vert] * 127.0).astype(np.int32)
-				parsedSubMesh.tangentList[unique_verts] = np.column_stack([
-					lt_int[:, 0] & 0xFF,
-					lt_int[:, 1] & 0xFF,
-					lt_int[:, 2] & 0xFF,
-					sign_int & 0xFF
-				]).astype(np.uint8)
+			def _mergeSubMeshResult(res):
+				# Serial merge: bbox update must not run concurrently.
+				ps, errs, bb, fl = res
+				if fl:
+					parsedMesh.bufferHasExtraWeight = True
+				for code, name in errs:
+					addErrorToDict(errorDict, code, name)
+				for bi, cx, cy, cz in bb:
+					_name = parsedMesh.skeleton.weightedBones[bi]
+					_bmin = boneMin[_name]
+					_bmax = boneMax[_name]
+					if cx < _bmin[0]: _bmin[0] = cx
+					if cy < _bmin[1]: _bmin[1] = cy
+					if cz < _bmin[2]: _bmin[2] = cz
+					if cx > _bmax[0]: _bmax[0] = cx
+					if cy > _bmax[1]: _bmax[1] = cy
+					if cz > _bmax[2]: _bmax[2] = cz
+				visconGroup.subMeshList.append(ps)
 
-				# UV per vertex (first loop UV per vertex)
-				if meshHasUV:
-					parsedSubMesh.uvList[unique_verts] = uv_array[first_loop_of_vert]
-					uv_ref = uv_array[first_loop_of_vert[inverse]]
-					if np.any(uv_array != uv_ref):
-						addErrorToDict(errorDict, "MultipleUVsAssignedToVertex", rawsubmesh.name)
-				if meshHasUV2:
-					parsedSubMesh.uv2List[unique_verts] = uv2_array[first_loop_of_vert]
-					uv2_ref = uv2_array[first_loop_of_vert[inverse]]
-					if np.any(uv2_array != uv2_ref):
-						addErrorToDict(errorDict, "MultipleUVsAssignedToVertex", rawsubmesh.name)
-
-				# Vertex Color
-				if meshHasColor:
-					parsedSubMesh.colorList[unique_verts] = color_array[first_loop_of_vert]
-
-				# Bone Weights - vectorized pre-flatten + NumPy processing
-				MIN_WEIGHT = 0.002
-				if parsedMesh.bufferHasWeight:
-					# Build flat arrays: per-vertex (group_index, weight) pairs, single pass
-					n_verts = len(evaluatedSubMeshData.vertices)
-					all_groups = []
-					all_weights = []
-					group_counts = np.zeros(n_verts, dtype=np.int32)
-					for vi, v in enumerate(evaluatedSubMeshData.vertices):
-						g_list = v.groups
-						cnt = len(g_list)
-						group_counts[vi] = cnt
-						for gi in range(cnt):
-							g = g_list[gi]
-							all_groups.append(g.group)
-							all_weights.append(g.weight)
-					total_groups = len(all_groups)
-					flat_groups = np.array(all_groups, dtype=np.int32) if total_groups > 0 else np.array([], dtype=np.int32)
-					flat_weights = np.array(all_weights, dtype=np.float32) if total_groups > 0 else np.array([], dtype=np.float32)
-
-					# Build segment boundaries for each vertex
-					seg_ends = np.cumsum(group_counts)
-					seg_starts = np.zeros_like(seg_ends)
-					seg_starts[1:] = seg_ends[:-1]
-
-					# ---- Vectorized filtering per-segment ----
-					# For each vertex group element, determine: is it in bounds? is it shapekey?
-					in_bounds = flat_groups < vertexGroupCount
-					is_shapekey = np.zeros(total_groups, dtype=bool)
-					if shapeKeyGroupIndices:
-						is_shapekey = np.isin(flat_groups, list(shapeKeyGroupIndices))
-					# Primary: weight >= MIN_WEIGHT and not shapekey
-					# Secondary: shapekey (regardless of weight)
-					# Both must be in bounds
-					is_primary = in_bounds & (flat_weights >= MIN_WEIGHT) & ~is_shapekey
-					is_secondary = in_bounds & is_shapekey
-
-					# ---- Remap group indices via dict lookup (vectorized) ----
-					# Build remap array keyed by original group index
-					if total_groups > 0:
-						max_gidx = int(flat_groups.max()) + 1
-						remap_arr = np.zeros(max_gidx, dtype=np.int32)
-						for orig_idx, remapped in vertexGroupIndexToRemapDict.items():
-							if orig_idx < max_gidx:
-								remap_arr[orig_idx] = remapped
-						remapped_indices = remap_arr[flat_groups]  # vectorized lookup
-					else:
-						remapped_indices = np.array([], dtype=np.int32)
-
-					# ---- Per-vertex: sort primary weights by weight descending, pad to 8 ----
-					# We process each vertex segment using vectorized slice operations
-					# Collect bone index/position pairs for vectorized bbox computation after the loop
-					_bbox_bone_indices = []
-					_bbox_vert_positions = []
-					for pos_idx, vi in enumerate(unique_verts):
-						s, e = seg_starts[vi], seg_ends[vi]
-						if s >= e:
-							continue
-						vert_pos = vert_positions[vi]
-
-						# Primary weights
-						prim_mask_slice = is_primary[s:e]
-						if np.any(prim_mask_slice):
-							prim_w = flat_weights[s:e][prim_mask_slice]
-							prim_idx = remapped_indices[s:e][prim_mask_slice]
-							# Sort by weight descending
-							sort_order = np.argsort(-prim_w)
-							prim_w = prim_w[sort_order]
-							prim_idx = prim_idx[sort_order]
-							n_prim = len(prim_w)
-							# Pad to 8
-							padding_idx = prim_idx[-1] if padWithLastWeightIndex else 0
-							if n_prim > maxWeightsPerVertex:
-								parsedMesh.bufferHasExtraWeight = True
-								if gameName not in EXTENDED_WEIGHT_GAMES:
-									addErrorToDict(errorDict, "MaxWeightsPerVertexExceeded", rawsubmesh.name)
-								# Extra weights
-								extra_n = min(n_prim - maxWeightsPerVertex, 8)
-								parsedSubMesh.extraWeightList[pos_idx, :extra_n] = prim_w[maxWeightsPerVertex:maxWeightsPerVertex+extra_n]
-								parsedSubMesh.extraWeightIndicesList[pos_idx, :extra_n] = prim_idx[maxWeightsPerVertex:maxWeightsPerVertex+extra_n]
-								if n_prim > maxWeightsPerVertexExtended:
-									addErrorToDict(errorDict, "ExtendedMaxWeightsPerVertexExceeded", rawsubmesh.name)
-							# Main weights (first maxWeightsPerVertex)
-							main_n = min(n_prim, maxWeightsPerVertex)
-							parsedSubMesh.weightList[pos_idx, :main_n] = prim_w[:main_n]
-							parsedSubMesh.weightIndicesList[pos_idx, :main_n] = prim_idx[:main_n]
-							# Fill padding for remaining slots
-							if main_n < 8:
-								parsedSubMesh.weightIndicesList[pos_idx, main_n:] = padding_idx
-
-							# Collect bone index/position pairs for vectorized bbox computation
-							_bbox_bone_indices.append(prim_idx[:main_n])
-							_bbox_vert_positions.append(np.broadcast_to(vert_pos, (main_n, 3)))
-
-						# Secondary weights (shapekeys)
-						if parsedMesh.bufferHasSecondaryWeight:
-							sec_mask_slice = is_secondary[s:e]
-							if np.any(sec_mask_slice):
-								sec_w = flat_weights[s:e][sec_mask_slice]
-								sec_idx = remapped_indices[s:e][sec_mask_slice]
-								n_sec = len(sec_w)
-								if n_sec > maxWeightsPerVertex:
-									addErrorToDict(errorDict, "MaxWeightsPerVertexExceeded", rawsubmesh.name)
-								sec_n = min(n_sec, 8)
-								parsedSubMesh.secondaryWeightList[pos_idx, :sec_n] = sec_w[:sec_n]
-								parsedSubMesh.secondaryWeightIndicesList[pos_idx, :sec_n] = sec_idx[:sec_n]
-
-								_bbox_bone_indices.append(sec_idx[:sec_n])
-								_bbox_vert_positions.append(np.broadcast_to(vert_pos, (sec_n, 3)))
-
-					# ---- Vectorized bone bounding box computation ----
-					# Process per-bone (not per-vertex), vectorized across all vertices for each bone
-					if _bbox_bone_indices:
-						all_bone_idx = np.concatenate(_bbox_bone_indices)
-						all_positions = np.vstack(_bbox_vert_positions)
-						unique_bone_idx = np.unique(all_bone_idx)
-						for bone_i in unique_bone_idx:
-							mask = all_bone_idx == bone_i
-							positions = all_positions[mask]
-							name = parsedMesh.skeleton.weightedBones[bone_i]
-							bn = boneMin[name]
-							bx = boneMax[name]
-							bmin = positions.min(axis=0)
-							bmax = positions.max(axis=0)
-							bn[0] = min(bn[0], bmin[0])
-							bn[1] = min(bn[1], bmin[1])
-							bn[2] = min(bn[2], bmin[2])
-							bx[0] = max(bx[0], bmax[0])
-							bx[1] = max(bx[1], bmax[1])
-							bx[2] = max(bx[2], bmax[2])
-				else:
-					# No weights - ensure empty defaults
-					pass
-
-				visconGroup.subMeshList.append(parsedSubMesh)
-				if len(unique_verts) < len(evaluatedSubMeshData.vertices):
-					addErrorToDict(errorDict, "LooseVerticesOnSubMesh", rawsubmesh.name)
+			workers = min(len(subMeshTasks), os.cpu_count() if os.cpu_count() else 4)
+			if len(subMeshTasks) == 0:
+				pass
+			elif workers <= 1:
+				for task in subMeshTasks:
+					_mergeSubMeshResult(_gatherSubMesh(task))
+			else:
+				results = [None] * len(subMeshTasks)
+				with ThreadPoolExecutor(max_workers=workers) as ex:
+					futures = {ex.submit(_gatherSubMesh, t): i for i, t in enumerate(subMeshTasks)}
+					for fut in as_completed(futures):
+						results[futures[fut]] = fut.result()
+				# Serial merge in original submesh order
+				for res in results:
+					_mergeSubMeshResult(res)
 
 			# End submesh
 			parsedLODLevel.visconGroupList.append(visconGroup)

@@ -394,7 +394,7 @@ class LODGroupHeader():
 		self.distance = read_float(file)
 		self.offsetOffset = read_uint64(file)
 		if self.count > 0:
-			self.meshGroupOffsetList = list(struct.unpack(f'<{self.count}Q', file.read(self.count * 8)))
+			self.meshGroupOffsetList = read_uint64_array(file, self.count)
 		file.seek(getPaddedPos(file.tell(), 16))
 		for i in range(0, self.count):
 			entry = MeshGroup()
@@ -446,7 +446,7 @@ class MainMeshHeader():
 		self.bbox.max.x, self.bbox.max.y, self.bbox.max.z, self.bbox.max.w = struct.unpack_from('<4f', raw2, off); off += 16
 		self.offsetOffset, = struct.unpack_from('<Q', raw2, off)
 		if self.lodGroupCount > 0:
-			self.lodGroupOffsetList = list(struct.unpack(f'<{self.lodGroupCount}Q', file.read(self.lodGroupCount * 8)))
+			self.lodGroupOffsetList = read_uint64_array(file, self.lodGroupCount)
 		self.lodGroupList = []
 		startPos = file.tell()
 
@@ -513,7 +513,7 @@ class ShadowHeader():
 
 		self.lodGroupOffsetList = []
 		if self.lodGroupCount > 0:
-			self.lodGroupOffsetList = list(struct.unpack(f'<{self.lodGroupCount}Q', file.read(self.lodGroupCount * 8)))
+			self.lodGroupOffsetList = read_uint64_array(file, self.lodGroupCount)
 		self.lodGroupList = []
 
 		# Commented out because there's no reason to read it, shadow meshes can only use main mesh lods
@@ -1261,7 +1261,7 @@ class BlendShapeHeader():
 			self.zero, self.mainOffset = struct.unpack_from('<QQ', raw, 8)
 		self.hash, = struct.unpack_from('<Q', raw, 24)
 		if self.count > 0:
-			self.blendShapeOffsetList = list(struct.unpack(f'<{self.count}Q', file.read(int(self.count) * 8)))
+			self.blendShapeOffsetList = read_uint64_array(file, int(self.count))
 		else:
 			self.blendShapeOffsetList = []
 		self.blendShapeList = []
@@ -1370,7 +1370,7 @@ class Skeleton():
 		self.boneInverseMatrixOffset = read_uint64(file)
 		# Batch read bone remap list
 		if self.remapCount > 0:
-			self.boneRemapList = list(struct.unpack(f'<{self.remapCount}H', file.read(self.remapCount * 2)))
+			self.boneRemapList = read_ushort_array(file, self.remapCount)
 		else:
 			self.boneRemapList = []
 		file.seek(getPaddedPos(file.tell(), 16))
@@ -1705,93 +1705,6 @@ def WriteToNorTanBuffer(bufferStream, normalArray, tangentArray):
 	bufferStream.write(norTanArray.tobytes())
 
 
-# Old method of calculating tangents, slow
-def WriteToNorTanBufferOld(bufferStream, normalList, vertexPosList, uvList, faceList):
-	"""Fully vectorized Mikktspace-style tangent computation.
-	Replaces the old per-face + per-vertex Python loops with pure NumPy.
-	Uses np.add.at for accumulation which is much faster than Python loops.
-	"""
-	vertexCount = len(vertexPosList)
-	faceCount = len(faceList)
-	normalArray = np.asarray(normalList, dtype=np.float64)
-	posArray = np.asarray(vertexPosList, dtype=np.float64)
-	uvArray = np.asarray(uvList, dtype=np.float64)
-	faceArray = np.asarray(faceList, dtype=np.int32)
-
-	# ---- Vectorized per-face tangent/bitangent computation ----
-	# Extract vertex indices per face
-	v0 = faceArray[:, 0]
-	v1 = faceArray[:, 1]
-	v2 = faceArray[:, 2]
-
-	# Edge vectors (positions)
-	e1 = posArray[v1] - posArray[v0]  # (F, 3)
-	e2 = posArray[v2] - posArray[v0]  # (F, 3)
-
-	# UV deltas
-	duv1 = uvArray[v1] - uvArray[v0]  # (F, 2)
-	duv2 = uvArray[v2] - uvArray[v0]  # (F, 2)
-
-	# Determinant
-	det = duv1[:, 0] * duv2[:, 1] - duv2[:, 0] * duv1[:, 1]  # (F,)
-	# Avoid division by zero: use safe reciprocal
-	with np.errstate(divide='ignore', invalid='ignore'):
-		r = np.where(np.abs(det) > 1e-10, 1.0 / det, 1.0)
-
-	# sdir = (t2 * e1 - t1 * e2) * r  -> (F, 3)
-	sdir_x = (duv2[:, 1] * e1[:, 0] - duv1[:, 1] * e2[:, 0]) * r
-	sdir_y = (duv2[:, 1] * e1[:, 1] - duv1[:, 1] * e2[:, 1]) * r
-	sdir_z = (duv2[:, 1] * e1[:, 2] - duv1[:, 1] * e2[:, 2]) * r
-	sdir = np.column_stack([sdir_x, sdir_y, sdir_z])  # (F, 3)
-
-	# tdir = (s1 * e2 - s2 * e1) * r  -> (F, 3)
-	tdir_x = (duv1[:, 0] * e2[:, 0] - duv2[:, 0] * e1[:, 0]) * r
-	tdir_y = (duv1[:, 0] * e2[:, 1] - duv2[:, 0] * e1[:, 1]) * r
-	tdir_z = (duv1[:, 0] * e2[:, 2] - duv2[:, 0] * e1[:, 2]) * r
-	tdir = np.column_stack([tdir_x, tdir_y, tdir_z])  # (F, 3)
-
-	# ---- Accumulate per-vertex using np.add.at (vectorized scatter-add) ----
-	tan1Array = np.zeros((vertexCount, 3), dtype=np.float64)
-	tan2Array = np.zeros((vertexCount, 3), dtype=np.float64)
-
-	# Accumulate for each vertex of each face
-	for k in range(3):
-		vidx = faceArray[:, k]
-		np.add.at(tan1Array, vidx, sdir)
-		np.add.at(tan2Array, vidx, tdir)
-
-	# ---- Vectorized per-vertex Gram-Schmidt orthogonalization ----
-	# TN = tan1 - n * dot(n, tan1)
-	dot_nt = np.sum(normalArray * tan1Array, axis=1, keepdims=True)  # (V, 1)
-	TN = tan1Array - normalArray * dot_nt  # (V, 3)
-	norm = np.linalg.norm(TN, axis=1, keepdims=True)  # (V, 1)
-	norm[norm == 0] = 1.0
-	TN /= norm
-
-	# Handedness: sign = dot(cross(n, t), tan2)
-	cross_nt = np.cross(normalArray, tan1Array)  # (V, 3)
-	TNW = np.sum(cross_nt * tan2Array, axis=1)  # (V,)
-	# Map to signed byte range
-	TNW_int = np.where(TNW < 0, -128, 127).astype(np.int32)
-
-	# ---- Pack tangents ----
-	tangentArray = np.zeros((vertexCount, 4), dtype=np.dtype("<b"))
-	tangentArray[:, 0] = np.clip(np.round(TN[:, 0] * 127), -128, 127).astype(np.dtype("<b"))
-	tangentArray[:, 1] = np.clip(np.round(TN[:, 1] * 127), -128, 127).astype(np.dtype("<b"))
-	tangentArray[:, 2] = np.clip(np.round(TN[:, 2] * 127), -128, 127).astype(np.dtype("<b"))
-	tangentArray[:, 3] = np.clip(TNW_int, -128, 127).astype(np.dtype("<b"))
-
-	# ---- Pack normals ----
-	normalOut = np.floor(normalArray * 127).astype(np.dtype("<b"))
-	normalOut = np.insert(normalOut, 3, np.zeros(vertexCount, np.dtype("<b")), axis=1)
-
-	norTanArray = np.empty((vertexCount * 2, 4), dtype=np.dtype("<b"))
-	norTanArray[::2] = normalOut
-	norTanArray[1::2] = tangentArray
-
-	bufferStream.write(norTanArray.tobytes())
-
-
 def WriteToUVBuffer(bufferStream, uvList):
 	uvArray = np.array(uvList, dtype=np.dtype("<e"))
 	uvArray = uvArray.flatten()
@@ -2022,7 +1935,6 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 
 						tangentGenerationStartTime = time.time()
 						WriteToNorTanBuffer(norTanBuffer, parsedSubMesh.normalList, parsedSubMesh.tangentList)
-						# WriteToNorTanBufferOld(norTanBuffer, parsedSubMesh.normalList,parsedSubMesh.vertexPosList,parsedSubMesh.uvList,parsedSubMesh.faceList)
 						totalTangentGenerationTime +=  (time.time() - tangentGenerationStartTime)
 
 						# Copy uv1 to uv2 if buffer has uv2, but the mesh only has 1 uv

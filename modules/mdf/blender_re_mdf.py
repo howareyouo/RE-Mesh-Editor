@@ -1,7 +1,7 @@
 import os
 import bpy
 
-from ..blender_utils import showMessageBox,showErrorMessageBox
+from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection
 from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .ui_re_mdf_panels import tag_redraw
@@ -137,13 +137,9 @@ def findHeaderObj():
 		else:
 			return None
 def createMDFCollection(collectionName,parentCollection = None):
-	collection = bpy.data.collections.new(collectionName)
-	collection.color_tag = "COLOR_05"
-	collection["~TYPE"] = "RE_MDF_COLLECTION"
-	if parentCollection != None:
-		parentCollection.children.link(collection)
-	else:
-		bpy.context.scene.collection.children.link(collection)
+	collection = createRECollection(
+		collectionName, parentCollection,
+		color_tag="COLOR_05", customProps={"~TYPE": "RE_MDF_COLLECTION"})
 	bpy.context.scene.re_mdf_toolpanel.mdfCollection = collection
 	return collection
 

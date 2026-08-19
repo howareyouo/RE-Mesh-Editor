@@ -249,7 +249,8 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 	#Should use regex to do this
 	split = meshPath.split(".mesh")
 	fileRoot = glob.escape(split[0])
-	meshVersion = split[1]
+	# Take the version from the last dot of the filename (handles e.g. .mesh_.221108797)
+	meshVersion = os.path.splitext(meshPath)[1]
 	mdfVersionDict = {
 		".1808312334":".10",#RE2
 		".1902042334":".13",#RE3
@@ -276,7 +277,7 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 	}
 	mdfVersion = mdfVersionDict.get(meshVersion,None)
 	if mdfVersion == None:#Allow for importing of mdfs that haven't had support added for them yet
-		raiseWarning("Attempting to import unknown mdf version")	
+		raiseWarning(f"Attempting to import unknown mdf version (parsed mesh version: {meshVersion}). Falling back to wildcard file search.")	
 		mdfPath = wildCardFileSearch(f"{fileRoot}.mdf2.*")
 		if mdfPath == None:
 			mdfPath = wildCardFileSearch(f"{fileRoot}_Mat.mdf2.*")

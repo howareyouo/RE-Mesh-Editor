@@ -168,39 +168,6 @@ os.system("color")#Enable console colors
 
 
 #Used to circumvent the issue of properties not being able to used as defaults for other properties at startup
-def setMeshImportDefaults(self):
-	self.clearScene = bpy.context.preferences.addons[__name__].preferences.default_clearScene
-	self.loadMaterials = bpy.context.preferences.addons[__name__].preferences.default_loadMaterials
-	self.loadMDFData = bpy.context.preferences.addons[__name__].preferences.default_loadMDFData
-	self.loadShellFur = bpy.context.preferences.addons[__name__].preferences.default_loadShellFur
-	self.loadUnusedTextures = bpy.context.preferences.addons[__name__].preferences.default_loadUnusedTextures
-	self.loadUnusedProps = bpy.context.preferences.addons[__name__].preferences.default_loadUnusedProps
-	self.useBackfaceCulling = bpy.context.preferences.addons[__name__].preferences.default_useBackfaceCulling
-	self.reloadCachedTextures = bpy.context.preferences.addons[__name__].preferences.default_reloadCachedTextures
-	self.createCollections = bpy.context.preferences.addons[__name__].preferences.default_createCollections
-	self.importArmatureOnly = bpy.context.preferences.addons[__name__].preferences.default_importArmatureOnly
-	self.importAllLODs = bpy.context.preferences.addons[__name__].preferences.default_importAllLODs
-	self.rotate90 = bpy.context.preferences.addons[__name__].preferences.default_rotate90
-	self.importBlendShapes = bpy.context.preferences.addons[__name__].preferences.default_importBlendShapes
-	self.importShadowMeshes = bpy.context.preferences.addons[__name__].preferences.default_importShadowMeshes
-	self.mergeGroups = bpy.context.preferences.addons[__name__].preferences.default_mergeGroups
-	self.importOcclusionMeshes = bpy.context.preferences.addons[__name__].preferences.default_importOcclusionMeshes
-	self.importBoundingBoxes = bpy.context.preferences.addons[__name__].preferences.default_importBoundingBoxes
-	#print("RE Mesh Editor: Loaded Default Import Settings")
-	
-def setMeshExportDefaults(self):
-	self.selectedOnly = bpy.context.preferences.addons[__name__].preferences.default_selectedOnly
-	self.exportAllLODs = bpy.context.preferences.addons[__name__].preferences.default_exportAllLODs
-	self.exportBlendShapes = bpy.context.preferences.addons[__name__].preferences.default_exportBlendShapes
-	self.rotate90 = bpy.context.preferences.addons[__name__].preferences.default_rotate90export
-	self.autoSolveRepeatedUVs = bpy.context.preferences.addons[__name__].preferences.default_autoSolveRepeatedUVs
-	self.preserveSharpEdges = bpy.context.preferences.addons[__name__].preferences.default_preserveSharpEdges
-	self.useBlenderMaterialName = bpy.context.preferences.addons[__name__].preferences.default_useBlenderMaterialName
-	self.preserveBoneMatrices = bpy.context.preferences.addons[__name__].preferences.default_preserveBoneMatrices
-	self.exportBoundingBoxes = bpy.context.preferences.addons[__name__].preferences.default_exportBoundingBoxes
-	#print("RE Mesh Editor: Loaded Default Export Settings")
-	
-
 def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 
 	def draw(self, context):
@@ -297,13 +264,13 @@ class ChunkPathPropertyGroup(bpy.types.PropertyGroup):
     path: StringProperty(
         name="Path",
 		subtype="DIR_PATH",
-		description = "Set the path to the natives\STM folder inside the extracted chunk files\nThis determines where textures will be imported from\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
+		description = "Set the path to the natives\\STM folder inside the extracted chunk files\nThis determines where textures will be imported from\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
     )
 
 
 class AddItemOperator(bpy.types.Operator):
 	bl_idname = "re_mesh.chunk_path_list_add_item"
-	bl_description = "Add path to the extracted chunk's natives\STM\ folder.\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
+	bl_description = "Add path to the extracted chunk's natives\\STM\\ folder.\n"+r"Example: I:\RE4_EXTRACT\re_chunk_000\natives\STM"
 	bl_label = "Add Path"
 
 	def execute(self, context):
@@ -437,131 +404,14 @@ class REMeshPreferences(AddonPreferences):
 	    min=0,
 	    max=59
 	)
-	#Internal properties for grouping import/export settings
-	showImportOptions : BoolProperty(
-	   name = "Show Default Import Settings",
-	   default = False
-	)
-	showExportOptions : BoolProperty(
-	   name = "Show Default Export Settings",
-	   default = False
-	)
 	textureCacheSizeString: bpy.props.StringProperty(
 	    default="",
 	)
 	textureCacheCheckDate: bpy.props.StringProperty(
 	    default="",
 	)
-	
-	#Default import settings
-	default_clearScene : BoolProperty(
-	   name = "Clear Scene",
-	   description = "Clears all objects before importing the mesh file",
-	   default = False)
-	default_loadMaterials : BoolProperty(
-	   name = "Load Materials",
-	   description = "Load materials from the MDF2 file. This may increase the time the mesh takes to import",
-	   default = False)
-	default_loadMDFData : BoolProperty(
-	   name = "Load MDF Material Data",
-	   description = "Imports the MDF materials as objects inside a collection in the outliner.\nYou can make changes to MDF materials by selecting the Material objects in the outliner.\nUnder the Object Properties tab (orange square), there's a panel called \"RE MDF Material Settings\".\nMake any changes to MDF materials there.\nIf you're not modding an RE Engine game, you can uncheck this option since it won't be needed",
-	   default = True)
-	default_loadShellFur : BoolProperty(
-	   name = "Load Shell Fur",
-	   description = "Load shell fur data from sfur file if present",
-	   default = False)
-	default_loadUnusedTextures : BoolProperty(
-	   name = "Load Unused Textures",
-	   description = "Loads textures that have no function assigned to them in the material shader graph.\nLeaving this disabled will make materials load faster.\nOnly enable this if you plan on editing the material shader graph",
-	   default = False)
-	default_loadUnusedProps : BoolProperty(
-	   name = "Load Unused Material Properties",
-	   description = "Loads material properties that have no function assigned to them in the material shader graph.\nLeaving this disabled will make materials load faster.\nOnly enable this if you plan on editing the material shader graph",
-	   default = False)
-	default_useBackfaceCulling : BoolProperty(
-	   name = "Use Backface Culling",
-	   description = "Enables backface culling on materials. May improve Blender's performance on high poly meshes.\nBackface culling will only be enabled on materials without the two sided flag",
-	   default = False)
-	default_reloadCachedTextures : BoolProperty(
-	   name = "Reload Cached Textures",
-	   description = "Convert all textures again instead of reading from already converted textures. Use this if you make changes to textures and need to reload them",
-	   default = False)
-	default_createCollections : BoolProperty(
-	   name = "Create Collections",
-	   description = "Create a collection for the mesh and for each LOD level. Note that collections are required for exporting LODs and applying MDF changes. Leaving this option enabled is recommended",
-	   default = True)
-	default_importArmatureOnly : BoolProperty(
-	   name = "Only Import Armature",
-	   description = "Imports the armature of the mesh file, but not any of the meshes",
-	   default = False)
-	default_importAllLODs : BoolProperty(
-	   name = "Import All LODs",
-	   description = "Imports all LOD (level of detail) meshes. If unchecked, only the first LOD of each mesh will be imported",
-	   default = False)
-	default_rotate90 : BoolProperty(
-	   name = "Y Up to Z Up",
-	   description = "Rotate meshes and armatures by 90 degrees. Leaving this option enabled is recommended",
-	   default = True)
-	default_importBlendShapes : BoolProperty(
-	   name = "Import Blend Shapes",
-	   description = "Imports blend shapes as shape keys if present",
-	   default = True)
-	default_importShadowMeshes : BoolProperty(
-	   name = "Import Shadow Cast Mesh",
-	   description = "Imports shadow cast meshes if present",
-	   default = True)
-	default_mergeGroups : BoolProperty(
-	   name = "Merge Mesh Groups",
-	   description = "Merges all submeshes of a mesh group. IMPORTANT: MERGED MESHES CANNOT BE EXPORTED BACK TO MESH",
-	   default = False)
-	default_importOcclusionMeshes : BoolProperty(
-	   name = "Import Occlusion Mesh",
-	   description = "Imports occlusion meshes if present",
-	   default = False)
-	default_importBoundingBoxes : BoolProperty(
-	   name = "Import Bounding Boxes",
-	   description = "Import mesh and bone bounding boxes for debugging purposes",
-	   default = False)
-	
-	#Default export options
-	default_selectedOnly : BoolProperty(
-	   name = "Selected Objects Only",
-	   description = "Limit export to selected objects",
-	   default = False)
-	default_exportAllLODs : BoolProperty(
-	   name = "Export All LODs",
-	   description = "Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
-	   default = True)
-	default_exportBlendShapes : BoolProperty(
-	   name = "Export Blend Shapes",
-	   description = "Exports blend shapes from mesh if present",
-	   default = True)
-	default_rotate90export : BoolProperty(
-	   name = "Convert Z Up To Y Up",
-	   description = "Rotates objects 90 degrees for export. Leaving this option enabled is recommended",
-	   default = True)
-	default_autoSolveRepeatedUVs : BoolProperty(
-	   name = "Auto Solve Repeated UVs",
-	   description = "Splits connected UV islands if present. The mesh format does not allow for multiple uvs assigned to a vertex.\nNOTE: This will modify the exported mesh. If auto smooth is disabled on the mesh, the normals may change",
-	   default = True)
-	default_preserveSharpEdges : BoolProperty(
-	   name = "Split Sharp Edges",
-	   description = "Edge splits all edges marked as sharp to preserve them on the exported mesh.\nNOTE: This will modify the exported mesh",
-	   default = True)
-	default_useBlenderMaterialName : BoolProperty(
-	   name = "Use Blender Material Names",
-	   description = "If left unchecked, the exporter will get the material names to be used from the end of each object name. For example, if a mesh is named LOD_0_Group_0_Sub_0__Shirts_Mat, the material name is Shirts_Mat. If this option is enabled, the material name will instead be taken from the first material assigned to the object",
-	   default = False)
-	default_preserveBoneMatrices : BoolProperty(
-	   name = "Preserve Bone Matrices",
-	   description = "Export using the original matrices of the imported bones. Note that this option only applies armatures imported with this addon. Any newly added bones will have new matrices calculated",
-	   default = False)
-	default_exportBoundingBoxes : BoolProperty(
-	   name = "Export Bounding Boxes",
-	   description = "Exports the original bounding boxes from the \"Import Bounding Boxes\" import option. New bounding boxes will be generated for any bones that do not have them",
-	   default = False)
-	
-	
+
+
 	def draw(self, context):
 		layout = self.layout
 		split = layout.split(factor = .3)
@@ -587,7 +437,7 @@ class REMeshPreferences(AddonPreferences):
 			row.prop(self,"textureCachePath")
 			box.label(text="Texture cache path is very long.",icon = "ERROR")
 			box.label(text="File paths may exceed the max length of 255 characters and fail to convert.")
-			box.label(text="Consider changing this to a shorter path such as C:\REMeshTextureCache.")
+			box.label(text="Consider changing this to a shorter path such as C:\\REMeshTextureCache.")
 		else:
 			row.prop(self,"textureCachePath")
 		row = box.row()
@@ -600,46 +450,6 @@ class REMeshPreferences(AddonPreferences):
 		box.operator("re_mesh.clear_texture_cache_folder")
 		
 		op.url = 'https://ko-fi.com/nsacloud'
-		
-		#Import defaults
-		row = layout.row()
-		icon = 'DOWNARROW_HLT' if self.showImportOptions else 'RIGHTARROW'
-		row.prop(self, 'showImportOptions', icon=icon, icon_only=True)
-		row.label(text='Default Mesh Import Settings')
-		split = layout.split(factor = 0.01)
-		column = split.column()
-		column2 = split.column()
-		if self.showImportOptions:
-			column2.prop(self, "default_clearScene")
-			column2.prop(self, "default_loadMaterials")
-			column2.prop(self, "default_loadMDFData")
-			column2.prop(self, "default_reloadCachedTextures")
-			column2.prop(self, "default_loadUnusedTextures")
-			column2.prop(self, "default_loadUnusedProps")
-			column2.prop(self, "default_useBackfaceCulling")
-			column2.prop(self, "default_importAllLODs")
-			column2.prop(self, "default_createCollections")
-			column2.prop(self, "default_mergeGroups")
-			column2.prop(self, "default_importArmatureOnly")
-			column2.prop(self, "default_rotate90")
-			column2.prop(self, "default_importBoundingBoxes")
-		#Export defaults
-		row = layout.row()
-		icon = 'DOWNARROW_HLT' if self.showExportOptions else 'RIGHTARROW'
-		row.prop(self, 'showExportOptions', icon=icon, icon_only=True)
-		row.label(text='Default Mesh Export Options')
-		split = layout.split(factor = 0.01)
-		column = split.column()
-		column2 = split.column()
-		if self.showExportOptions:
-			column2.prop(self, "default_selectedOnly")
-			column2.prop(self, "default_exportAllLODs")
-			column2.prop(self,"default_autoSolveRepeatedUVs")
-			column2.prop(self,"default_preserveSharpEdges")
-			column2.prop(self, "default_rotate90export")
-			column2.prop(self, "default_useBlenderMaterialName")
-			column2.prop(self, "default_preserveBoneMatrices")
-			column2.prop(self, "default_exportBoundingBoxes")
 		
 		layout.label(text = "Chunk Path List")
 		layout.prop(self, "saveChunkPaths")
@@ -676,7 +486,7 @@ class ImportREMesh(Operator, ImportHelper):
 	loadMaterials : BoolProperty(
 	   name = "Load Materials",
 	   description = "Load materials from the MDF2 file. This may increase the time the mesh takes to import",
-	   default = True)
+	   default = False)
 	loadMDFData : BoolProperty(
 	   name = "Load MDF Material Data",
 	   description = "Imports the MDF materials as objects inside a collection in the outliner.\nYou can make changes to MDF materials by selecting the Material objects in the outliner.\nUnder the Object Properties tab (orange square), there's a panel called \"RE MDF Material Settings\".\nMake any changes to MDF materials there.\nIf you're not modding an RE Engine game, you can uncheck this option since it won't be needed",
@@ -684,7 +494,7 @@ class ImportREMesh(Operator, ImportHelper):
 	loadShellFur : BoolProperty(
 	   name = "Load Shell Fur",
 	   description = "Load shell fur data from sfur file if present",
-	   default = True)
+	   default = False)
 	loadUnusedTextures : BoolProperty(
 	   name = "Load Unused Textures",
 	   description = "Loads textures that have no function assigned to them in the material shader graph.\nLeaving this disabled will make materials load faster.\nOnly enable this if you plan on editing the material shader graph",
@@ -821,8 +631,6 @@ class ImportREMesh(Operator, ImportHelper):
 		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
 		print("https://github.com/NSACloud/RE-Mesh-Editor")
 		
-		bpy.context.scene["REMeshDefaultImportSettingsLoaded"] = 1
-		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:
 			try: 
 				bpy.ops.wm.console_toggle()
@@ -872,9 +680,6 @@ class ImportREMesh(Operator, ImportHelper):
 			return {"CANCELLED"}
 	
 	def invoke(self, context, event):
-		if not bpy.context.scene.get("REMeshDefaultImportSettingsLoaded"):
-			setMeshImportDefaults(self)
-			
 		if self.directory:
 			if bpy.context.preferences.addons[__name__].preferences.dragDropImportOptions:
 				return context.window_manager.invoke_props_dialog(self)
@@ -974,9 +779,6 @@ class ExportREMesh(Operator, ExportHelper):
 	   description = "Exports the original bounding boxes from the \"Import Bounding Boxes\" import option. New bounding boxes will be generated for any bones that do not have them",
 	   default = False)
 	def invoke(self, context, event):
-		if not bpy.context.scene.get("REMeshDefaultExportSettingsLoaded"):
-			setMeshExportDefaults(self)
-			
 		if context.scene.get("REMeshLastImportedMeshVersion",0) in meshFileVersionToGameNameDict:
 			if context.scene["REMeshLastImportedMeshVersion"] == 231011879:
 				#DD2 version update fix
@@ -1072,8 +874,6 @@ class ExportREMesh(Operator, ExportHelper):
 		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
 		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
 		print("https://github.com/NSACloud/RE-Mesh-Editor")
-		
-		bpy.context.scene["REMeshDefaultExportSettingsLoaded"] = 1
 		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:
 			try: 
@@ -1647,70 +1447,40 @@ classes = [
 
 #Drag and drop importing, 4.1 or higher only
 if bpy.app.version >= (4, 1, 0):
-	meshExtensionsString = ""
-	for meshVersion in meshFileVersionToGameNameDict.keys():
-		meshExtensionsString += f".{str(meshVersion)};"
-	class MESH_FH_drag_import(bpy.types.FileHandler):
-		bl_idname = "MESH_FH_drag_import"
-		bl_label = "File handler for RE Mesh importing"
-		bl_import_operator = "re_mesh.importfile"
-		bl_file_extensions = meshExtensionsString
-	
+	class RE_FH_base(bpy.types.FileHandler):
 		@classmethod
 		def poll_drop(cls, context):
 			return (context.area and context.area.type == 'VIEW_3D')
-	mdfExtensionsString = ""
-	for mdfVersion in gameNameMDFVersionDict.keys():
-		if isinstance(mdfVersion,int):
-			mdfExtensionsString += f".{str(mdfVersion)};"
-	
-	class MDF_FH_drag_import(bpy.types.FileHandler):
-		bl_idname = "MDF_FH_drag_import"
-		bl_label = "File handler for RE MDF importing"
-		bl_import_operator = "re_mdf.importfile"
-		bl_file_extensions = mdfExtensionsString
-		
-		@classmethod
-		def poll_drop(cls, context):
-			return (context.area and context.area.type == 'VIEW_3D')
-	texExtensionsString = ".tif;.tiff;.tga;.png;.dds;"
-	for texVersion in gameNameToTexVersionDict.values():
-		texExtensionsString += f".{str(texVersion)};"
-	texExtensionsString += ".31;"#RE Verse tex drag and drop support
-	
-	class TEX_FH_drag_import(bpy.types.FileHandler):
-		bl_idname = "TEX_FH_drag_import"
-		bl_label = "File handler for RE Tex Conversion"
-		bl_import_operator = "re_tex.convert_tex_dds_files"
-		bl_file_extensions = texExtensionsString
-	
-		@classmethod
-		def poll_drop(cls, context):
-			return (context.area and context.area.type == 'VIEW_3D')
-		
-		
+
+	def make_file_handler(bl_idname, label, operator, extensions):
+		return type(bl_idname, (RE_FH_base,), {
+			'bl_idname': bl_idname,
+			'bl_label': label,
+			'bl_import_operator': operator,
+			'bl_file_extensions': extensions,
+		})
+
+	meshExtensionsString = "".join(f".{str(v)};" for v in meshFileVersionToGameNameDict.keys())
+	MESH_FH_drag_import = make_file_handler(
+		"MESH_FH_drag_import", "File handler for RE Mesh importing",
+		"re_mesh.importfile", meshExtensionsString)
+	mdfExtensionsString = "".join(f".{str(v)};" for v in gameNameMDFVersionDict.keys() if isinstance(v, int))
+	MDF_FH_drag_import = make_file_handler(
+		"MDF_FH_drag_import", "File handler for RE MDF importing",
+		"re_mdf.importfile", mdfExtensionsString)
+	texExtensionsString = ".tif;.tiff;.tga;.png;.dds;" + "".join(
+		f".{str(v)};" for v in gameNameToTexVersionDict.values()) + ".31;"  # RE Verse tex drag and drop support
+	TEX_FH_drag_import = make_file_handler(
+		"TEX_FH_drag_import", "File handler for RE Tex Conversion",
+		"re_tex.convert_tex_dds_files", texExtensionsString)
 	fbxSkelExtensionsString = ".4;.5;.6;.7;.8;"
-	
-	class FBXSKEL_FH_drag_import(bpy.types.FileHandler):
-		bl_idname = "FBXSKEL_FH_drag_import"
-		bl_label = "File handler for RE FBXSkel importing"
-		bl_import_operator = "re_fbxskel.importfile"
-		bl_file_extensions = fbxSkelExtensionsString
-	
-		@classmethod
-		def poll_drop(cls, context):
-			return (context.area and context.area.type == 'VIEW_3D')
+	FBXSKEL_FH_drag_import = make_file_handler(
+		"FBXSKEL_FH_drag_import", "File handler for RE FBXSkel importing",
+		"re_fbxskel.importfile", fbxSkelExtensionsString)
 	sfurExtensionsString = ".4;.5;"
-	
-	class SFUR_FH_drag_import(bpy.types.FileHandler):
-		bl_idname = "SFUR_FH_drag_import"
-		bl_label = "File handler for RE SFur importing"
-		bl_import_operator = "re_sfur.importfile"
-		bl_file_extensions = sfurExtensionsString
-	
-		@classmethod
-		def poll_drop(cls, context):
-			return (context.area and context.area.type == 'VIEW_3D')
+	SFUR_FH_drag_import = make_file_handler(
+		"SFUR_FH_drag_import", "File handler for RE SFur importing",
+		"re_sfur.importfile", sfurExtensionsString)
 class GU_PT_collection_custom_properties(bpy.types.Panel, PropertyPanel): #For adding custom properties to collections, fixed on 3.3 and up so not needed there
     _context_path = "collection"
     _property_type = bpy.types.Collection

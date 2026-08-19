@@ -131,27 +131,31 @@ def write_unicode_string(file_object,input):#Writes utf-8 string as utf-16
 def getPaddingAmount(currentPos,alignment):
     return (currentPos*-1)%alignment
 
-# Batch read helpers: read N values from file in one call
+# Batch read helpers: read N values from file in one call.
+# NOTE: must unpack EXACTLY `count` values. The single-value pre-compiled
+# structs (_struct_ushort etc.) cannot be used here - `unpack_from` on a whole
+# buffer with a single-element format returns only the FIRST value, silently
+# truncating arrays (previously caused bone weights to be dropped on import).
 def read_ubyte_array(file_object, count):
-    return list(_struct_ubyte.unpack_from(file_object.read(count)))
+    return list(struct.unpack_from(f'<{count}B', file_object.read(count)))
 def read_ushort_array(file_object, count):
     raw = file_object.read(count * 2)
-    return list(_struct_ushort.unpack_from(raw)) if count <= 256 else list(struct.unpack_from(f'<{count}H', raw))
+    return list(struct.unpack_from(f'<{count}H', raw))
 def read_uint_array(file_object, count):
     raw = file_object.read(count * 4)
-    return list(_struct_uint.unpack_from(raw)) if count <= 128 else list(struct.unpack_from(f'<{count}I', raw))
+    return list(struct.unpack_from(f'<{count}I', raw))
 def read_uint64_array(file_object, count):
     raw = file_object.read(count * 8)
-    return list(_struct_uint64.unpack_from(raw)) if count <= 64 else list(struct.unpack_from(f'<{count}Q', raw))
+    return list(struct.unpack_from(f'<{count}Q', raw))
 def read_short_array(file_object, count):
     raw = file_object.read(count * 2)
-    return list(_struct_short.unpack_from(raw)) if count <= 256 else list(struct.unpack_from(f'<{count}h', raw))
+    return list(struct.unpack_from(f'<{count}h', raw))
 def read_float_array(file_object, count):
     raw = file_object.read(count * 4)
-    return list(_struct_float.unpack_from(raw)) if count <= 128 else list(struct.unpack_from(f'<{count}f', raw))
+    return list(struct.unpack_from(f'<{count}f', raw))
 def read_int_array(file_object, count):
     raw = file_object.read(count * 4)
-    return list(_struct_int.unpack_from(raw)) if count <= 128 else list(struct.unpack_from(f'<{count}i', raw))
+    return list(struct.unpack_from(f'<{count}i', raw))
 
 # Batch write helpers
 def write_ubyte_array(file_object, values):
@@ -326,6 +330,19 @@ def openFolder(path):
 
 def isLinux():
     return not IS_WINDOWS
+
+def log(*args, tag="RE", **kwargs):
+    """集中式日志输出, 统一加标签前缀, 便于排查和过滤.
+    用法与 print 一致: log("msg") / log("key=%s", val) 支持 str.format 风格."""
+    import time
+    ts = time.strftime("%H:%M:%S")
+    if len(args) == 1 and isinstance(args[0], str) and kwargs:
+        msg = args[0].format(*kwargs.pop("args", ()), **kwargs)
+    elif len(args) == 1 and isinstance(args[0], str) and "%" in args[0]:
+        msg = args[0] % args[1:]
+    else:
+        msg = " ".join(str(a) for a in args)
+    return print(f"[{ts}] [{tag}] {msg}")
 	
 def _case_insensitive_pattern(name):
     escaped = glob.escape(name)
