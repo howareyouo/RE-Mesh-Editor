@@ -2286,9 +2286,8 @@ def readREMesh(filepath, lodTarget=None):
 		file = open(filepath, "rb", buffering=MESH_IO_BUFFER_SIZE)
 	except:
 		raiseError("Failed to open " + filepath)
-	try:
-		meshVersion = int(os.path.splitext(filepath)[1].replace(".", ""))
-	except:
+	meshVersion = parseFileVersion(filepath, None)
+	if meshVersion is None:
 		print("Unable to read mesh version from file path, assuming MHRSB")
 		meshVersion = 2109148288  # MHRSB
 	version = meshFileVersionToNewVersionDict.get(meshVersion, getNearestRemapVersion(meshVersion))
@@ -2340,9 +2339,8 @@ def writeREMesh(reMeshFile, filepath):
 		file = open(filepath, "wb", buffering=MESH_IO_BUFFER_SIZE)
 	except:
 		raiseError("Failed to open " + filepath)
-	try:
-		meshVersion = int(os.path.splitext(filepath)[1].replace(".", ""))
-	except:
+	meshVersion = parseFileVersion(filepath, None)
+	if meshVersion is None:
 		print("Unable to read mesh version from file path, assuming MHRSB")
 		meshVersion = 2109148288  # MHRSB
 	version = newVersionToMeshFileVersion.get(meshVersion, getNearestRemapVersion(meshVersion))

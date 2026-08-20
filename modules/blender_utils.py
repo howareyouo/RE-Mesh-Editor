@@ -1,10 +1,17 @@
 #Author: NSA Cloud
 import bpy
+from math import radians
+from mathutils import Matrix
 
-from .gen_functions import textColors
+from .gen_functions import textColors, splitNativesPath, raiseWarning
 import os
 from collections import OrderedDict
 from itertools import repeat
+
+# Shared rotation matrices (X-axis ±90°) for RE Engine import/export
+rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
+rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
+
 def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 
 	def draw(self, context):
@@ -30,6 +37,54 @@ def createRECollection(collectionName, parentCollection=None, color_tag=None, cu
 	else:
 		bpy.context.scene.collection.children.link(collection)
 	return collection
+
+def getBlenderSafeBoneName(boneName):
+	"""Return a Blender-safe bone name, hashing if it exceeds the 63-char limit.
+	
+	Returns:
+		tuple: (safeName, isHashed)
+	"""
+	if len(boneName) > 63:
+		from ..hashing.mmh3.pymmh3 import hashUTF8
+		safeName = f"#HASHED_{str(hashUTF8(boneName))}"
+		raiseWarning(
+			f"Bone name length exceeds Blender's limit of 63 characters, hashing bone name: {boneName}")
+		return safeName, True
+	return boneName, False
+
+def setAssetPathFromFilePath(filePath, collection):
+	"""Parse the natives asset path from filePath and store it on the collection.
+	
+	Sets collection["~ASSETPATH"] if the file is inside a natives folder.
+	"""
+	try:
+		split = splitNativesPath(filePath)
+		if split != None:
+			assetPath = os.path.splitext(split[1])[0].replace(os.sep, "/")
+			collection["~ASSETPATH"] = assetPath
+	except:
+		print("Failed to set asset path from file path, file is likely not in a natives folder.")
+
+def createEmpty(name, propertyList, parent=None, collection=None):
+	"""Create a Blender Empty object with display type PLAIN_AXES, custom
+	properties, and link to a collection."""
+	obj = bpy.data.objects.new(name, None)
+	obj.empty_display_size = .10
+	obj.empty_display_type = 'PLAIN_AXES'
+	obj.parent = parent
+	for property in propertyList:
+		obj[property[0]] = property[1]
+	if collection == None:
+		collection = bpy.context.scene.collection
+	collection.objects.link(obj)
+	return obj
+
+def printEditorHeader(bl_info):
+	"""Print the RE Mesh Editor version header to console."""
+	editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
+	print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
+	print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
+	print("https://github.com/NSACloud/RE-Mesh-Editor")
 
 class ContextExecuterOverride:
 	def __init__(self, window, screen, area, region):

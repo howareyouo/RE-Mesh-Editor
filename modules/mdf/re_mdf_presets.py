@@ -5,9 +5,9 @@ import re
 import bpy
 
 from ..gen_functions import textColors,raiseWarning
-from ..blender_utils import showErrorMessageBox
+from ..blender_utils import showErrorMessageBox,createEmpty
 from .file_re_mdf import getMDFVersionToGameName
-from .blender_re_mdf import createEmpty, checkNameUsage
+from .blender_re_mdf import checkNameUsage
 
 from .blender_re_mdf import boolPropertySet,colorPropertySet
 def findHeaderObj():

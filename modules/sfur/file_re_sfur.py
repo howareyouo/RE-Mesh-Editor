@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string
+from ..gen_functions import textColors,raiseWarning,raiseError,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion
 
 class SIZEDATA():
 	def __init__(self,version):
@@ -197,9 +197,8 @@ def writeSFur(sFurFile,filepath):
 		file = open(filepath,"wb")
 	except:
 		raiseError("Failed to open " + filepath)
-	try:
-		version = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
+	version = parseFileVersion(filepath, None)
+	if version is None:
 		raiseWarning("No number extension found on SFur file, defaulting to version 5")
 		version = 5
 	sFurFile.write(file,version)

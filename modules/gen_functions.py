@@ -410,3 +410,15 @@ def printElapsed(label, startTime, color=y, suffix=""):
 	if color:
 		ms = color(ms)
 	print(f"{label} took {ms} ms.{suffix}")
+
+
+def parseFileVersion(filepath, default=None):
+	"""Parse the integer version number from a file's extension.
+	
+	e.g. 'file.mesh.221108797' -> 221108797
+	Returns `default` if parsing fails.
+	"""
+	try:
+		return int(os.path.splitext(filepath)[1].replace(".", ""))
+	except:
+		return default

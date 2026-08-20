@@ -22,16 +22,12 @@ from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
-from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs
-from ..blender_utils import showErrorMessageBox, showMessageBox
-from ..hashing.mmh3.pymmh3 import hashUTF8
+from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion
+from ..blender_utils import showErrorMessageBox, showMessageBox, getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix
 import time
 import numpy as np
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
-rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
 
 
 def triangulateMesh(mesh):
@@ -187,20 +183,6 @@ def findArmatureObjFromData(armatureData):
 	return armatureObj
 
 
-def createEmpty(name, propertyList, parent=None, collection=None):
-	obj = bpy.data.objects.new(name, None)
-	obj.empty_display_size = .10
-	obj.empty_display_type = 'PLAIN_AXES'
-	obj.parent = parent
-	for property in propertyList:
-		obj[property[0]] = property[1]
-	if collection == None:
-		collection = bpy.context.scene.collection
-
-	collection.objects.link(obj)
-	return obj
-
-
 def importSkeleton(parsedSkeleton, armatureName, collection, rotate90, targetArmatureName=None):
 	mergedArmature = False
 	# Merging with existing armature if specified in import menu
@@ -236,15 +218,8 @@ def importSkeleton(parsedSkeleton, armatureName, collection, rotate90, targetArm
 	hashedNameDict = dict()
 	for bone in parsedSkeleton.boneList:
 		if bone.boneName not in armatureData.bones:
-			hashedName = False
-			boneName = bone.boneName
-			if len(boneName) > 63:  
-				# Thank DMC5 for abominations like this: 
-				# bake12_sim_sm1103_vegetablebox_04__PMesh_sm1103_vegetablebox_sm1103_vegetablebox_s6_polySurface6180__p001
-				boneName = f"#HASHED_{str(hashUTF8(boneName))}"
-				raiseWarning(
-					f"Bone name length exceeds Blender's limit of 63 characters, hashing bone name: {bone.boneName}")
-				hashedName = True
+			boneName, hashedName = getBlenderSafeBoneName(bone.boneName)
+			if hashedName:
 				hashedNameDict[bone.boneName] = boneName
 			editBone = armatureData.edit_bones.new(boneName)
 			if hashedName:
@@ -368,17 +343,11 @@ def buildBoneNameMaps(boneNameList):
 	
 	for idx, name in enumerate(boneNameList):
 		# Primary bone name
-		if len(name) > 63:
-			boneNameMap[idx] = f"#HASHED_{str(hashUTF8(name))}"
-		else:
-			boneNameMap[idx] = name
+		boneNameMap[idx] = getBlenderSafeBoneName(name)[0]
 		
 		# Secondary (shapekey) bone name
 		secName = "SHAPEKEY_" + name
-		if len(secName) > 63:
-			secBoneNameMap[idx] = f"#HASHED_{str(hashUTF8(secName))}"
-		else:
-			secBoneNameMap[idx] = secName
+		secBoneNameMap[idx] = getBlenderSafeBoneName(secName)[0]
 	
 	return boneNameMap, secBoneNameMap
 
@@ -875,10 +844,7 @@ def importBoundingBox(bbox, bboxName, meshCollection, armatureObj=None, bonePare
 	meshCollection.objects.link(bboxObj)
 
 	if armatureObj != None and boneParent != None:
-		if len(boneParent) > 63:
-			boneName = f"#HASHED_{str(hashUTF8(boneParent))}"
-		else:
-			boneName = boneParent
+		boneName = getBlenderSafeBoneName(boneParent)[0]
 		constraint = bboxObj.constraints.new(type="CHILD_OF")
 		constraint.target = armatureObj
 		constraint.subtarget = boneName
@@ -955,11 +921,9 @@ def resolveMeshGameNameConflict(gameName, filePath):
 def importREMeshFile(filePath, options):
 	meshImportStartTime = time.time()
 	fileName = os.path.split(filePath)[1].split(".mesh")[0]
-	try:
-		meshVersion = int(os.path.splitext(filePath)[1].replace(".", ""))
-	except:
+	meshVersion = parseFileVersion(filePath, None)
+	if meshVersion is None:
 		print("Unable to parse mesh version number in file path.")
-		meshVersion = None
 	if meshVersion in meshFileVersionToGameNameDict:
 		gameName = meshFileVersionToGameNameDict[meshVersion]
 		if gameName in meshGameNameConflictDict:
@@ -1012,13 +976,7 @@ def importREMeshFile(filePath, options):
 		meshCollection.color_tag = "COLOR_01"
 		meshCollection["~TYPE"] = "RE_MESH_COLLECTION"
 		meshCollection["LODGroupNameHash"] = str(reMesh.fileHeader.lodGroupNameHash)
-		try:
-			split = splitNativesPath(filePath)
-			if split != None:
-				assetPath = os.path.splitext(split[1])[0].replace(os.sep, "/")
-				meshCollection["~ASSETPATH"] = assetPath  # Used to determine where to export automatically
-		except:
-			print("Failed to set asset path from file path, file is likely not in a natives folder.")
+		setAssetPathFromFilePath(filePath, meshCollection)
 		bpy.context.scene.re_mdf_toolpanel.meshCollection = meshCollection
 	else:
 		meshCollection = bpy.context.scene.collection
@@ -1300,11 +1258,9 @@ def exportREMeshFile(filePath, options):
 	vertexCount = 0
 	faceCount = 0
 	fileName = os.path.split(filePath)[1].split(".mesh")[0]
-	try:
-		meshVersion = int(os.path.splitext(filePath)[1].replace(".", ""))
-	except:
+	meshVersion = parseFileVersion(filePath, 0)
+	if meshVersion == 0:
 		print("Unable to parse mesh version number in file path.")
-		meshVersion = 0
 	if meshVersion in meshFileVersionToGameNameDict:
 		gameName = meshFileVersionToGameNameDict[meshVersion]
 	else:

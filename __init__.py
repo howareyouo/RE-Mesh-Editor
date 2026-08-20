@@ -19,8 +19,8 @@ from bpy_extras.io_utils import ExportHelper,ImportHelper
 from bpy.props import StringProperty, BoolProperty,IntProperty, EnumProperty, CollectionProperty,PointerProperty
 from bpy.types import Operator, OperatorFileListElement,AddonPreferences
 from rna_prop_ui import PropertyPanel
-from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder
-from .modules.blender_utils import operator_exists
+from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder,parseFileVersion
+from .modules.blender_utils import operator_exists, printEditorHeader
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .modules.mesh.blender_re_mesh import importREMeshFile,exportREMeshFile
@@ -166,14 +166,6 @@ from .modules.workspace.ui_re_mod_workspace_panels import (
 
 os.system("color")#Enable console colors
 
-
-#Used to circumvent the issue of properties not being able to used as defaults for other properties at startup
-def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
-
-	def draw(self, context):
-		self.layout.label(text = message)
-
-	bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 def setModDirectoryFromFilePath(filePath):
 	if "re_chunk_000" not in filePath and "re_dlc_stm" not in filePath and "natives" in filePath:
@@ -626,10 +618,7 @@ class ImportREMesh(Operator, ImportHelper):
 		if self.mergeArmature:
 			self.clearScene = False
 		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes}
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:
 			try: 
@@ -865,18 +854,14 @@ class ExportREMesh(Operator, ExportHelper):
 
 	def execute(self, context):
 		options = {"targetCollection":self.targetCollection,"selectedOnly":self.selectedOnly,"exportAllLODs":self.exportAllLODs,"exportBlendShapes":self.exportBlendShapes,"rotate90":self.rotate90,"useBlenderMaterialName":self.useBlenderMaterialName,"preserveBoneMatrices":self.preserveBoneMatrices,"exportBoundingBoxes":self.exportBoundingBoxes,"autoSolveRepeatedUVs":self.autoSolveRepeatedUVs,"preserveSharpEdges":self.preserveSharpEdges}
-		try:
-			meshVersion = int(os.path.splitext(self.filepath)[1].replace(".",""))
-		except:
+		meshVersion = parseFileVersion(self.filepath, None)
+		if meshVersion is None:
 			self.report({"INFO"},"Mesh file path is missing number extension. Cannot export.")
 			return{"CANCELLED"}
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try: 
+			try:
 				bpy.ops.wm.console_toggle()
 			except:
 				pass
@@ -923,10 +908,7 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
 	filter_glob: StringProperty(default="*.mdf2.*", options={'HIDDEN'})
 
 	def execute(self, context):
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		multiFileImport = len(self.files) > 1
 		hasImportErrors = False
 		
@@ -1032,10 +1014,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
 			row.alert=True
 	def execute(self, context):
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		success = exportMDFFile(self.filepath,self.targetCollection)
 		if success:
 			self.report({"INFO"},"Exported RE MDF successfully.")
@@ -1189,10 +1168,7 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
 	filter_glob: StringProperty(default="*.sfur.*", options={'HIDDEN'})
 
 	def execute(self, context):
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		multiFileImport = len(self.files) > 1
 		hasImportErrors = False
 		
@@ -1288,10 +1264,7 @@ class ExportRESFur(bpy.types.Operator, ExportHelper):
 			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
 			row.alert=True
 	def execute(self, context):
-		editorVersion = str(bl_info["version"][0])+"."+str(bl_info["version"][1])
-		print(f"\n{textColors.BOLD}RE Mesh Editor V{editorVersion}{textColors.ENDC}")
-		print(f"Blender Version {bpy.app.version[0]}.{bpy.app.version[1]}.{bpy.app.version[2]}")
-		print("https://github.com/NSACloud/RE-Mesh-Editor")
+		printEditorHeader(bl_info)
 		success = exportSFurFile(self.filepath,self.targetCollection)
 		if success:
 			self.report({"INFO"},"Exported RE SFur successfully.")

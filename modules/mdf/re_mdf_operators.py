@@ -6,8 +6,8 @@ import json
 from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
 from ..gen_functions import raiseWarning,openFolder
-from ..blender_utils import showErrorMessageBox
-from .blender_re_mdf import createEmpty,reindexMaterials,createMDFCollection,checkNameUsage,buildMDF
+from ..blender_utils import showErrorMessageBox,createEmpty
+from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF
 from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON

@@ -1,8 +1,8 @@
 import os
 import bpy
 
-from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt
+from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection,setAssetPathFromFilePath,createEmpty
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .ui_re_mdf_panels import tag_redraw
 
@@ -152,24 +152,6 @@ def checkNameUsage(baseName,checkSubString = True, objList = None):
 		return baseName in [obj.name for obj in objList]
 
 
-def createEmpty(name,propertyList,parent = None,collection = None):
-	obj = bpy.data.objects.new( name, None )
-	obj.empty_display_size = .10
-	obj.empty_display_type = 'PLAIN_AXES'
-	obj.parent = parent
-	for property in propertyList:#Reverse list so items get added in correct order
- 
-		obj[property[0]] = property[1]
-	if collection == None:
-		collection = bpy.context.scene.collection
-		
-	collection.objects.link(obj)
-		
-		
-	return obj
-
-
-
 def addPropsToPropList(obj,matPropertyList):
 	obj.re_mdf_material.propertyList_items.clear()
 	for prop in matPropertyList:
@@ -232,8 +214,12 @@ def getMDFFlags(obj,flags,flagsB):
 def importMDFFile(filePath,parentCollection = None):
 	mdfFile = readMDF(filePath)
 	mdfFileName = os.path.splitext(os.path.split(filePath)[1])[0]
-	try:
-		mdfVersion = int(os.path.splitext(filePath)[1].replace(".",""))
+	mdfVersion = parseFileVersion(filePath, None)
+	if mdfVersion is None:
+		print("Unable to parse mdf version number in file path.")
+		gameName = -1
+		mdfVersion = 45
+	else:
 		if mdfVersion in gameNameMDFVersionDict:
 			gameName = gameNameMDFVersionDict[mdfVersion]
 			if gameName in MDFGameNameConflictDict:
@@ -242,21 +228,10 @@ def importMDFFile(filePath,parentCollection = None):
 			bpy.context.scene.re_mdf_toolpanel.activeGame = gameName
 		else:
 			gameName = -1
-			
-	except:
-		print("Unable to parse mdf version number in file path.")
-		gameName = -1
-		mdfVersion = 45
 	#headerObj = createEmpty("MDF_HEADER ("+os.path.split(filePath)[1]+")",[("~TYPE","RE_MDF_HEADER"),("unknHeaderValue",mdfFile.Header.version),("MDFVersion",os.path.splitext(filePath)[1].split(".")[1])],None,"MDFData")
 	mdfCollection = createMDFCollection(mdfFileName,parentCollection)
 	bpy.context.scene["REMeshLastImportedMDFVersion"] = mdfVersion
-	try:
-			split = splitNativesPath(filePath)
-			if split != None:
-				assetPath = os.path.splitext(split[1])[0].replace(os.sep,"/")
-				mdfCollection["~ASSETPATH"] = assetPath#Used to determine where to export automatically
-	except:
-		print("Failed to set asset path from file path, file is likely not in a natives folder.")
+	setAssetPathFromFilePath(filePath, mdfCollection)
 	#MATERIALS IMPORT
 	for index, material in enumerate(mdfFile.materialList):
 		name = "Material "+str(index).zfill(2)+ " ("+material.materialName+")"
@@ -512,10 +487,8 @@ def buildMDF(mdfCollectionName,mdfVersion = None):
 	else:
 		return None
 def exportMDFFile(filepath,mdfCollectionName = ""):
-	try:
-		mdfVersion = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
-		mdfVersion = None
+	mdfVersion = parseFileVersion(filepath, None)
+	if mdfVersion is None:
 		print("Unable to parse MDF version number in file path.")
 	mdfFile = buildMDF(mdfCollectionName,mdfVersion)
 	if mdfFile != None:

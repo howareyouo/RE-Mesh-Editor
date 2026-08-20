@@ -3,8 +3,8 @@ import bpy
 import glob
 from mathutils import Vector,Quaternion,Matrix
 from math import radians
-from ..blender_utils import showMessageBox,createRECollection
-from ..gen_functions import textColors,raiseWarning,splitNativesPath
+from ..blender_utils import showMessageBox,createRECollection,setAssetPathFromFilePath
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,parseFileVersion
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
 def checkNameUsage(baseName,checkSubString = True, objList = None):
@@ -130,13 +130,7 @@ def importSFurFile(filePath,parentCollection = None):
 	
 		#TODO Find each submesh using material and add a shell fur geonode modifier to this object for it
 	
-	try:
-		split = splitNativesPath(filePath)
-		if split != None:
-			assetPath = os.path.splitext(split[1])[0].replace(os.sep,"/")
-			sFurCollection["~ASSETPATH"] = assetPath#Used to determine where to export automatically
-	except:
-		print("Failed to set asset path from file path, file is likely not in a natives folder.")
+	setAssetPathFromFilePath(filePath, sFurCollection)
 	
 	
 	
@@ -148,9 +142,8 @@ def importSFurFile(filePath,parentCollection = None):
 
 def exportSFurFile(filepath,targetCollection):
 	sFurFile = SFurFile()
-	try:
-		sfurVersion = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
+	sfurVersion = parseFileVersion(filepath, None)
+	if sfurVersion is None:
 		print("Unable to parse sfur version number in file path, defaulting to 5.")
 		sfurVersion = 5
 	sFurFile.header.version = sfurVersion

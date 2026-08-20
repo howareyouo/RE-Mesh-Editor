@@ -1,21 +1,16 @@
 import os
 import bpy
 from mathutils import Vector,Quaternion,Matrix
-from math import radians
-from ..blender_utils import showMessageBox
-from ..gen_functions import textColors,raiseWarning,splitNativesPath
+from ..blender_utils import showMessageBox, setAssetPathFromFilePath, rotate90Matrix, rotateNeg90Matrix
+from ..gen_functions import textColors,raiseWarning,parseFileVersion
 from .file_re_fbxskel import readFBXSkel,writeFBXSkel,FBXSkelFile,BoneEntry
-
-rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
-rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
 
 #FBXSKEL IMPORT
 def importFBXSkelFile(filePath):
 	
 	fbxSkelFile = readFBXSkel(filePath)
-	try:
-		fbxSkelVersion = int(os.path.splitext(filePath)[1].replace(".",""))
-	except:
+	fbxSkelVersion = parseFileVersion(filePath, None)
+	if fbxSkelVersion is None:
 		print("Unable to parse fbxskel version number in file path.")
 		fbxSkelVersion = 7
 	bpy.context.scene["REMeshLastImportedFBXSkelVersion"] = fbxSkelVersion
@@ -23,13 +18,7 @@ def importFBXSkelFile(filePath):
 	armatureData = bpy.data.armatures.new(fileName)	
 	armatureObj = bpy.data.objects.new(fileName, armatureData)
 	
-	try:
-		split = splitNativesPath(filePath)
-		if split != None:
-			assetPath = os.path.splitext(split[1])[0].replace(os.sep,"/")
-			armatureObj["~ASSETPATH"] = assetPath#Used to determine where to export automatically
-	except:
-		print("Failed to set asset path from file path, file is likely not in a natives folder.")
+	setAssetPathFromFilePath(filePath, armatureObj)
 	
 	armatureObj.show_in_front = True
 	#armatureObj.display_type = "WIRE" # Change display type to make it visually different from a mesh armature
