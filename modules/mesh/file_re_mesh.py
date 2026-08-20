@@ -33,7 +33,6 @@ from io import BytesIO
 from ..gen_functions import *
 from .file_re_mesh_mply import REMeshMPLY
 
-timeFormat = "%d"
 # Mesh version numbers do not always increase for newer versions of the file format
 # Therefore mesh versions have been remapped to new values to allow for conditional import and export changes depending on the mesh version
 
@@ -1989,7 +1988,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 
 				lodGroupHeader.meshGroupList.append(meshGroup)
 			reMesh.lodHeader.lodGroupList.append(lodGroupHeader)
-	print(f"Tangent calculation took {timeFormat%(totalTangentGenerationTime * 1000)} ms.")
+	print(f"Tangent calculation took {formatMs(totalTangentGenerationTime)} ms.")
 	# Shadow Meshes
 
 	if parsedMesh.shadowMeshLinkedLODList != []:

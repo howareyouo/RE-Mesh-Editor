@@ -7,9 +7,6 @@ from io import BytesIO
 from itertools import chain
 from ..gen_functions import *
 
-# from .file_re_mesh import meshFileVersionToNewVersionDict,meshFileVersionToInternalVersionDict,getNearestRemapVersion
-
-timeFormat = "%d"
 # Mesh version numbers do not always increase for newer versions of the file format
 # Therefore mesh versions have been remapped to new values to allow for conditional import and export changes depending on the mesh version
 

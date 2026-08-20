@@ -667,7 +667,6 @@ class MDFFile():
 		#stringTableSize = list(stringOffsetDict.items())[-1][1] + len(list(stringOffsetDict.items())[-1][0])*2 +2
 		#stringTableSize = stringTableSize + getPaddingAmount(stringTableStartOffset+stringTableSize, 16)
 		
-		
 		propDataStartOffset = currentStringOffset# + getPaddingAmount(currentStringOffset, 16)
 		#Not padded
 
@@ -746,7 +745,6 @@ class MDFFile():
 				#print(material.mmtrsData)
 				material.mmtrsData.write(file)
 def readMDF(filepath):
-	#print(textColors.OKCYAN + "__________________________________\nMDF read started." + textColors.ENDC)
 	print("Opening " + filepath)
 	try:  
 		file = open(filepath,"rb")
@@ -761,10 +759,8 @@ def readMDF(filepath):
 	mdfFile.fileVersion = version
 	mdfFile.read(file,version)
 	file.close()
-	#print(textColors.OKGREEN + "__________________________________\nMDF read finished." + textColors.ENDC)
 	return mdfFile
 def readMDFFast(filepath):
-	#print(textColors.OKCYAN + "__________________________________\nMDF read started." + textColors.ENDC)
 	print("Opening " + filepath)
 	try:  
 		file = open(filepath,"rb")
@@ -779,10 +775,8 @@ def readMDFFast(filepath):
 	debugprint("File Version "+str(version))
 	mdfFile.read_fast(file,version)
 	file.close()
-	#print(textColors.OKGREEN + "__________________________________\nMDF read finished." + textColors.ENDC)
 	return mdfFile
 def writeMDF(mdfFile,filepath):
-	#print(textColors.OKCYAN + "__________________________________\nMDF write started." + textColors.ENDC)
 	print("Opening " + filepath)
 	try:
 		file = open(filepath,"wb")
@@ -795,4 +789,3 @@ def writeMDF(mdfFile,filepath):
 		version = 23
 	mdfFile.write(file,version)
 	file.close()
-	#print(textColors.OKGREEN + "__________________________________\nMDF write finished." + textColors.ENDC)

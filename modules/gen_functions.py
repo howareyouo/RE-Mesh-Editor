@@ -3,6 +3,7 @@
 import os
 import struct
 import glob
+import time
 from pathlib import Path
 import platform
 import unicodedata
@@ -387,3 +388,25 @@ def r(text): return _color(text, 31)    # 红色
 def g(text): return _color(text, 32)    # 绿色
 def b(text): return _color(text, 34)    # 蓝色
 def fname(path): return y(os.path.basename(path))
+
+# --- Public timing utilities ---
+
+_timeFormat = "%d"
+
+def formatMs(seconds):
+	"""Convert seconds (float) to a formatted millisecond string, e.g. '318'."""
+	return _timeFormat % (seconds * 1000)
+
+def printElapsed(label, startTime, color=y, suffix=""):
+	"""Print elapsed time since startTime in milliseconds.
+	Args:
+		label: Description of the operation, e.g. 'Mesh build'.
+		startTime: time.time() captured before the operation.
+		color: Color function to highlight the time value (default: y/yellow).
+			 Pass False or None to disable coloring.
+		suffix: Extra text appended after 'ms.', e.g. ' (5 workers, 12 meshes).'.
+	"""
+	ms = formatMs(time.time() - startTime)
+	if color:
+		ms = color(ms)
+	print(f"{label} took {ms} ms.{suffix}")

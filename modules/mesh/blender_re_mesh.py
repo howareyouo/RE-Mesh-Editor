@@ -22,7 +22,7 @@ from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
-from ..gen_functions import splitNativesPath, raiseWarning, y
+from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs
 from ..blender_utils import showErrorMessageBox, showMessageBox
 from ..hashing.mmh3.pymmh3 import hashUTF8
 import time
@@ -30,7 +30,6 @@ import numpy as np
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-timeFormat = "%d"
 rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
 rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
 
@@ -625,6 +624,12 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 # differs from the original on re-export. Reused meshes, blend shapes, extra
 # weights and DD2 secondary weights are never merged (they keep the safe path).
 MERGE_SAME_MATERIAL_SUBMESHES = True
+# A merged mesh must not exceed the RE standard 16-bit index vertex limit (65536),
+# otherwise re-export warns "exceeded the standard limit ... Enabling extended
+# vertex limit". When a bucket's cumulative vertex count would exceed this, the
+# bucket is split into multiple merged meshes. Kept below 65536 to leave headroom
+# for export-time solveRepeatedUVs, which can add vertices by splitting UVs.
+MERGE_VERTEX_LIMIT = 60000
 
 
 def _subMeshMergeProfile(subMesh):
@@ -757,7 +762,12 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 			if MERGE_SAME_MATERIAL_SUBMESHES and not parsedMesh.isMPLY:
 				# Pre-pass: bucket mergeable same-material submeshes and build each
 				# bucket as ONE larger mesh (fewer Blender builds = faster import).
-				mergeBuckets = {}
+				# Buckets are vertex-capped: once adding a submesh would push the
+				# cumulative vertex count past MERGE_VERTEX_LIMIT, the bucket is
+				# closed and a new one is started, so no merged mesh can exceed
+				# the RE 16-bit index limit. A bucket with a single member is not
+				# merged (imported individually like before).
+				mergeBuckets = {}  # (materialName, profile) -> list of (bucket, vert_count)
 				for subMesh in visconGroup.subMeshList:
 					if subMesh.isReusedMesh:
 						continue
@@ -765,19 +775,31 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 					if profile is None or subMesh.meshVertexOffset in reuseSourceOffsets:
 						continue
 					materialName = parsedMesh.materialNameList[subMesh.materialIndex]
-					mergeBuckets.setdefault((materialName, profile), []).append(subMesh)
-				for (materialName, _), mergeList in mergeBuckets.items():
-					if len(mergeList) < 2:
-						continue
-					meshObj = _importMergedSubMeshes(
-						mergeList, materialName, LODNum, visconGroup.visconGroupNum,
-						boneNameList, materialDict, armatureObj, lodCollection, rotate90)
-					if mergeGroups:
-						objMergeList.append(meshObj)
-					totalMergedSubMeshes += len(mergeList)
-					totalMergedMeshes += 1
-					for subMesh in mergeList:
-						mergedSubMeshIDs.add(id(subMesh))
+					key = (materialName, profile)
+					vcount = len(subMesh.vertexPosList)
+					buckets = mergeBuckets.get(key)
+					if buckets is None:
+						mergeBuckets[key] = [([subMesh], vcount)]
+					else:
+						lastBucket, lastCount = buckets[-1]
+						if lastCount + vcount <= MERGE_VERTEX_LIMIT:
+							lastBucket.append(subMesh)
+							buckets[-1] = (lastBucket, lastCount + vcount)
+						else:
+							buckets.append(([subMesh], vcount))
+				for (materialName, _), bucketList in mergeBuckets.items():
+					for mergeList, _ in bucketList:
+						if len(mergeList) < 2:
+							continue
+						meshObj = _importMergedSubMeshes(
+							mergeList, materialName, LODNum, visconGroup.visconGroupNum,
+							boneNameList, materialDict, armatureObj, lodCollection, rotate90)
+						if mergeGroups:
+							objMergeList.append(meshObj)
+						totalMergedSubMeshes += len(mergeList)
+						totalMergedMeshes += 1
+						for subMesh in mergeList:
+							mergedSubMeshIDs.add(id(subMesh))
 			for subMesh in visconGroup.subMeshList:
 				if id(subMesh) in mergedSubMeshIDs:
 					continue
@@ -979,9 +1001,7 @@ def importREMeshFile(filePath, options):
 	meshParseStartTime = time.time()
 	parsedMesh = ParsedREMesh()
 	parsedMesh.ParseREMesh(reMesh)
-	meshParseEndTime = time.time()
-	meshParseTime = meshParseEndTime - meshParseStartTime
-	print(f"Mesh parsing took {y(timeFormat % (meshParseTime * 1000))} ms.")
+	printElapsed("Mesh parsing", meshParseStartTime)
 	armatureObj = None
 	parentCollection = None  # Collection for grouping mesh and mdf
 	if options["createCollections"]:
@@ -1018,10 +1038,10 @@ def importREMeshFile(filePath, options):
 		               hiddenCollectionSet, meshOffsetDict, options["importAllLODs"],
 		               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
 		               options["mergeGroups"], options["importBoundingBoxes"])
-		print(f"Mesh build took {timeFormat % ((time.time() - meshBuildStartTime) * 1000)} ms.")
+		printElapsed("Mesh build", meshBuildStartTime)
 		if _IMPORT_PHASES:
 			phaseStr = ", ".join(f"{name} {sec * 1000:.0f}ms" for name, sec in sorted(_IMPORT_PHASES.items()))
-			print(f"  importMesh phases: {phaseStr}")
+			print(f"Mesh import phases: {phaseStr}")
 			_phase_reset()
 	# print("DEBUG: Finished importing main mesh")
 	"""
@@ -1074,7 +1094,7 @@ def importREMeshFile(filePath, options):
 
 					mdfImportEndTime = time.time()
 					mdfImportTime = mdfImportEndTime - mdfImportStartTime
-					print(f"Material importing took {timeFormat % (mdfImportTime * 1000)} ms.")
+					printElapsed("Material importing", mdfImportStartTime)
 			else:
 				warningList.append("MDF file not found.")
 		except Exception as err:
@@ -1114,7 +1134,7 @@ def importREMeshFile(filePath, options):
 
 	meshImportEndTime = time.time()
 	meshImportTime = meshImportEndTime - meshImportStartTime
-	print(f"Mesh imported in {y(timeFormat % (meshImportTime * 1000))} ms.")
+	print(f"Mesh imported in {y(formatMs(meshImportTime))} ms.")
 	print("\033[92m__________________________________\nRE Mesh import finished.\033[0m")
 	return (warningList, errorList)
 
@@ -1760,7 +1780,7 @@ def exportREMeshFile(filePath, options):
 					uvRemapDict.update(remaps)
 			except Exception as err:
 				raiseWarning(f"Failed to solve repeated UVs. {str(err)}")
-			print(f"Solve repeated UVs took {timeFormat % ((time.time() - uvSolveStart) * 1000)} ms ({len(doubledUVList)} meshes).")
+			printElapsed("Solve repeated UVs", uvSolveStart, suffix=f" ({len(doubledUVList)} meshes).")
 
 			"""
 			if hasattr(bpy.types, "OBJECT_PT_re_tools_quick_export_panel"):#RE Toolbox installed
@@ -1990,7 +2010,7 @@ def exportREMeshFile(filePath, options):
 				for res in results:
 					_mergeSubMeshResult(res)
 			print(
-				f"  Parallel submesh extraction took {timeFormat % ((time.time() - gatherStart) * 1000)} ms ({workers} workers, {len(subMeshTasks)} meshes).")
+				f"  Parallel submesh extraction took {formatMs(time.time() - gatherStart)} ms ({workers} workers, {len(subMeshTasks)} meshes).")
 
 			# End submesh
 			parsedLODLevel.visconGroupList.append(visconGroup)
@@ -2061,7 +2081,7 @@ def exportREMeshFile(filePath, options):
 	meshDataEndTime = time.time()
 	meshDataExportTime = meshDataEndTime - meshDataStartTime
 
-	print(f"Gathering mesh data took {timeFormat % (meshDataExportTime * 1000)} ms.")
+	printElapsed("Gathering mesh data", meshDataStartTime)
 
 	# TODO Calculate bounding boxes
 
@@ -2069,7 +2089,7 @@ def exportREMeshFile(filePath, options):
 	# Get weights for meshes and calculate bone bounding boxes
 	weightStartTime = time.time()
 	if armatureObj:
-		print(f"Generating bone remap dictionary took {timeFormat % (boneRemapTime * 1000)} ms.")
+		printElapsed("Generating bone remap dictionary", boneRemapStartTime)
 		boneBBoxDict = dict()
 		for boneName in parsedMesh.skeleton.weightedBones:
 			bonePos = transform @ armatureObj.data.bones[boneName].head_local
@@ -2108,7 +2128,7 @@ def exportREMeshFile(filePath, options):
 					bone.boundingBox.max.z = boneBBoxDict[bone.boneName]["max"][2]
 		weightEndTime = time.time()
 		weightExportTime = weightEndTime - weightStartTime
-		print(f"Building bone bounding boxes took {timeFormat % (weightExportTime * 1000)} ms.")
+		printElapsed("Building bone bounding boxes", weightStartTime)
 
 	# Generate mesh bounding box and bounding sphere from lowest quality LOD level
 	meshBBoxStartTime = time.time()
@@ -2139,7 +2159,7 @@ def exportREMeshFile(filePath, options):
 			parsedMesh.boundingBox.max.z = maxVec[2]
 	meshBBoxEndTime = time.time()
 	meshBBoxTime = meshBBoxEndTime - meshBBoxStartTime
-	print(f"Calculating mesh bounding sphere and bounding box took {timeFormat % (meshBBoxTime * 1000)} ms.")
+	printElapsed("Calculating mesh bounding sphere and bounding box", meshBBoxStartTime)
 
 	if parsedMesh.skeleton and parsedMesh.skeleton.weightedBones and len(
 			parsedMesh.skeleton.weightedBones) > maxWeightedBones:
@@ -2191,7 +2211,7 @@ def exportREMeshFile(filePath, options):
 	writeREMesh(reMesh, filePath)
 	meshWriteEndTime = time.time()
 	meshWriteExportTime = meshWriteEndTime - meshWriteStartTime
-	print(f"Converting to RE Mesh took {timeFormat % (meshWriteExportTime * 1000)} ms.")
+	printElapsed("Converting to RE Mesh", meshWriteStartTime)
 	vertexBufferString = ""
 	if parsedMesh.bufferHasPosition:
 		vertexBufferString += "[Position] "
@@ -2213,7 +2233,7 @@ def exportREMeshFile(filePath, options):
 
 	meshExportEndTime = time.time()
 	meshExportTime = meshExportEndTime - meshExportStartTime
-	print(f"Mesh export finished in {y(timeFormat % (meshExportTime * 1000))} ms.")
+	print(f"Mesh export finished in {y(formatMs(meshExportTime))} ms.")
 
 	print("\nMesh Info:")
 	print(f"Mesh Count: {str(subMeshCount)}")
