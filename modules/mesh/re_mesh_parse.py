@@ -19,15 +19,6 @@ SIX_WEIGHT_MESH_VERSIONS = frozenset([
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
                    "ExtraWeight"]
-typeStrideDict = {
-	"Position": 12,
-	"NorTan": 8,
-	"UV": 4,
-	"UV2": 4,
-	"Weight": 16,
-	"Color": 4,
-	"ExtraWeight": 16,
-}
 
 blendShapeNameMapping = ["BlendShapeByte", "BlendShapeShort"]
 blendShapeStrideDict = {

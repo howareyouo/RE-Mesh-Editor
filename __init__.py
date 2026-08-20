@@ -18,9 +18,8 @@ import os
 from bpy_extras.io_utils import ExportHelper,ImportHelper
 from bpy.props import StringProperty, BoolProperty,IntProperty, EnumProperty, CollectionProperty,PointerProperty
 from bpy.types import Operator, OperatorFileListElement,AddonPreferences
-from rna_prop_ui import PropertyPanel
 from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder,parseFileVersion
-from .modules.blender_utils import operator_exists, printEditorHeader
+from .modules.blender_utils import printEditorHeader
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .modules.mesh.blender_re_mesh import importREMeshFile,exportREMeshFile
@@ -1454,28 +1453,6 @@ if bpy.app.version >= (4, 1, 0):
 	SFUR_FH_drag_import = make_file_handler(
 		"SFUR_FH_drag_import", "File handler for RE SFur importing",
 		"re_sfur.importfile", sfurExtensionsString)
-class GU_PT_collection_custom_properties(bpy.types.Panel, PropertyPanel): #For adding custom properties to collections, fixed on 3.3 and up so not needed there
-    _context_path = "collection"
-    _property_type = bpy.types.Collection
-    bl_label = "Custom Properties"
-    bl_idname = "GU_PT_collection_custom_properties"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "collection"
-
-"""	
-def re_mesh_import(self, context):
-	self.layout.operator(ImportREMesh.bl_idname, text="RE Mesh (.mesh.x)")
-	
-def re_mesh_export(self, context):
-	self.layout.operator(ExportREMesh.bl_idname, text="RE Mesh (.mesh.x)")
-
-def re_mdf_import(self, context):
-	self.layout.operator(ImportREMDF.bl_idname, text="RE MDF (.mdf2.x)")
-	
-def re_mdf_export(self, context):
-	self.layout.operator(ExportREMDF.bl_idname, text="RE MDF (.mdf2.x)")
-"""
 
 class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
     bl_label = "RE Mesh Editor"
@@ -1515,9 +1492,6 @@ def register():
 	bpy.utils.register_class(IMPORT_MT_re_mesh_editor)
 	bpy.utils.register_class(EXPORT_MT_re_mesh_editor)
 	
-	if (3, 3, 0) > bpy.app.version:
-		bpy.utils.register_class(GU_PT_collection_custom_properties)
-	
 	
 	#REGISTER PROPERTY GROUP PROPERTIES
 	bpy.types.WindowManager.enableModFileTracking = bpy.props.BoolProperty(default=False)
@@ -1526,11 +1500,6 @@ def register():
 	bpy.types.Object.re_mdf_material = PointerProperty(type=MDFMaterialPropertyGroup)
 	bpy.types.Object.re_sfur_data = PointerProperty(type=SFurEntryPropertyGroup)
 	bpy.types.WindowManager.re_mdf_findreplace = PointerProperty(type=FindReplacePropertyGroup)
-	
-	#bpy.types.TOPBAR_MT_file_import.append(re_mesh_import)
-	#bpy.types.TOPBAR_MT_file_export.append(re_mesh_export)
-	#bpy.types.TOPBAR_MT_file_import.append(re_mdf_import)
-	#bpy.types.TOPBAR_MT_file_export.append(re_mdf_export)
 	bpy.types.TOPBAR_MT_file_import.append(re_mesh_editor_import)
 	bpy.types.TOPBAR_MT_file_export.append(re_mesh_editor_export)
 
@@ -1553,13 +1522,7 @@ def unregister():
 	bpy.utils.unregister_class(IMPORT_MT_re_mesh_editor)
 	bpy.utils.unregister_class(EXPORT_MT_re_mesh_editor)
 	
-	if (3, 3, 0) > bpy.app.version:
-		bpy.utils.unregister_class(GU_PT_collection_custom_properties)
-		
-	#bpy.types.TOPBAR_MT_file_import.remove(re_mesh_import)
-	#bpy.types.TOPBAR_MT_file_export.remove(re_mesh_export)
-	#bpy.types.TOPBAR_MT_file_import.remove(re_mdf_import)
-	#bpy.types.TOPBAR_MT_file_export.remove(re_mdf_export)
+	
 	bpy.types.TOPBAR_MT_file_import.remove(re_mesh_editor_import)
 	bpy.types.TOPBAR_MT_file_export.remove(re_mesh_editor_export)
 	

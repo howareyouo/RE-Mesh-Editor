@@ -1,17 +1,9 @@
 import bpy
 
 from bpy.types import (Panel, Menu, Operator, PropertyGroup)
+from ..blender_utils import tag_redraw
 
 
-def tag_redraw(context, space_type="PROPERTIES", region_type="WINDOW"):
-	for window in context.window_manager.windows:
-		for area in window.screen.areas:
-			if area.spaces[0].type == space_type:
-				for region in area.regions:
-					if region.type == region_type:
-						region.tag_redraw()
-
-		
 class OBJECT_PT_SFurObjectModePanel(Panel):
 	bl_label = "RE SFur Tools"
 	bl_idname = "OBJECT_PT_sfur_tools_panel"
@@ -20,7 +12,7 @@ class OBJECT_PT_SFurObjectModePanel(Panel):
 	bl_category = "RE Mesh"   
 	bl_context = "objectmode"
 	bl_options = {'DEFAULT_CLOSED'}
-	# bl_order = 3
+	bl_order = 3
 	
 	@classmethod
 	def poll(self,context):

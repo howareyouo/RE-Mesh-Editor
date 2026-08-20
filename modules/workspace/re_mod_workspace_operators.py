@@ -83,14 +83,6 @@ def getAssetLibDir(gameName):
 				print(os.path.join(libDir,f"GameInfo_{gameName}.json") + " is missing.")
 	return None
 
-def verifyAssetLib(gameName):
-	libDir = getAssetLibDir(gameName)
-	if libDir != None:
-		extractInfoPath = os.path.join(libDir,f"ExtractInfo_{gameName}.json")
-		if os.path.isfile(extractInfoPath):
-			return True
-	return False
-
 def getAssetLibEXEPath(gameName):
 	libDir = getAssetLibDir(gameName)
 	exePath = None

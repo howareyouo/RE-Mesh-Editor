@@ -12,9 +12,8 @@
 import bpy
 import bmesh
 import os
-from math import radians, floor, sqrt
+from math import sqrt
 from mathutils import Vector, Matrix
-from itertools import chain, repeat, islice
 from .file_re_mesh import readREMesh, writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow
@@ -38,33 +37,6 @@ def triangulateMesh(mesh):
 	bmesh.ops.triangulate(bm, faces=bm.faces[:])
 	bm.to_mesh(mesh)
 	bm.free()
-
-
-# if custom_normals:
-# mesh.normals_split_custom_set_from_vertices(custom_normals)
-
-def pad_infinite(iterable, padding=None):
-	return chain(iterable, repeat(padding))
-
-
-def pad(iterable, size, padding=None):
-	return islice(pad_infinite(iterable, padding), size)
-
-
-def normalize(lst):
-	s = sum(lst)
-	if s != 0.0:
-		return list(map(lambda x: float(x) / s, lst))
-	else:
-		return lst
-
-
-def normalizeVec(vec):
-	return Vector(vec).normalized()
-
-
-def dist(a, b) -> float:
-	return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
 
 
 def bounding_sphere_ritter(points):
@@ -123,22 +95,6 @@ def bounding_sphere_ritter(points):
 		remaining = still_outside
 
 	return (float(center[0]), float(center[1]), float(center[2])), float(radius)
-
-
-def vertexPosToGlobal(local_coords, world_matrix):
-	# Reshape coords to Nx3 matrix
-	local_coords.shape = (-1, 3)
-
-	# Add an extra 1.0s column (for matrix dot product)
-	local_coords = np.c_[local_coords, np.ones(local_coords.shape[0])]
-
-	# Then:
-	# Dot product matrix with the coords transpose
-	# Keep the first 3 rows (x,y,z)
-	# Transpose result to Nx3
-	# Flatten
-	global_coords = np.dot(world_matrix, local_coords.T)[0:3].T.reshape((-1))
-	return np.reshape(global_coords, (-1, 3))
 
 
 def joinObjects(objList):

@@ -10,14 +10,6 @@ from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
 
 from .blender_re_mdf import boolPropertySet,colorPropertySet
-def findHeaderObj():
-	if bpy.data.collections.get("MDFData",None) != None:
-		objList = bpy.data.collections["MDFData"].all_objects
-		headerList = [obj for obj in objList if obj.get("~TYPE",None) == "RE_MDF_HEADER"]
-		if len(headerList) >= 1:
-			return headerList[0]
-		else:
-			return None
 
 PRESET_VERSION = 5#To be changed when there are changes to material variables
 PRESET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")

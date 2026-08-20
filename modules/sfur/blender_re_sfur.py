@@ -3,17 +3,9 @@ import bpy
 import glob
 from mathutils import Vector,Quaternion,Matrix
 from math import radians
-from ..blender_utils import showMessageBox,createRECollection,setAssetPathFromFilePath
+from ..blender_utils import showMessageBox,createRECollection,setAssetPathFromFilePath,checkNameUsage
 from ..gen_functions import textColors,raiseWarning,splitNativesPath,parseFileVersion
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
-
-def checkNameUsage(baseName,checkSubString = True, objList = None):
-	if objList == None:
-		objList = bpy.data.objects
-	if checkSubString:
-		return any(baseName in name for name in [obj.name for obj in objList])
-	else:
-		return baseName in [obj.name for obj in objList]
 
 def createSFurCollection(collectionName,parentCollection = None):
 	collection = createRECollection(

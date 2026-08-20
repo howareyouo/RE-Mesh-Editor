@@ -19,16 +19,10 @@ RGBChannel = re.compile("([RGBAX])([0-9]+)")
 #Texture packets in dds by standard are 16 bytes long
 packetSize = 16
 
+_BC_BPP = {"BC1": 8, "BC2": 16, "BC3": 16, "BC4": 8, "BC5": 16, "BC6H": 16, "BC7": 16}
+
 def getBCBPP(BC):
-    BC = BC.upper()
-    #print("FE: "+BC)
-    if "BC1" in BC: return 8
-    if "BC2" in BC: return 16
-    if "BC3" in BC: return 16
-    if "BC4" in BC: return 8
-    if "BC5" in BC: return 16
-    if "BC6H" in BC: return 16
-    if "BC7" in BC: return 16
+    return _BC_BPP.get(BC.upper())
 
 def decomposeRGBFormat(rgb):
     channels = []

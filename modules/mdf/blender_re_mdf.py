@@ -1,7 +1,7 @@
 import os
 import bpy
 
-from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection,setAssetPathFromFilePath,createEmpty
+from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection,setAssetPathFromFilePath,createEmpty,checkNameUsage
 from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .ui_re_mdf_panels import tag_redraw
@@ -104,28 +104,8 @@ matShaderTypeEnum = {
 	"PrimitiveSolidMaterial" : 0x12,
 	"SpineMaterial" : 0x13,
 	"Max" : 0x14,
-	0x0 : "Standard",
-	0x1 : "Decal",
-	0x2 : "DecalWithMetallic",
-	0x3 : "DecalNRMR",
-	0x4 : "Transparent",
-	0x5 : "Distortion",
-	0x6 : "PrimitiveMesh",
-	0x7 : "PrimitiveSolidMesh",
-	0x8 : "Water",
-	0x9 : "SpeedTree",
-	0xA : "GUI",
-	0xB : "GUIMesh",
-	0xC : "GUIMeshTransparent",
-	0xD : "ExpensiveTransparent",
-	0xE : "Forward",
-	0xF : "RenderTarget",
-	0x10 : "PostProcess",
-	0x11 : "PrimitiveMaterial",
-	0x12 : "PrimitiveSolidMaterial",
-	0x13 : "SpineMaterial",
-	0x14 : "Max",
-	}
+}
+matShaderTypeEnum.update({v: k for k, v in matShaderTypeEnum.items()})
 
 
 def findHeaderObj():
@@ -142,14 +122,6 @@ def createMDFCollection(collectionName,parentCollection = None):
 		color_tag="COLOR_05", customProps={"~TYPE": "RE_MDF_COLLECTION"})
 	bpy.context.scene.re_mdf_toolpanel.mdfCollection = collection
 	return collection
-
-def checkNameUsage(baseName,checkSubString = True, objList = None):
-	if objList == None:
-		objList = bpy.data.objects
-	if checkSubString:
-		return any(baseName in name for name in [obj.name for obj in objList])
-	else:
-		return baseName in [obj.name for obj in objList]
 
 
 def addPropsToPropList(obj,matPropertyList):
