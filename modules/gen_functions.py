@@ -156,10 +156,27 @@ def setBit(bitFlag, index):
 def unsetBit(bitFlag, index):
     return bitFlag & ~(1 << index)
 def raiseError(error,errorCode = 999):
-    try:
-        raise Exception()
-    except Exception:
-        print(textColors.FAIL + "ERROR: " + error + textColors.ENDC)
+	"""Print a colored error message and abort by raising.
+
+	Callers rely on this stopping execution (e.g. failed file opens must not
+	fall through to using an unbound file object), so it always raises.
+	"""
+	print(textColors.FAIL + "ERROR: " + error + textColors.ENDC)
+	raise Exception(error)
+
+def openFileRead(filepath, buffering=-1):
+	"""Open a binary file for reading; raise a descriptive error on failure."""
+	try:
+		return open(filepath, "rb", buffering=buffering)
+	except OSError as err:
+		raise Exception("Failed to open " + filepath + " for reading: " + str(err))
+
+def openFileWrite(filepath, buffering=-1):
+	"""Open a binary file for writing; raise a descriptive error on failure."""
+	try:
+		return open(filepath, "wb", buffering=buffering)
+	except OSError as err:
+		raise Exception("Failed to open " + filepath + " for writing: " + str(err))
 def raiseWarning(warning):
      print(textColors.WARNING + "WARNING: " + warning + textColors.ENDC)
 def getPaddedPos(currentPos,alignment):

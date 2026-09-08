@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import raiseError,read_uint,write_uint
+from ..gen_functions import raiseError,openFileRead,openFileWrite,read_uint,write_uint
 
 
 class DX10_Header():
@@ -135,29 +135,17 @@ class DDSFile:
 		self.dds = DDS()
 	def read(self,filePath):
 		#print("Opening " + filePath)
-		try:  
-			file = open(filePath,"rb")
-		except:
-			raiseError("Failed to open " + filePath)
-		self.dds.read(file)
-		file.close()
-			
+		with openFileRead(filePath) as file:
+			self.dds.read(file)
+
 	def write(self,filePath):
 		os.makedirs(os.path.dirname(filePath),exist_ok = True)
 		print("Writing " + filePath)
-		try:  
-			file = open(filePath,"wb")
+		with openFileWrite(filePath) as file:
 			self.dds.write(file)
-		except Exception as err:
-			raiseError("Failed to write " + filePath + str(err))
-		file.close()
 
 def getDDSHeader(ddsPath):
-	try:  
-		file = open(ddsPath,"rb")
-	except Exception as err:
-		raiseError("Failed to open " + ddsPath + str(err))
-	header = DDSHeader()
-	header.read(file)
-	file.close()
+	with openFileRead(ddsPath) as file:
+		header = DDSHeader()
+		header.read(file)
 	return header
