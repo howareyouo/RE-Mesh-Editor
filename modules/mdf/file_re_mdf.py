@@ -52,7 +52,7 @@ class SIZEDATA():
 		self.GPBF_ENTRY_SIZE = 16
 		
 		if version < 13:
-			TEXTURE_ENTRY_SIZE = 24
+			self.TEXTURE_ENTRY_SIZE = 24
 		if version < 19:
 			self.MATERIAL_ENTRY_SIZE = 64
 		if version >= 31:
@@ -435,7 +435,7 @@ class Material():
 		self.textureList = []
 		for i in range(0,self.textureCount):
 			textureEntry = TextureBinding()
-			textureEntry.read(file)
+			textureEntry.read(file,version)
 			debugprint(textureEntry)
 			self.textureList.append(textureEntry)
 		"""

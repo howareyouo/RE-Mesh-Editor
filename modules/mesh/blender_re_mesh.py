@@ -870,7 +870,7 @@ def resolveMeshGameNameConflict(gameName, filePath):
 			realGameName = "RE2RT"
 	if realGameName == None:
 		realGameName = gameName
-	return gameName
+	return realGameName
 
 
 # ---RE MESH IO FUNCTIONS---#

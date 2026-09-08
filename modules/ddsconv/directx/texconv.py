@@ -132,7 +132,7 @@ class Texconv:
                 args += ['-f', 'rgba']
 
         if dds_header.is_signed():
-            args += '-x2bias'
+            args += ['-x2bias']
 
         if dds_header.is_int():
             msg = f'Int format detected. ({dds_header.get_format_as_str()})\n It might not be converted correctly.'

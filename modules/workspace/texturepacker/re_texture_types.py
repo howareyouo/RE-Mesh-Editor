@@ -300,9 +300,9 @@ def packSCOT(textureSetName,imageXRes,imageYRes,outImageName):
     aoImage.scale(imageXRes,imageYRes)
     aoImage.pixels.foreach_get(aoArray)
     outPixelArray = np.empty(shape = imageXRes*imageYRes*4, dtype=np.float32)
-    outPixelArray[0::4] = 1.0
-    outPixelArray[1::4] = 1.0
     outPixelArray[0::4] = aoArray[0::4]
+    outPixelArray[1::4] = 1.0
+    outPixelArray[2::4] = 1.0
     outPixelArray[3::4] = 0.0
     
     
