@@ -291,14 +291,14 @@ def rescale_blend_deltas(deltas, aabb_min, aabb_max):
 
 
 def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, usedVertexOffsetDictList,
-                      blendShapeBuffer=None):
+                      blendShapeBuffer=None, parseBlendShapes=True):
 	lodList = []
 	currentBlendShapeOffset = 0
 	blendShapeDict = {}
 	for lodIndex, lodGroup in enumerate(targetLODList):
 
 		# BLEND SHAPES - LOD level
-		if reMesh.blendShapeHeader != None and len(reMesh.blendShapeHeader.blendShapeList) > lodIndex:
+		if parseBlendShapes and reMesh.blendShapeHeader != None and len(reMesh.blendShapeHeader.blendShapeList) > lodIndex:
 			blendShapeLODData = reMesh.blendShapeHeader.blendShapeList[lodIndex]
 		else:
 			blendShapeLODData = None
@@ -377,7 +377,7 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 			lastSubmeshIndex = len(visconGroup.vertexInfoList) - 1
 
 			# Precompute common references outside the loop
-			has32BitIndex = reMesh.lodHeader.has32BitIndexBuffer
+			has32BitIndex = reMesh.lodHeader.has32BitIndexBuffer if reMesh.lodHeader != None else False
 			faceBuffer = faceBufferList[
 				visconGroup.vertexInfoList[0].vertexBufferIndex] if visconGroup.vertexInfoList else None
 			indexMultiplier = 4 if has32BitIndex else 2
@@ -639,7 +639,11 @@ class ParsedREMesh:
 					print("ERROR: Shadow mesh has unique lod offsets, cannot import")
 		# self.shadowMeshLODList = parseLODStructure(reMesh,reMesh.shadowHeader.lodGroupList,vertexDict,usedVertexOffsetDict)
 
-		# TODO Add occlusion mesh
+		# Occlusion meshes have their own LOD group header with groups referencing the shared vertex/face buffers
+		if reMesh.occlusionHeader != None and len(vertexDictList) != 0:
+			self.occlusionMeshLODList = parseLODStructure(reMesh, [reMesh.occlusionHeader], vertexDictList,
+			                                              faceBufferList, usedVertexOffsetDictList,
+			                                              parseBlendShapes=False)
 
 		if self.isMPLY:
 

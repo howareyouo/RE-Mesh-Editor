@@ -1514,7 +1514,7 @@ class REMesh():
 			self.shadowHeader = ShadowHeader()
 			self.shadowHeader.read(file, version)
 
-		if self.fileHeader.occlusionMeshGroupOffset and lodTarget == None:
+		if self.fileHeader.occlusionMeshGroupOffset:  # Occlusion header is small, always read it regardless of lodTarget
 			file.seek(self.fileHeader.occlusionMeshGroupOffset)
 			self.occlusionHeader = LODGroupHeader()
 			self.occlusionHeader.read(file, version)

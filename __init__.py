@@ -612,7 +612,7 @@ class ImportREMesh(Operator, ImportHelper):
 			column2.prop(self, "rotate90")
 			column2.prop(self, "importBoundingBoxes")
 			column2.prop(self, "hideArmature")
-			#column2.prop(self, "importOcclusionMeshes")  
+			column2.prop(self, "importOcclusionMeshes")
 		
 	def execute(self, context):
 		try:

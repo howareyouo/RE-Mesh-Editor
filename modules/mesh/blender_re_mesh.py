@@ -634,6 +634,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 		targetLODList = parsedMesh.shadowMeshLODList
 	elif meshType == "Occlusion Mesh":
 		shortName = "Occlusion"
+		targetLODList = parsedMesh.occlusionMeshLODList
 	firstLOD = True
 
 	if parsedMesh.skeleton != None:
@@ -953,6 +954,13 @@ def importREMeshFile(filePath, options):
 		               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
 		               options["mergeGroups"], options["importBoundingBoxes"])
 		printElapsed("Mesh build", meshBuildStartTime)
+		if options["importOcclusionMeshes"] and parsedMesh.occlusionMeshLODList != []:
+			occlusionBuildStartTime = time.time()
+			importLODGroup(parsedMesh, "Occlusion Mesh", meshCollection, materialDict, armatureObj,
+			               hiddenCollectionSet, meshOffsetDict, options["importAllLODs"],
+			               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
+			               options["mergeGroups"], options["importBoundingBoxes"])
+			printElapsed("Occlusion mesh build", occlusionBuildStartTime)
 		if _IMPORT_PHASES:
 			phaseStr = ", ".join(f"{name} {sec * 1000:.0f}ms" for name, sec in sorted(_IMPORT_PHASES.items()))
 			print(f"Mesh import phases: {phaseStr}")
