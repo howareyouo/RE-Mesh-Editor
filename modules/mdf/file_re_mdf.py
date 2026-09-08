@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,getStringTableOffset,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 import ctypes
 
@@ -579,56 +579,32 @@ class MDFFile():
 			self.stringList.append(material.materialName)
 			currentStringOffset += len(material.materialName)*2+2
 			
-			if mmtrPathOffsetDict.get(material.mmtrPath,None) != None:
-				material.mmtrPathOffset = mmtrPathOffsetDict[material.mmtrPath]
-				self.stringList.append(material.mmtrPath)
-				currentStringOffset += len(material.mmtrPath)*2+2
-			else:
-				material.mmtrPathOffset = currentStringOffset
-				mmtrPathOffsetDict[material.mmtrPath] = currentStringOffset
-				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-				self.stringList.append(material.mmtrPath)
-				currentStringOffset += len(material.mmtrPath)*2+2
+			material.mmtrPathOffset = getStringTableOffset(mmtrPathOffsetDict,material.mmtrPath,currentStringOffset)
+			#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+			self.stringList.append(material.mmtrPath)
+			currentStringOffset += len(material.mmtrPath)*2+2
 		#Get texture types and paths next
 		textureOffsetDict = {}#Property names have to share offsets or the game will crash
 		
 		for material in self.materialList:
 			for texture in material.textureList:
-				if textureOffsetDict.get(texture.textureType,None) != None:
-					texture.textureTypeOffset = textureOffsetDict[texture.textureType]
-					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-					self.stringList.append(texture.textureType)
-					currentStringOffset += len(texture.textureType)*2+2
-				else:
-					textureOffsetDict[texture.textureType] = currentStringOffset
-					texture.textureTypeOffset = currentStringOffset
-					self.stringList.append(texture.textureType)
-					currentStringOffset += len(texture.textureType)*2+2
+				texture.textureTypeOffset = getStringTableOffset(textureOffsetDict,texture.textureType,currentStringOffset)
+				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+				self.stringList.append(texture.textureType)
+				currentStringOffset += len(texture.textureType)*2+2
 				
-				if textureOffsetDict.get(texture.texturePath,None) != None:
-					texture.texturePathOffset = textureOffsetDict[texture.texturePath]
-					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-					self.stringList.append(texture.texturePath)
-					currentStringOffset += len(texture.texturePath)*2+2
-				else:
-					textureOffsetDict[texture.texturePath] = currentStringOffset
-					texture.texturePathOffset = currentStringOffset
-					self.stringList.append(texture.texturePath)
-					currentStringOffset += len(texture.texturePath)*2+2
+				texture.texturePathOffset = getStringTableOffset(textureOffsetDict,texture.texturePath,currentStringOffset)
+				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+				self.stringList.append(texture.texturePath)
+				currentStringOffset += len(texture.texturePath)*2+2
 		#Lastly get property names
 		propNameOffsetDict = {}#Property names have to share offsets or the game will crash
 		for material in self.materialList:
 			for prop in material.propertyList:
-				if propNameOffsetDict.get(prop.propName,None) != None:
-					prop.propNameOffset = propNameOffsetDict[prop.propName]
-					self.stringList.append(prop.propName)
-					currentStringOffset += len(prop.propName)*2+2
-				else:
-					prop.propNameOffset = currentStringOffset
-					propNameOffsetDict[prop.propName] = currentStringOffset
-					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-					self.stringList.append(prop.propName)
-					currentStringOffset += len(prop.propName)*2+2
+				prop.propNameOffset = getStringTableOffset(propNameOffsetDict,prop.propName,currentStringOffset)
+				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+				self.stringList.append(prop.propName)
+				currentStringOffset += len(prop.propName)*2+2
 		if gpbfEntriesSize != 0:
 			gpbfNameOffsetDict = {}
 			for material in self.materialList:
@@ -639,29 +615,17 @@ class MDFFile():
 				for index, entry in enumerate(material.gpbfBufferNameList):
 					entry.nameUTF16Hash = hashUTF16(entry.name)
 					entry.nameUTF8Hash = hashUTF8(entry.name)
-					if gpbfNameOffsetDict.get(entry.name,None) != None:
-						entry.nameOffset = gpbfNameOffsetDict[entry.name]
-						#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-						self.stringList.append(entry.name)
-						currentStringOffset += len(entry.name)*2+2
-					else:
-						entry.nameOffset = currentStringOffset
-						gpbfNameOffsetDict[entry.name] = currentStringOffset
-						self.stringList.append(entry.name)
-						currentStringOffset += len(entry.name)*2+2
+					entry.nameOffset = getStringTableOffset(gpbfNameOffsetDict,entry.name,currentStringOffset)
+					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+					self.stringList.append(entry.name)
+					currentStringOffset += len(entry.name)*2+2
 					
 					pathEntry = material.gpbfBufferPathList[index]
 					
-					if gpbfNameOffsetDict.get(pathEntry.name,None) != None:
-						pathEntry.nameOffset = gpbfNameOffsetDict[pathEntry.name]
-						#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-						self.stringList.append(pathEntry.name)
-						currentStringOffset += len(pathEntry.name)*2+2
-					else:
-						pathEntry.nameOffset = currentStringOffset
-						gpbfNameOffsetDict[pathEntry.name] = currentStringOffset
-						self.stringList.append(pathEntry.name)
-						currentStringOffset += len(pathEntry.name)*2+2
+					pathEntry.nameOffset = getStringTableOffset(gpbfNameOffsetDict,pathEntry.name,currentStringOffset)
+					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
+					self.stringList.append(pathEntry.name)
+					currentStringOffset += len(pathEntry.name)*2+2
 
 					
 		#stringTableSize = list(stringOffsetDict.items())[-1][1] + len(list(stringOffsetDict.items())[-1][0])*2 +2

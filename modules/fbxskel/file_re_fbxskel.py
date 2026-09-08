@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte,collectStringOffsets
 from ..hashing.mmh3.pymmh3 import hashUTF16
 
 DEBUG_MODE = False
@@ -154,13 +154,7 @@ class FBXSkelFile():
 			self.boneHashList.append(entry)
 		
 	def gatherStrings(self):
-		stringOffsetDict = {}
-		currentStringOffset = 0
-		for bone in self.boneEntryList: 
-			if stringOffsetDict.get(bone.boneName,None) == None:
-				stringOffsetDict[bone.boneName] = currentStringOffset
-				currentStringOffset += len(bone.boneName)*2+2
-		return stringOffsetDict
+		return collectStringOffsets(bone.boneName for bone in self.boneEntryList)
 	def recalculateHashesAndOffsets(self,stringOffsetDict):
 		self.header.boneCount = len(self.boneEntryList)
 		

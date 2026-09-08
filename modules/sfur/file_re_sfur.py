@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion,collectStringOffsets
 
 class SIZEDATA():
 	def __init__(self,version):
@@ -133,16 +133,7 @@ class SFurFile():
 			self.furEntryList.append(entry)
 		
 	def gatherStrings(self):
-		stringOffsetDict = {}
-		currentStringOffset = 0
-		for entry in self.furEntryList: 
-			if stringOffsetDict.get(entry.materialName,None) == None:
-				stringOffsetDict[entry.materialName] = currentStringOffset
-				currentStringOffset += len(entry.materialName)*2+2
-			if stringOffsetDict.get(entry.groomingTexturePath,None) == None:
-				stringOffsetDict[entry.groomingTexturePath] = currentStringOffset
-				currentStringOffset += len(entry.groomingTexturePath)*2+2
-		return stringOffsetDict
+		return collectStringOffsets(string for entry in self.furEntryList for string in (entry.materialName,entry.groomingTexturePath))
 	def recalculateHashesAndOffsets(self,stringOffsetDict):
 		
 		self.header.matCount = len(self.furEntryList)

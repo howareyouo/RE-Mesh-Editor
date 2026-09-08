@@ -104,6 +104,23 @@ def write_string(file_object,input):
      file_object.write(bytes(input + '\x00', 'utf-8'))
 def write_unicode_string(file_object,input):#Writes utf-8 string as utf-16
      file_object.write(input.encode('UTF-16LE') + b'\x00\x00')
+def collectStringOffsets(strings):#Builds a {string: offset} table for a UTF-16 string table, assigning each unique string's offset in first-seen order (len*2+2 bytes per entry, including the terminator)
+    stringOffsetDict = {}
+    currentStringOffset = 0
+    for string in strings:
+        if stringOffsetDict.get(string,None) == None:
+            stringOffsetDict[string] = currentStringOffset
+            currentStringOffset += len(string)*2+2
+    return stringOffsetDict
+
+def getStringTableOffset(stringOffsetDict,string,currentStringOffset):#Returns the offset of the string's first occurrence, registering currentStringOffset if new. Callers that serialize duplicate strings must still advance their offset counter afterwards.
+    offset = stringOffsetDict.get(string,None)
+    if offset == None:
+        stringOffsetDict[string] = currentStringOffset
+        return currentStringOffset
+    return offset
+
+
 def getPaddingAmount(currentPos,alignment):
     return (currentPos*-1)%alignment
 
