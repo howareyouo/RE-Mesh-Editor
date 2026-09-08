@@ -682,23 +682,25 @@ class ImportREMesh(Operator, ImportHelper):
 				return self.execute(context)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
-def update_targetMeshCollection(self,context):
+def _syncFileBrowserFilename(self, propertyName, fileExtension):
+	"""Point the open file browser's filename field at the name derived from the
+	collection picker property, so the browser follows the user's selection."""
 	temp = bpy.data.screens.get("temp")
 	browserSpace = None
 	if temp != None:
 		for area in temp.areas:
 			for space in area.spaces:
-				try:
-					if type(space.params).__name__ == "FileSelectParams":
-						browserSpace = space
-						break
-						break
-				except:
-					pass
+				params = getattr(space, "params", None)
+				if params is not None and type(params).__name__ == "FileSelectParams":
+					browserSpace = space
+					break
 	if browserSpace != None:
-		#print(browserSpace.params.filename)
-		if ".mesh" in self.targetCollection:
-			browserSpace.params.filename = self.targetCollection.split(".mesh")[0]+".mesh" + self.filename_ext
+		value = getattr(self, propertyName)
+		if fileExtension in value:
+			browserSpace.params.filename = value.split(fileExtension)[0] + fileExtension + self.filename_ext
+
+def update_targetMeshCollection(self,context):
+	_syncFileBrowserFilename(self, "targetCollection", ".mesh")
 class ExportREMesh(Operator, ExportHelper):
 	'''Export RE Engine Mesh File'''
 	bl_idname = "re_mesh.exportfile"
@@ -947,18 +949,7 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
 supportedMDFVersions = set([23,19,21,32,31,40,45,49,51])	
 
 def update_targetMDFCollection(self,context):
-	temp = bpy.data.screens.get("temp")
-	browserSpace = None
-	if temp != None:
-		for area in temp.areas:
-			for space in area.spaces:
-				if type(space.params).__name__ == "FileSelectParams":
-					browserSpace = space
-					break
-	if browserSpace != None:
-		#print(browserSpace.params.filename)
-		if ".mdf2" in self.targetCollection:
-			browserSpace.params.filename = self.targetCollection.split(".mdf2")[0]+".mdf2" + self.filename_ext	
+	_syncFileBrowserFilename(self, "targetCollection", ".mdf2")
 class ExportREMDF(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine MDF File'''
 	bl_idname = "re_mdf.exportfile"
@@ -1064,18 +1055,7 @@ class ImportREFBXSkel(bpy.types.Operator, ImportHelper):
 			return {"CANCELLED"}
 
 def update_targetFBXSkelArmature(self,context):
-	temp = bpy.data.screens.get("temp")
-	browserSpace = None
-	if temp != None:
-		for area in temp.areas:
-			for space in area.spaces:
-				if type(space.params).__name__ == "FileSelectParams":
-					browserSpace = space
-					break
-	if browserSpace != None:
-		#print(browserSpace.params.filename)
-		if ".fbxskel" in self.targetArmature:
-			browserSpace.params.filename = self.targetArmature.split(".fbxskel")[0]+".fbxskel" + self.filename_ext	
+	_syncFileBrowserFilename(self, "targetArmature", ".fbxskel")
 		
 class ExportREFBXSkel(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine FBXSkel File'''
@@ -1205,18 +1185,7 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
 supportedMDFVersions = set([4,5])	
 
 def update_targetSFurCollection(self,context):
-	temp = bpy.data.screens.get("temp")
-	browserSpace = None
-	if temp != None:
-			for area in temp.areas:
-				for space in area.spaces:
-					if type(space.params).__name__ == "FileSelectParams":
-						browserSpace = space
-						break
-	if browserSpace != None:
-		#print(browserSpace.params.filename)
-		if ".sfur" in self.targetCollection:
-			browserSpace.params.filename = self.targetCollection.split(".sfur")[0]+".sfur" + self.filename_ext	
+	_syncFileBrowserFilename(self, "targetCollection", ".sfur")
 class ExportRESFur(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine SFur File'''
 	bl_idname = "re_sfur.exportfile"
