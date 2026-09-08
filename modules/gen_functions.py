@@ -342,3 +342,33 @@ def parseFileVersion(filepath, default=None):
 		return int(os.path.splitext(filepath)[1].replace(".", ""))
 	except:
 		return default
+
+
+# --- RE mesh object name parsing ---
+# RE mesh objects follow the naming convention:
+#   [LOD_N_]Group_{groupID}_Sub_{subIndex}__{materialName}
+# These helpers extract the numeric IDs, returning 0 on failure so that
+# malformed names degrade gracefully instead of crashing export/import.
+
+def parseREMeshGroupID(name):
+	"""Extract the Group_N number from an RE mesh object name.
+	Returns 0 if the name doesn't contain a valid Group_ token."""
+	try:
+		return int(name.split("Group_")[1].split("_")[0])
+	except (IndexError, ValueError):
+		return 0
+
+
+def getREMeshMaterialName(obj, fallback="NO_MATERIAL"):
+	"""Get the RE material name for a Blender mesh object.
+
+	Priority: first assigned material slot (stripped at first '.'),
+	then the __material suffix parsed from the object name.
+	Returns `fallback` when neither is available.
+	"""
+	if obj.data and len(obj.data.materials) > 0:
+		return obj.data.materials[0].name.split(".", 1)[0].strip()
+	try:
+		return obj.name.split("__", 1)[1].split(".")[0].strip()
+	except (IndexError, ValueError):
+		return fallback

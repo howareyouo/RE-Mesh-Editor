@@ -21,7 +21,7 @@ from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
-from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion
+from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, getREMeshMaterialName
 from ..blender_utils import showErrorMessageBox, showMessageBox, getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix
 import time
 import numpy as np
@@ -1665,14 +1665,7 @@ def exportREMeshFile(filePath, options):
 					if not np.all(use_smooth):
 						sharpEdgeSplitList.append(cloneObj)
 
-				if "Group_" in obj.name:
-					try:
-						groupID = int(obj.name.split("Group_")[1].split("_")[0])
-					except:
-						pass
-				else:
-					print(f"Could not parse group ID in {obj.name}, setting to 0")
-					groupID = 0
+				groupID = parseREMeshGroupID(obj.name)
 
 				if not visconDict.get(groupID):
 					visconDict[groupID] = [obj]
@@ -1736,9 +1729,10 @@ def exportREMeshFile(filePath, options):
 			visconGroup = VisconGroup()
 			visconGroup.visconGroupNum = visconGroupID
 			subMeshTasks = []  # heavy (read-only) extraction tasks, run in a thread pool after prep
-			# Sort by submesh number
+			# Sort by material name so the submesh order is always derived from
+			# the material, not the stale Sub_N suffix in the object name.
 			for submeshIndex, rawsubmesh in enumerate(
-					sorted(visconDict[visconGroupID], key=lambda obj: obj.name)):
+					sorted(visconDict[visconGroupID], key=getREMeshMaterialName)):
 				print(f"    Sub Mesh {str(submeshIndex)}:{rawsubmesh.name}")
 				evaluatedSubMeshData = bpy.data.objects[cloneMeshNameDict[rawsubmesh.name]].data
 				# Weight data is read from the CLONE mesh (evaluatedSubMeshData), whose vertex-group
