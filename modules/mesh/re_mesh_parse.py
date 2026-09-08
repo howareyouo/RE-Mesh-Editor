@@ -1,21 +1,6 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere
-
-# MESH VERSIONS
-VERSION_SF6 = 230110883
-VERSION_MHWILDS_BETA = 240820143
-VERSION_MHWILDS = 241111606
-VERSION_MHS3 = 250604100
-VERSION_PRAGDEMO = 250925211
-VERSION_RE9 = 250925211
-
-SIX_WEIGHT_MESH_VERSIONS = frozenset([
-	VERSION_SF6,
-	VERSION_MHWILDS_BETA,
-	VERSION_MHWILDS,
-	VERSION_MHS3,
-	# VERSION_PRAGDEMO,
-])
+from .mesh_versions import SIX_WEIGHT_MESH_FILE_VERSIONS
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
                    "ExtraWeight"]
@@ -582,7 +567,7 @@ class ParsedREMesh:
 		# Parse Vertex Buffer
 		if reMesh.meshBufferHeader != None:
 			tags = set()
-			if reMesh.meshVersion in SIX_WEIGHT_MESH_VERSIONS or reMesh.fileHeader.version == 250707828:  # Street Fighter 6 mesh version + MH Wilds, #Pragmata internal mesh version uses 6 weight but RE9 uses 8
+			if reMesh.meshVersion in SIX_WEIGHT_MESH_FILE_VERSIONS or reMesh.fileHeader.version == 250707828:  # Street Fighter 6 mesh version + MH Wilds, #Pragmata internal mesh version uses 6 weight but RE9 uses 8
 				tags.add("SixWeightCompressed")  # Add tag to parse compressed weights
 			# if duplicate in vertexelementlist, add shadowLOD tag
 

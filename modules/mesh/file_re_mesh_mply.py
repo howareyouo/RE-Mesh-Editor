@@ -13,12 +13,10 @@ from ..gen_functions import *
 # Leaving gaps in case the versions in between these need to be parsed
 
 
-# Games using MPLY
-VERSION_DD2 = 115  # file:230517984,internal:230517984
-VERSION_KG = 120  # file:240306278,internal:230727984
-VERSION_DD2NEW = 124  # file:240423143,internal:230517984
-VERSION_MHWILDS = 130  # file:240820143,internal:240704828
-VERSION_RE9 = 135  # file:240820143,internal:240704828
+# Games using MPLY - version values come from mesh_versions.py (single source of
+# truth; mply previously carried a stale copy where VERSION_RE9 conflicted).
+from .mesh_versions import (VERSION_DD2, VERSION_KG, VERSION_DD2NEW,
+                            VERSION_MHWILDS, VERSION_RE9)
 
 c_uint64 = ctypes.c_uint64
 c_uint32 = ctypes.c_uint32
