@@ -405,6 +405,30 @@ def setCollectionVisibility(collectionName,hide):
     if layerCollection:
         layerCollection.hide_viewport = hide
 
+def iterModFiles(watchDir, extensionBlackList):
+	"""Yield (filePath, relPath) for every file under watchDir whose name does not
+	match any extension in the blacklist. Shared by tracker/copy/uninstall loops."""
+	for root, _, files in os.walk(watchDir):
+		for file in files:
+			if not any(ext in file.lower() for ext in extensionBlackList):
+				filePath = os.path.join(root, file)
+				yield filePath, os.path.relpath(filePath, start=watchDir)
+
+def safeCopyFile(filePath, outPath):
+	"""Copy a file, creating its parent directory first. Raises on failure."""
+	os.makedirs(os.path.split(outPath)[0], exist_ok=True)
+	shutil.copyfile(filePath, outPath)
+
+def copyTrackedFile(filePath, outPath):
+	"""Copy a tracked mod file, tolerating transient permission errors
+	(the file gets retried on the next tracker tick)."""
+	try:
+		safeCopyFile(filePath, outPath)
+	except PermissionError:
+		pass#Sometimes it gives permission errors when placing new files in the directory, it'll be copied on the next tick
+	except Exception as e:
+		print(f"Failed to copy {filePath} - {e}")
+
 def getFileCRC(filePath):
 	size = 1024*1024*10  # 10 MiB chunks
 	with open(filePath, 'rb') as f:
@@ -945,37 +969,19 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 			#Format as HH:MM:SS
 			currentTime = now.strftime("%H:%M:%S")
 			trackedFileCount = 0
-			for root, _, files in os.walk(self.watchDir):
-				for file in files:
-					if not any(ext in file.lower() for ext in self.extensionBlackList):
-						filePath = os.path.join(root, file)
-						trackedFileCount += 1
-						if filePath not in self.filePathDict:
-							relPath = os.path.relpath(filePath,start = self.watchDir)
-							print(f"Mod File Tracker: [{currentTime}] New File - {relPath}")
-							self.filePathDict[filePath] = os.stat(filePath).st_mtime
-							try:
-								outPath = os.path.join(self.outDir,relPath)
-								os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-								shutil.copyfile(filePath,outPath)
-							except PermissionError:
-								pass#Sometimes it gives permission errors when placing new files in the directory, it'll be copied on the next tick
-							except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
-						else:
-							if os.stat(filePath).st_mtime != self.filePathDict[filePath]:
-								relPath = os.path.relpath(filePath,start = self.watchDir)
-								self.filePathDict[filePath] = os.stat(filePath).st_mtime
-								print(f"Mod File Tracker: [{currentTime}] File Modified - {relPath}")
-								try:
-									outPath = os.path.join(self.outDir,relPath)
-									os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-									shutil.copyfile(filePath,outPath)
-								except PermissionError:
-									pass#Sometimes it gives permission errors when placing new files in the directory, it'll be copied on the next tick
-								except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
-									
+			for filePath, relPath in iterModFiles(self.watchDir, self.extensionBlackList):
+					trackedFileCount += 1
+					if filePath not in self.filePathDict:
+						print(f"Mod File Tracker: [{currentTime}] New File - {relPath}")
+						self.filePathDict[filePath] = os.stat(filePath).st_mtime
+						copyTrackedFile(filePath, os.path.join(self.outDir,relPath))
+					else:
+						st_mtime = os.stat(filePath).st_mtime
+						if st_mtime != self.filePathDict[filePath]:
+							self.filePathDict[filePath] = st_mtime
+							print(f"Mod File Tracker: [{currentTime}] File Modified - {relPath}")
+							copyTrackedFile(filePath, os.path.join(self.outDir,relPath))
+					
 			if trackedFileCount != len(self.filePathDict):
 				#Find which files were deleted, remove them from the game directory and path dict
 				for filePath in list(self.filePathDict.keys()):
@@ -996,30 +1002,17 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 				for entry in os.scandir(self.watchDirPak):
 					if entry.name.endswith(".pak"):
 						filePath = os.path.join(self.watchDirPak, entry.name)
+						outPath = os.path.join(self.outDir,"pak_mods",entry.name)
 						if filePath not in self.pakPathDict:
-							print(f"Mod File Tracker: [{currentTime}] New Pak File - {relPath}")
+							print(f"Mod File Tracker: [{currentTime}] New Pak File - {entry.name}")
 							self.pakPathDict[filePath] = os.stat(filePath).st_mtime
-							try:
-								outPath = os.path.join(self.outDir,"pak_mods",entry.name)
-								os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-								shutil.copyfile(filePath,outPath)
-							except PermissionError:
-								pass#Sometimes it gives permission errors when placing new files in the directory, it'll be copied on the next tick
-							except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
+							copyTrackedFile(filePath, outPath)
 						else:
-							if os.stat(filePath).st_mtime != self.pakPathDict[filePath]:
-								relPath = os.path.relpath(filePath,start = self.watchDir)
-								self.pakPathDict[filePath] = os.stat(filePath).st_mtime
-								print(f"Mod File Tracker: [{currentTime}] Pak File Modified - {relPath}")
-								try:
-									outPath = os.path.join(self.outDir,relPath)
-									os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-									shutil.copyfile(filePath,outPath)
-								except PermissionError:
-									pass#Sometimes it gives permission errors when placing new files in the directory, it'll be copied on the next tick
-								except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
+							st_mtime = os.stat(filePath).st_mtime
+							if st_mtime != self.pakPathDict[filePath]:
+								self.pakPathDict[filePath] = st_mtime
+								print(f"Mod File Tracker: [{currentTime}] Pak File Modified - {entry.name}")
+								copyTrackedFile(filePath, outPath)
 		return {'PASS_THROUGH'}
 
 	def cancel(self, context):
@@ -1054,21 +1047,15 @@ class WM_OT_CopyModFilesToGameDir(Operator):
 				print(f"Copying To: {outDir}")
 				allowTexCopy = bpy.context.scene["modWorkspace_allowTexCopy"]
 				extensionBlackList = FILE_BLACKLIST if allowTexCopy else FILE_BLACKLIST_NO_TEX
-				for root, _, files in os.walk(inDir):
-					for file in files:
-						if not any(ext in file.lower() for ext in extensionBlackList):
-							fileCount += 1
-							filePath = os.path.join(root, file)
-							relPath = os.path.relpath(filePath,start = inDir)
-							print(f"Copying: {relPath}")
-							try:
-								outPath = os.path.join(outDir,relPath)
-								os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-								shutil.copyfile(filePath,outPath)
-								copyCount += 1
-							except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
-									
+				for filePath, relPath in iterModFiles(inDir, extensionBlackList):
+						fileCount += 1
+						print(f"Copying: {relPath}")
+						try:
+							safeCopyFile(filePath, os.path.join(outDir,relPath))
+							copyCount += 1
+						except Exception as e:
+								print(f"Failed to copy {filePath} - {e}")
+								
 				if not allowTexCopy:
 					pakDir = os.path.join(bpy.context.scene["modWorkspace_directory"],"modOutput")
 					pakOutDir = os.path.join(os.path.split(exePath)[0],"pak_mods")
@@ -1090,8 +1077,7 @@ class WM_OT_CopyModFilesToGameDir(Operator):
 									
 								try:
 									print(f"Copying: {entry.name} to {pakOutDir}")
-									os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-									shutil.copyfile(filePath,outPath)
+									safeCopyFile(filePath,outPath)
 									copyCount += 1
 								except PermissionError as e:
 									pakCopyFailed = True
@@ -1133,22 +1119,17 @@ class WM_OT_UninstallModFilesFromGameDir(Operator):
 			allowTexCopy = bpy.context.scene["modWorkspace_allowTexCopy"]
 			extensionBlackList = FILE_BLACKLIST if allowTexCopy else FILE_BLACKLIST_NO_TEX
 			
-			for root, _, files in os.walk(inDir):
-				for file in files:
-					if not any(ext in file.lower() for ext in extensionBlackList):
-						filePath = os.path.join(root, file)
-						relPath = os.path.relpath(filePath,start = inDir)
-						
-						try:
-							outPath = os.path.join(outDir,relPath)
-							#print(outPath)
-							if os.path.isfile(outPath):
-								fileCount += 1
-								os.remove(outPath)
-								print(f"Deleted: {relPath}")
-								deleteCount += 1
-						except Exception as e:
-								print(f"Failed to delete {outPath} - {e}")
+			for filePath, relPath in iterModFiles(inDir, extensionBlackList):
+					outPath = os.path.join(outDir,relPath)
+					try:
+						#print(outPath)
+						if os.path.isfile(outPath):
+							fileCount += 1
+							os.remove(outPath)
+							print(f"Deleted: {relPath}")
+							deleteCount += 1
+					except Exception as e:
+							print(f"Failed to delete {outPath} - {e}")
 			if not allowTexCopy:
 				pakDir = os.path.join(bpy.context.scene["modWorkspace_directory"],"modOutput")
 				pakOutDir = os.path.join(os.path.split(exePath)[0],"pak_mods")
@@ -1169,7 +1150,7 @@ class WM_OT_UninstallModFilesFromGameDir(Operator):
 							print(f"Permission Error - Failed to delete {outPath}\nMake sure the game isn't running when deleting pak files.")
 						except Exception as e:
 							pakDeleteFailed = True
-							print(f"Failed to copy {outPath} - {e}")
+							print(f"Failed to delete {outPath} - {e}")
 			self.report({"INFO"},f"Deleted {deleteCount} / {fileCount} files."  + (" Pak file was not deleted, make sure the game isn't running." if pakDeleteFailed else ""))
 		return {'FINISHED'}
 
