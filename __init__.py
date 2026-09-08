@@ -648,9 +648,11 @@ class ImportREMesh(Operator, ImportHelper):
 				if index != 0:
 					options["mergeArmature"] = mergeArmatureName
 			if os.path.isfile(filepath):
-				success = importREMeshFile(filepath,options)
+				warningList, errorList = importREMeshFile(filepath,options)
 				options["clearScene"] = False#Disable clear scene after first mesh is imported
-				if not success: hasImportErrors = True
+				if errorList: hasImportErrors = True
+				for warning in warningList:
+					raiseWarning(warning)
 			else:
 				hasImportErrors = True
 				raiseWarning(f"Path does not exist, cannot import file. If you are importing multiple files at once, they must all be in the same directory.\nInvalid Path:{filepath}")

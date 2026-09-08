@@ -1548,8 +1548,6 @@ class REMesh():
 				if self.streamingInfoHeader.entryCount != 0 and streamingBuffer == None:
 					raiseError(
 						"Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory.\n\nExample Mesh Path: natives\\STM\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606\nExample Streaming Mesh Path: natives\\STM\\streaming\\Art\\Model\\Character\\ch02\\007\\000\\1\\ch02_007_0001.mesh.241111606")
-					raise Exception(
-						"Streaming mesh file is missing. Both mesh files are required. Extract the corresponding mesh file from inside the streaming directory.")
 		if self.fileHeader.meshOffset:
 			file.seek(self.fileHeader.meshOffset)
 			self.meshBufferHeader = MeshBufferHeader()
@@ -2282,10 +2280,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 
 def readREMesh(filepath, lodTarget=None):
 	print("Opening " + filepath)
-	try:
-		file = open(filepath, "rb", buffering=MESH_IO_BUFFER_SIZE)
-	except:
-		raiseError("Failed to open " + filepath)
+	file = openFileRead(filepath, MESH_IO_BUFFER_SIZE)
 	meshVersion = parseFileVersion(filepath, None)
 	if meshVersion is None:
 		print("Unable to read mesh version from file path, assuming MHRSB")
@@ -2304,7 +2299,6 @@ def readREMesh(filepath, lodTarget=None):
 	if magic != 1213416781 and "streaming" in filepath:
 		raiseError(
 			"Attempted to import a streaming mesh file. Streaming mesh files cannot be imported directly.\nImport the mesh file that has same path and name that's not in the streaming folder.")
-		raise Exception("Streaming meshes can't be imported directly. Import the non streaming mesh instead.")
 	file.seek(0)
 
 	if version >= VERSION_SF6:
@@ -2315,35 +2309,29 @@ def readREMesh(filepath, lodTarget=None):
 			streamingMeshPath = os.path.join(rootPath, "streaming", nativesPath)
 			if os.path.isfile(streamingMeshPath):
 
-				try:
-					streamFile = open(streamingMeshPath, "rb", buffering=MESH_IO_BUFFER_SIZE)
+				with openFileRead(streamingMeshPath, MESH_IO_BUFFER_SIZE) as streamFile:
 					streamingBuffer = streamFile.read()
-					streamFile.close()
-					print(f"Loaded {len(streamingBuffer)} bytes from streaming mesh at {streamingMeshPath}")
-				except:
-					raiseError("Failed to open " + filepath)
+				print(f"Loaded {len(streamingBuffer)} bytes from streaming mesh at {streamingMeshPath}")
 	if magic == 1498173517 and IMPORT_MPLY:  # MPLY Mesh
 		reMeshFile = REMeshMPLY()
 		print("Loading MPLY mesh.")
 	else:
 		reMeshFile = REMesh()
 	reMeshFile.meshVersion = meshVersion
-	reMeshFile.read(file, version, lodTarget, streamingBuffer)
-	file.close()
+	try:
+		reMeshFile.read(file, version, lodTarget, streamingBuffer)
+	finally:
+		file.close()
 	return reMeshFile
 
 
 def writeREMesh(reMeshFile, filepath):
 	print("Writing to " + filepath)
-	try:
-		file = open(filepath, "wb", buffering=MESH_IO_BUFFER_SIZE)
-	except:
-		raiseError("Failed to open " + filepath)
 	meshVersion = parseFileVersion(filepath, None)
 	if meshVersion is None:
 		print("Unable to read mesh version from file path, assuming MHRSB")
 		meshVersion = 2109148288  # MHRSB
 	version = newVersionToMeshFileVersion.get(meshVersion, getNearestRemapVersion(meshVersion))
 	reMeshFile.meshVersion = meshVersion
-	reMeshFile.write(file, version)
-	file.close()
+	with openFileWrite(filepath, MESH_IO_BUFFER_SIZE) as file:
+		reMeshFile.write(file, version)

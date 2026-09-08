@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,getPaddingAmount,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
 from ..hashing.mmh3.pymmh3 import hashUTF16
 
 DEBUG_MODE = False
@@ -200,27 +200,17 @@ class FBXSkelFile():
 def readFBXSkel(filepath):
 	print(textColors.OKCYAN + "__________________________________\nFBXSkel read started." + textColors.ENDC)
 	print("Opening " + filepath)
-	try:  
-		file = open(filepath,"rb")
-	except:
-		raiseError("Failed to open " + filepath)
-	fbxSkelFile = FBXSkelFile()
-	fbxSkelFile.read(file)
-	file.close()
+	with openFileRead(filepath) as file:
+		fbxSkelFile = FBXSkelFile()
+		fbxSkelFile.read(file)
 	print(textColors.OKGREEN + "__________________________________\nFBXSkel read finished." + textColors.ENDC)
 	return fbxSkelFile
 def writeFBXSkel(fbxSkelFile,filepath):
 	print(textColors.OKCYAN + "__________________________________\nFBXSkel write started." + textColors.ENDC)
 	print("Opening " + filepath)
-	try:
-		file = open(filepath,"wb")
-	except:
-		raiseError("Failed to open " + filepath)
-	try:
-		version = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
+	version = parseFileVersion(filepath, 5)
+	if version == 5 and not os.path.splitext(filepath)[1][1:].isdigit():
 		raiseWarning("No number extension found on FBXSkel file, defaulting to version 5")
-		version = 5
-	fbxSkelFile.write(file,version)
-	file.close()
+	with openFileWrite(filepath) as file:
+		fbxSkelFile.write(file,version)
 	print(textColors.OKGREEN + "__________________________________\nFBXSkel write finished." + textColors.ENDC)

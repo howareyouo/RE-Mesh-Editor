@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,getPaddingAmount,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 import ctypes
 
@@ -746,46 +746,28 @@ class MDFFile():
 				material.mmtrsData.write(file)
 def readMDF(filepath):
 	print("Opening " + filepath)
-	try:  
-		file = open(filepath,"rb")
-	except:
-		raiseError("Failed to open " + filepath)
-	#try:
-	version = int(os.path.splitext(filepath)[1].replace(".",""))
-	#except:
-		#raiseWarning("No number extension found on mdf file, defaulting to version 23")
-		#version = 23
-	mdfFile = MDFFile()
-	mdfFile.fileVersion = version
-	mdfFile.read(file,version)
-	file.close()
+	version = parseFileVersion(filepath, 23)
+	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
+		print("No number extension found on mdf file, defaulting to version 23")
+	with openFileRead(filepath) as file:
+		mdfFile = MDFFile()
+		mdfFile.fileVersion = version
+		mdfFile.read(file,version)
 	return mdfFile
 def readMDFFast(filepath):
 	print("Opening " + filepath)
-	try:  
-		file = open(filepath,"rb")
-	except:
-		raiseError("Failed to open " + filepath)
-	try:
-		version = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
+	version = parseFileVersion(filepath, 23)
+	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
 		raiseWarning("No number extension found on mdf file, defaulting to version 23")
-		version = 23
-	mdfFile = MDFFile()
-	debugprint("File Version "+str(version))
-	mdfFile.read_fast(file,version)
-	file.close()
+	with openFileRead(filepath) as file:
+		mdfFile = MDFFile()
+		debugprint("File Version "+str(version))
+		mdfFile.read_fast(file,version)
 	return mdfFile
 def writeMDF(mdfFile,filepath):
 	print("Opening " + filepath)
-	try:
-		file = open(filepath,"wb")
-	except:
-		raiseError("Failed to open " + filepath)
-	try:
-		version = int(os.path.splitext(filepath)[1].replace(".",""))
-	except:
+	version = parseFileVersion(filepath, 23)
+	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
 		raiseWarning("No number extension found on mdf file, defaulting to version 23")
-		version = 23
-	mdfFile.write(file,version)
-	file.close()
+	with openFileWrite(filepath) as file:
+		mdfFile.write(file,version)

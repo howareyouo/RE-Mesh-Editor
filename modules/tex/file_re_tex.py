@@ -1,6 +1,6 @@
 # Author: NSA Cloud & AsteriskAmpersand
 from io import BytesIO
-from ..gen_functions import raiseError
+from ..gen_functions import raiseError, openFileRead, openFileWrite
 from ..gen_functions import read_uint, read_int, read_uint64,\
     read_float, read_short, read_ushort, read_ubyte,\
     read_unicode_string, read_byte,\
@@ -364,18 +364,10 @@ class RE_TexFile:
 
     def read(self, filePath):
         #print("Opening " + filePath)
-        try:
-            file = open(filePath, "rb")
-        except:
-            raiseError("Failed to open " + filePath)
-        self.tex.read(file)
-        file.close()
+        with openFileRead(filePath) as file:
+            self.tex.read(file)
 
     def write(self, filePath):
         print("Writing " + filePath)
-        try:
-            file = open(filePath, "wb")
-        except:
-            raiseError("Failed to open " + filePath)
-        self.tex.write(file)
-        file.close()
+        with openFileWrite(filePath) as file:
+            self.tex.write(file)

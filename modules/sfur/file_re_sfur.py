@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion
 
 class SIZEDATA():
 	def __init__(self,version):
@@ -181,26 +181,18 @@ class SFurFile():
 def readSFur(filepath):
 	print(textColors.OKCYAN + "__________________________________\nSFur read started." + textColors.ENDC)
 	print("Opening " + filepath)
-	try:  
-		file = open(filepath,"rb")
-	except:
-		raiseError("Failed to open " + filepath)
-	sFurFile = SFurFile()
-	sFurFile.read(file)
-	file.close()
+	with openFileRead(filepath) as file:
+		sFurFile = SFurFile()
+		sFurFile.read(file)
 	print(textColors.OKGREEN + "__________________________________\nSFur read finished." + textColors.ENDC)
 	return sFurFile
 def writeSFur(sFurFile,filepath):
 	print(textColors.OKCYAN + "__________________________________\nSFur write started." + textColors.ENDC)
 	print("Opening " + filepath)
-	try:
-		file = open(filepath,"wb")
-	except:
-		raiseError("Failed to open " + filepath)
 	version = parseFileVersion(filepath, None)
 	if version is None:
 		raiseWarning("No number extension found on SFur file, defaulting to version 5")
 		version = 5
-	sFurFile.write(file,version)
-	file.close()
+	with openFileWrite(filepath) as file:
+		sFurFile.write(file,version)
 	print(textColors.OKGREEN + "__________________________________\nSFur write finished." + textColors.ENDC)
