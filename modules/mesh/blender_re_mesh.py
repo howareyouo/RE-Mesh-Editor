@@ -1043,8 +1043,9 @@ def importREMeshFile(filePath, options):
 			                  rotate90=options["rotate90"])
 
 	# Blender hide bones:
-	armatureObj.hide_viewport = True
-	armatureObj.hide_render = True
+	if options["hideArmature"] and armatureObj != None:
+		armatureObj.hide_viewport = True
+		armatureObj.hide_render = True
 
 	meshImportEndTime = time.time()
 	meshImportTime = meshImportEndTime - meshImportStartTime

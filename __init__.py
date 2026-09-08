@@ -551,6 +551,10 @@ class ImportREMesh(Operator, ImportHelper):
 	   name = "Import Bounding Boxes",
 	   description = "Import mesh and bone bounding boxes for debugging purposes",
 	   default = False)
+	hideArmature : BoolProperty(
+	   name = "Hide Armature",
+	   description = "Hides the imported armature in the viewport and render",
+	   default = True)
 	
 	#Internal properties for grouping material settings
 	showAdvancedOptions : BoolProperty(
@@ -607,6 +611,7 @@ class ImportREMesh(Operator, ImportHelper):
 		
 			column2.prop(self, "rotate90")
 			column2.prop(self, "importBoundingBoxes")
+			column2.prop(self, "hideArmature")
 			#column2.prop(self, "importOcclusionMeshes")  
 		
 	def execute(self, context):
@@ -616,7 +621,7 @@ class ImportREMesh(Operator, ImportHelper):
 			raiseWarning("Could not create texture cache directory at " + bpy.context.preferences.addons[__name__].preferences.textureCachePath)
 		if self.mergeArmature:
 			self.clearScene = False
-		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes}
+		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
 		printEditorHeader(bl_info)
 		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:
