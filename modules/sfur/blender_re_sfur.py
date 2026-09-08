@@ -87,6 +87,29 @@ def findSFurPathFromMeshPath(meshPath,gameName = None):
 	#print(sFurPath)
 	return sFurPath
 
+#Maps re_sfur_data property names to SFurEntry field names, with converters for the
+#directions whose types differ (entry values -> property strings -> entry ints).
+SFUR_FIELD_MAPPING = (
+	("shellCount","shellCount",None,None),
+	("shellThinType","shellThinType",str,int),
+	("groomingTexCoordType","groomingTexCoordType",str,int),
+	("shellHeight","shellHeight",None,None),
+	("bendRate","bendRate",None,None),
+	("bendRootRate","bendRootRate",None,None),
+	("normalTransformRate","normalTransformRate",None,None),
+	("stiffness","stiffness",None,None),
+	("stiffnessDistribution","stiffnessDistribution",None,None),
+	("springCoefficient","springCoefficient",None,None),
+	("damping","damping",None,None),
+	("gravityForceScale","gravityForceScale",None,None),
+	("directWindForceScale","directWindForceScale",None,None),
+	("isForceTwoSide","isForceTwoSide",None,None),
+	("isForceAlphaTest","isForceAlphaTest",None,None),
+	("unknownFlag","padding",None,None),
+	("materialName","materialName",None,None),
+	("groomingTexturePath","groomingTexturePath",None,None),
+	)
+
 #SFUR IMPORT
 
 def importSFurFile(filePath,parentCollection = None):
@@ -101,24 +124,9 @@ def importSFurFile(filePath,parentCollection = None):
 		name = "Shell Fur "+str(index).zfill(2)+ " ("+entry.materialName+")"
 		furObj = createCurveEmpty(name,[("~TYPE","RE_SFUR_ENTRY")],None,sFurCollection)
 
-		furObj.re_sfur_data.shellCount = entry.shellCount
-		furObj.re_sfur_data.shellThinType = str(entry.shellThinType)
-		furObj.re_sfur_data.groomingTexCoordType = str(entry.groomingTexCoordType)
-		furObj.re_sfur_data.shellHeight = entry.shellHeight
-		furObj.re_sfur_data.bendRate = entry.bendRate
-		furObj.re_sfur_data.bendRootRate = entry.bendRootRate
-		furObj.re_sfur_data.normalTransformRate = entry.normalTransformRate
-		furObj.re_sfur_data.stiffness = entry.stiffness
-		furObj.re_sfur_data.stiffnessDistribution = entry.stiffnessDistribution
-		furObj.re_sfur_data.springCoefficient = entry.springCoefficient
-		furObj.re_sfur_data.damping = entry.damping
-		furObj.re_sfur_data.gravityForceScale = entry.gravityForceScale
-		furObj.re_sfur_data.directWindForceScale = entry.directWindForceScale
-		furObj.re_sfur_data.isForceTwoSide = entry.isForceTwoSide
-		furObj.re_sfur_data.isForceAlphaTest = entry.isForceAlphaTest
-		furObj.re_sfur_data.unknownFlag = entry.padding
-		furObj.re_sfur_data.materialName = entry.materialName
-		furObj.re_sfur_data.groomingTexturePath = entry.groomingTexturePath
+		for propName,entryField,entryToProp,_ in SFUR_FIELD_MAPPING:
+			value = getattr(entry,entryField)
+			setattr(furObj.re_sfur_data,propName,entryToProp(value) if entryToProp != None else value)
 	
 		#TODO Find each submesh using material and add a shell fur geonode modifier to this object for it
 	
@@ -145,24 +153,9 @@ def exportSFurFile(filepath,targetCollection):
 		for furObj in collection.all_objects:
 			if furObj.get("~TYPE") == "RE_SFUR_ENTRY":
 				entry = SFurEntry()
-				entry.shellCount = furObj.re_sfur_data.shellCount
-				entry.shellThinType = int(furObj.re_sfur_data.shellThinType)
-				entry.groomingTexCoordType = int(furObj.re_sfur_data.groomingTexCoordType)
-				entry.shellHeight = furObj.re_sfur_data.shellHeight
-				entry.bendRate = furObj.re_sfur_data.bendRate
-				entry.bendRootRate = furObj.re_sfur_data.bendRootRate
-				entry.normalTransformRate = furObj.re_sfur_data.normalTransformRate
-				entry.stiffness = furObj.re_sfur_data.stiffness
-				entry.stiffnessDistribution = furObj.re_sfur_data.stiffnessDistribution
-				entry.springCoefficient = furObj.re_sfur_data.springCoefficient
-				entry.damping = furObj.re_sfur_data.damping
-				entry.gravityForceScale = furObj.re_sfur_data.gravityForceScale
-				entry.directWindForceScale = furObj.re_sfur_data.directWindForceScale
-				entry.isForceTwoSide = furObj.re_sfur_data.isForceTwoSide
-				entry.isForceAlphaTest = furObj.re_sfur_data.isForceAlphaTest
-				entry.padding = furObj.re_sfur_data.unknownFlag
-				entry.materialName = furObj.re_sfur_data.materialName
-				entry.groomingTexturePath = furObj.re_sfur_data.groomingTexturePath
+				for propName,entryField,_,propToEntry in SFUR_FIELD_MAPPING:
+					value = getattr(furObj.re_sfur_data,propName)
+					setattr(entry,entryField,propToEntry(value) if propToEntry != None else value)
 				
 				sFurFile.furEntryList.append(entry)
 				
