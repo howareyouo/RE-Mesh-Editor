@@ -154,7 +154,7 @@ class GDeflate:
         Raises:
             GDeflateError: If the size calculation fails
         """
-        input_array = (c_uint8 * len(compressed_data))(*compressed_data)
+        input_array = (c_uint8 * len(compressed_data)).from_buffer_copy(compressed_data)
         uncompressed_size = c_uint64(0)
         
         success = self._get_uncompressed_size_func(
@@ -188,7 +188,7 @@ class GDeflate:
         output_size = self.get_uncompressed_size(compressed_data)
         
         # Prepare input and output buffers
-        input_array = (c_uint8 * len(compressed_data))(*compressed_data)
+        input_array = (c_uint8 * len(compressed_data)).from_buffer_copy(compressed_data)
         output_array = (c_uint8 * output_size)()
         
         success = self._decompress_func(
@@ -230,7 +230,7 @@ class GDeflate:
         # Allocate input/output buffers and output size var.
         output_size = c_uint64(bounded_output_size)
         output_array = (c_uint8 * bounded_output_size)()
-        input_array = (c_uint8 * len(data))(*data)
+        input_array = (c_uint8 * len(data)).from_buffer_copy(data)
         
         success = self._compress_func(
             output_array,

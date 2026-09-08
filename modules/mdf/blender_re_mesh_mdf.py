@@ -407,6 +407,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 	inErrorState = False
 	loadedImageDict = dict()
 	errorFileSet = set()
+	texPathCache = dict()  # baseTexturePath -> resolved tex path; avoids re-globbing shared textures
 	mdfVersion = mdfFile.fileVersion
 	if gameName == None:
 		gameName = getMDFVersionToGameName(mdfVersion)
@@ -458,7 +459,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
 					outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
 					
-					texPath = getTexPath(baseTexturePath,chunkPathList,mdfVersion)
+					if baseTexturePath in texPathCache:
+						texPath = texPathCache[baseTexturePath]
+					else:
+						texPath = getTexPath(baseTexturePath,chunkPathList,mdfVersion)
+						texPathCache[baseTexturePath] = texPath
 					if texPath != None:
 						if texPath not in loadedImageDict:
 							try:
@@ -475,10 +480,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						else:
 							imageList = loadedImageDict[texPath]
 					else:
+						imageList = [None]  # always define; avoids reusing a stale list from a previous iteration
 						if texture not in errorFileSet:
 							raiseWarning("Could not find texture: " + texture + ", skipping...")
 							errorFileSet.add(texture)
-							imageList = [None]
 					#if os.path.exists(outputPath):
 						#Determine what node to create for this texture
 					

@@ -997,18 +997,17 @@ def importREMeshFile(filePath, options):
 				else:
 					chunkPath = ""
 				mdfImportStartTime = time.time()
-				if options[
-					"loadMDFData"]:  # MDF gets read twice when importing mdf data, could fix it but reading is fast enough that it's not really noticable.
+				mdfFile = readMDF(mdfPath)  # Read once, shared by both consumers below.
+				if options["loadMDFData"]:
 					print("Loading MDF Data...")
 					try:
-						importMDFFile(mdfPath, parentCollection=parentCollection)
+						importMDFFile(mdfPath, parentCollection=parentCollection, mdfFile=mdfFile)
 					except Exception as err:
 						raiseWarning("Could not import MDF data from " + mdfPath + ":" + str(err))
 						warningList.append("Could not import MDF data from " + mdfPath + ":" + str(err))
 				if options["loadMaterials"] and not options["importArmatureOnly"]:
 					if options["loadMDFData"]:
 						print("Loading Mesh Materials From MDF...")
-					mdfFile = readMDF(mdfPath)
 					importMDF(mdfFile, materialDict, options["loadUnusedTextures"],
 					          options["loadUnusedProps"], options["useBackfaceCulling"],
 					          options["reloadCachedTextures"], chunkPath=chunkPath, gameName=gameName,

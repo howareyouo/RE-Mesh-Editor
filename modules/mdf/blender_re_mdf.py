@@ -183,8 +183,9 @@ def getMDFFlags(obj,flags,flagsB):
 #MDF IMPORT
 
 
-def importMDFFile(filePath,parentCollection = None):
-	mdfFile = readMDF(filePath)
+def importMDFFile(filePath,parentCollection = None,mdfFile = None):
+	if mdfFile is None:
+		mdfFile = readMDF(filePath)
 	mdfFileName = os.path.splitext(os.path.split(filePath)[1])[0]
 	mdfVersion = parseFileVersion(filePath, None)
 	if mdfVersion is None:

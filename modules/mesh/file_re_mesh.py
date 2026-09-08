@@ -2096,8 +2096,9 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		if reMesh.skeletonHeader.remapCount > 0:
 			reMesh.boneBoundingBoxHeader = BoneAABBGroup()
 			reMesh.boneBoundingBoxHeader.count = reMesh.skeletonHeader.remapCount
+		weightedBoneNameSet = set(parsedMesh.skeleton.weightedBones)
 		for boneIndex, parsedBone in enumerate(parsedMesh.skeleton.boneList):
-			if parsedBone.boneName in parsedMesh.skeleton.weightedBones:
+			if parsedBone.boneName in weightedBoneNameSet:
 				reMesh.skeletonHeader.boneRemapList.append(boneIndex)
 				if parsedBone.boundingBox != None and reMesh.boneBoundingBoxHeader != None:
 					reMesh.boneBoundingBoxHeader.bboxList.append(parsedBone.boundingBox)
