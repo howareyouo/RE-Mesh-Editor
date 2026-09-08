@@ -1729,10 +1729,11 @@ def exportREMeshFile(filePath, options):
 			visconGroup = VisconGroup()
 			visconGroup.visconGroupNum = visconGroupID
 			subMeshTasks = []  # heavy (read-only) extraction tasks, run in a thread pool after prep
-			# Sort by material name so the submesh order is always derived from
+			# Sort by material name (case-insensitive, matching the Rename
+			# Meshes operator) so the submesh order is always derived from
 			# the material, not the stale Sub_N suffix in the object name.
 			for submeshIndex, rawsubmesh in enumerate(
-					sorted(visconDict[visconGroupID], key=getREMeshMaterialName)):
+					sorted(visconDict[visconGroupID], key=lambda obj: getREMeshMaterialName(obj).lower())):
 				print(f"    Sub Mesh {str(submeshIndex)}:{rawsubmesh.name}")
 				evaluatedSubMeshData = bpy.data.objects[cloneMeshNameDict[rawsubmesh.name]].data
 				# Weight data is read from the CLONE mesh (evaluatedSubMeshData), whose vertex-group

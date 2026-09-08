@@ -14,7 +14,7 @@ from bpy.props import (StringProperty,
                        )
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
-from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName
+from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix
 from ..blender_utils import showErrorMessageBox
 
 
@@ -98,7 +98,7 @@ class WM_OT_RenameMeshToREFormat(Operator):
 		for selectedObj in selection:
 			if selectedObj.type == "MESH":
 				groupID = parseREMeshGroupID(selectedObj.name)
-				materialName = getREMeshMaterialName(selectedObj)
+				materialName = stripREMatSuffix(getREMeshMaterialName(selectedObj))
 				if groupID not in groupDict:
 					groupDict[groupID] = []
 				groupDict[groupID].append((selectedObj, materialName))
@@ -108,9 +108,11 @@ class WM_OT_RenameMeshToREFormat(Operator):
 		# Sub index is then assigned in that order, restarting from 0 for every group.
 		for groupID in sorted(groupDict):
 			objList = groupDict[groupID]
-			objList.sort(key=lambda x: x[1])
+			# Case-insensitive so lowercase names (e.g. "diamond") don't all
+			# land after uppercase ones ("Stockings") in the Sub_N order.
+			objList.sort(key=lambda x: x[1].lower())
 			for subIndex, (obj, materialName) in enumerate(objList):
-				obj.name = f"Group_{str(groupID)}_Sub_{str(subIndex)}__{materialName}"
+				obj.name = f"Group_{str(groupID)}_Sub_{str(subIndex)}__{capitalizeREMaterialName(materialName)}"
 
 		if context.selected_objects == []:
 			self.report({"INFO"}, "Renamed all objects to RE Mesh format")

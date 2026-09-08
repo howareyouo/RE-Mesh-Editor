@@ -372,3 +372,19 @@ def getREMeshMaterialName(obj, fallback="NO_MATERIAL"):
 		return obj.name.split("__", 1)[1].split(".")[0].strip()
 	except (IndexError, ValueError):
 		return fallback
+
+
+def stripREMatSuffix(name):
+	"""Remove a trailing "_Mat" material suffix (case-insensitive)."""
+	return re.sub(r"_mat$", "", name, flags=re.IGNORECASE)
+
+
+def capitalizeREMaterialName(name):
+	"""Capitalize the first letter of every word in a material name.
+
+	Words are delimited by the start of the string and any non-letter
+	character (e.g. "_" or a space); letters after those get uppercased
+	while the rest of the name is left untouched, so camelCase and
+	already-capitalized names pass through unchanged.
+	"""
+	return re.sub(r"(^|[^A-Za-z])([a-z])", lambda match: match.group(1) + match.group(2).upper(), name)

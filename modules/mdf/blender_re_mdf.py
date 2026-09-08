@@ -2,7 +2,7 @@ import os
 import bpy
 
 from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection,setAssetPathFromFilePath,createEmpty,checkNameUsage
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .ui_re_mdf_panels import tag_redraw
 
@@ -246,21 +246,24 @@ def importMDFFile(filePath,parentCollection = None):
 #MDF EXPORT
 
 def reindexMaterials(mdfCollection):
-	
+
 	if mdfCollection != None:
-		
-		currentIndex = 0
-		for obj in sorted(mdfCollection.all_objects,key = lambda item: item.re_mdf_material.materialName if item.get("~TYPE",None) == "RE_MDF_MATERIAL" else item.name):
-			
-			if obj.get("~TYPE",None) == "RE_MDF_MATERIAL":
-				#Change the material name in the mdf material settings to the one in the object name
-				#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
-				if "Material" in obj.name and "(" in obj.name:
-					objMaterialName = obj.name.rsplit("(",1)[1].split(")")[0]
-					if objMaterialName != obj.re_mdf_material.materialName:
-						obj.re_mdf_material.materialName = objMaterialName
-				obj.name = "Material "+str(currentIndex).zfill(2)+ " ("+obj.re_mdf_material.materialName+")"
-				currentIndex += 1
+
+		# Sort by material name (case-insensitive, matching the Rename Meshes
+		# operator) and capitalize each word of the material name the same way,
+		# so MDF material order and names stay consistent with the mesh.
+		# A trailing "_Mat" suffix is dropped (case-insensitive) in both places.
+		materialObjs = [obj for obj in mdfCollection.all_objects if obj.get("~TYPE",None) == "RE_MDF_MATERIAL"]
+		materialObjs.sort(key = lambda obj: stripREMatSuffix(obj.re_mdf_material.materialName).lower())
+		for currentIndex, obj in enumerate(materialObjs):
+			#Change the material name in the mdf material settings to the one in the object name
+			#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
+			if "Material" in obj.name and "(" in obj.name:
+				objMaterialName = obj.name.rsplit("(",1)[1].split(")")[0]
+				if objMaterialName != obj.re_mdf_material.materialName:
+					obj.re_mdf_material.materialName = objMaterialName
+			obj.re_mdf_material.materialName = capitalizeREMaterialName(stripREMatSuffix(obj.re_mdf_material.materialName))
+			obj.name = "Material "+str(currentIndex).zfill(2)+ " ("+obj.re_mdf_material.materialName+")"
 def MDFErrorCheck(collectionName):
 	print("\nChecking for problems with MDF structure...")
 	
