@@ -16,7 +16,7 @@ from math import sqrt
 from mathutils import Vector, Matrix
 from .file_re_mesh import readREMesh, writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
-from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow
+from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
@@ -1192,10 +1192,10 @@ def splitSharpEdges():
 
 
 def exportREMeshFile(filePath, options):
-	# TODO Warning Conditions
-	# Invalid mesh naming scheme - notify when using blender material name and setting viscon id to 0
+	# Warning Conditions (non blocking, printed after export finishes)
+	# Invalid mesh naming scheme - notified when the object name falls back to viscon group 0 and/or the blender material name
 	# Vertex groups weighted to bones that aren't on the armature
-	# If an mdf for the mesh imported, check if the mesh materials are mismatched with mdf
+	# If an mdf for the mesh is found, check if the mesh materials are mismatched with mdf
 
 	# Error Conditions
 	# No meshes in collection or selection x
@@ -1217,6 +1217,7 @@ def exportREMeshFile(filePath, options):
 	# More than one material on submesh
 
 	errorDict = dict()
+	warningDict = dict()  # Non blocking issues that are reported after the export finishes
 	# TODO Fix having all bones as weighted bones breaks export
 	meshExportStartTime = time.time()
 	vertexCount = 0
@@ -1401,6 +1402,7 @@ def exportREMeshFile(filePath, options):
 	else:
 		print(f"Armature: None")
 		armatureObj = None
+	armatureBoneNameSet = set(bone.name for bone in armatureObj.data.bones) if armatureObj else None
 
 	# Get previously imported bounding boxes if option enabled
 	if boundingBoxCollection and options["exportBoundingBoxes"]:
@@ -1469,7 +1471,7 @@ def exportREMeshFile(filePath, options):
 	def _gatherSubMesh(task):
 		(parsedSubMesh, evaluatedSubMeshData, rawName, meshHasUV, meshHasUV2, meshHasColor,
 		 vertexGroupCount, vgNameList, shapeKeyGroupIndices,
-		 hasWeight, hasSecondaryWeight, uvRemap) = task
+		 hasWeight, hasSecondaryWeight, uvRemap, armatureBoneNameSet) = task
 		errs = []  # (code, name) collected locally, merged on main thread
 		bbox_gi = []   # raw group index for every weighted-bone assignment (for bone bbox)
 		bbox_xyz = []  # flat x,y,z positions, parallel to bbox_gi
@@ -1560,6 +1562,7 @@ def exportREMeshFile(filePath, options):
 			else:
 				vert_ids = unique_verts.tolist()
 			verts = evaluatedSubMeshData.vertices
+			invalidBoneGroupSet = set()  # Vertex groups weighted to bones that aren't on the armature
 			for pos_idx, vi_old in enumerate(vert_ids):
 				vert = verts[vi_old]
 				prim = []  # (raw group idx, weight)
@@ -1570,6 +1573,8 @@ def exportREMeshFile(filePath, options):
 						continue
 					rawN = vg_name_list[gidx]
 					used_names.add(rawN[9:] if rawN.startswith("SHAPEKEY_") else rawN)
+					if not rawN.startswith("SHAPEKEY_") and rawN not in armatureBoneNameSet:
+						invalidBoneGroupSet.add(rawN)
 					if secondary and gidx in shapekey_set:
 						sec.append((gidx, g.weight))
 					elif g.weight >= min_w:
@@ -1612,6 +1617,9 @@ def exportREMeshFile(filePath, options):
 					for gi in sec_idx[:sec_n]:
 						bbox_gi.append(gi)
 						bbox_xyz.extend((px, py, pz))
+			if invalidBoneGroupSet:
+				for groupName in sorted(invalidBoneGroupSet):
+					errs.append(("WARN_VertexGroupsNotOnArmature", f"{rawName} [{groupName}]"))
 		if len(unique_verts) < len(evaluatedSubMeshData.vertices):
 			errs.append(("LooseVerticesOnSubMesh", rawName))
 		if bbox_gi:
@@ -1674,6 +1682,10 @@ def exportREMeshFile(filePath, options):
 						sharpEdgeSplitList.append(cloneObj)
 
 				groupID = parseREMeshGroupID(obj.name)
+				# Warn when the name doesn't follow the RE naming scheme since the viscon
+				# group and material name both fall back to defaults then
+				if "Group_" not in obj.name or ("__" not in obj.name and not options["useBlenderMaterialName"]):
+					addErrorToDict(warningDict, "InvalidMeshNamingScheme", obj.name)
 
 				if not visconDict.get(groupID):
 					visconDict[groupID] = [obj]
@@ -1889,6 +1901,7 @@ def exportREMeshFile(filePath, options):
 					vertexGroupCount, vgNameList, shapeKeyGroupIndices,
 					armatureObj != None, parsedMesh.bufferHasSecondaryWeight,
 					uvRemapDict.get(cloneMeshNameDict[rawsubmesh.name]),
+					armatureBoneNameSet,
 				))
 
 			# Run the submesh extraction in parallel, then merge results on the main thread.
@@ -1902,7 +1915,10 @@ def exportREMeshFile(filePath, options):
 				if fl:
 					parsedMesh.bufferHasExtraWeight = True
 				for code, name in errs:
-					addErrorToDict(errorDict, code, name)
+					if code.startswith("WARN_"):  # Non blocking, reported after the export finishes
+						addErrorToDict(warningDict, code[len("WARN_"):], name)
+					else:
+						addErrorToDict(errorDict, code, name)
 				visconGroup.subMeshList.append(ps)
 				if used and armatureObj != None:
 					all_used_names.update(used)
@@ -2108,6 +2124,24 @@ def exportREMeshFile(filePath, options):
 		showREMeshErrorWindow(targetCollection.name, armatureObj, errorDict)
 		return False
 
+	# Warning: Compare the exported mesh materials against the materials in the mesh's MDF file
+	if parsedMesh.materialNameList:
+		mdfPath = findMDFPathFromMeshPath(filePath, gameName)
+		if mdfPath != None and os.path.isfile(mdfPath):
+			try:
+				mdfMaterialNameSet = set(
+					material.materialName for material in readMDF(mdfPath).materialList)
+				mdfLowerNameDict = {name.lower(): name for name in mdfMaterialNameSet}
+				for materialName in parsedMesh.materialNameList:
+					if materialName.lower() in mdfLowerNameDict:
+						del mdfLowerNameDict[materialName.lower()]
+					else:
+						addErrorToDict(warningDict, "MeshMaterialsMissingFromMDF", materialName)
+				for materialName in sorted(mdfLowerNameDict.values()):
+					addErrorToDict(warningDict, "MDFMaterialsMissingFromMesh", materialName)
+			except Exception as err:
+				print(f"Could not compare mesh materials with MDF: {str(err)}")
+
 	if hashedBoneNameDict:  # Translate hashed bone names to their original names
 		print("Translating hashed bone names...")
 		for bone in parsedMesh.skeleton.boneList:
@@ -2161,6 +2195,9 @@ def exportREMeshFile(filePath, options):
 	print(f"Materials ({str(len(parsedMesh.materialNameList))}):")
 	for materialName in parsedMesh.materialNameList:
 		print(materialName)
+	if warningDict:
+		printWarningDict(warningDict)
+		showWarningMessage = True
 	if showWarningMessage:
 		showMessageBox("Warnings occured during export. Check Window > Toggle System Console for details.",
 		               title="Mesh Export Warning", icon="ERROR")

@@ -353,6 +353,62 @@ def printErrorDict(errorDict):
             f"{textColors.FAIL}ERROR ({str(index + 1)} / {len(errorDict)}): {str(count)} instance(s) of {errorInfo}{nameListString}\n__________________________________{textColors.ENDC}")
 
 
+warningInfoDict = {
+    "InvalidMeshNamingScheme": """Invalid Mesh Naming Scheme
+An object name doesn't follow the RE mesh naming scheme, so it was exported with viscon group ID 0 and/or the material name was taken from the Blender material slot instead of the object name.
+
+This can cause submeshes to end up in the wrong group or materials to not match the game's materials.
+
+HOW TO FIX:
+_______________
+
+Use the "Rename Meshes" operator in the RE Mesh tab to rename all meshes to the naming scheme.
+
+Example Object Name: LOD_0_Group_0_Sub_0__pl1000_Body_Mat
+""",
+    "VertexGroupsNotOnArmature": """Vertex Group Weighted To Missing Bone
+A vertex group has weights assigned to a bone that doesn't exist on the armature. Those weights are exported on the first weighted bone instead.
+
+HOW TO FIX:
+_______________
+
+Check the vertex groups on the listed meshes (Object Data Properties > Vertex Groups) and remove or rename the groups that don't match an armature bone name.
+""",
+    "MeshMaterialsMissingFromMDF": """Mesh Material Missing From MDF
+The mesh uses a material that doesn't exist in the mesh's MDF file. The material may not render correctly in game.
+
+HOW TO FIX:
+_______________
+
+Make sure the material name matches the name in the MDF file exactly, or add the material to the MDF file.
+""",
+    "MDFMaterialsMissingFromMesh": """MDF Material Not Used By Mesh
+The MDF file contains a material that no mesh in the export uses. This is usually fine, but it can also mean that the mesh is missing a submesh or that the wrong MDF was found.
+
+HOW TO FIX:
+_______________
+
+Check that the mesh contains all of the submeshes that the MDF file expects.
+""",
+}
+
+
+def printWarningDict(warningDict):
+    print(
+        f"\n{textColors.WARNING}{len(warningDict)} warning type(s) were found during export:{textColors.ENDC}\n")
+    for index, warningType in enumerate(sorted(warningDict.keys())):
+        count = warningDict[warningType]["count"]
+        objectSet = warningDict[warningType]["objectSet"]
+        warningInfo = warningInfoDict[warningType]
+        nameListString = ""
+        if objectSet:
+            nameListString = f"\nItems with this warning ({str(len(objectSet))}):\n"
+            for name in sorted(list(objectSet)):
+                nameListString += "[" + name + "]\n"
+        print(
+            f"{textColors.WARNING}WARNING ({str(index + 1)} / {len(warningDict)}): {str(count)} instance(s) of {warningInfo}{nameListString}\n__________________________________{textColors.ENDC}")
+
+
 def showREMeshErrorWindow(targetCollectionName, armatureObj, errorDict):
     bpy.types.Scene.re_mesh_error_list = bpy.props.CollectionProperty(type=REMeshErrorEntry)
     bpy.context.scene.re_mesh_error_list.clear()
