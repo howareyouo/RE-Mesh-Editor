@@ -7,7 +7,7 @@ import json
 import platform
 from bpy.types import Operator
 from zlib import crc32
-from ..gen_functions import slugify,openFolder,raiseWarning
+from ..gen_functions import slugify,openFolder,raiseWarning,PRESET_DIR
 popup_regions = set()
 
 from ..mesh.blender_re_mesh import joinObjects,getCollection
@@ -473,7 +473,7 @@ class WM_OT_ConvertToREEngine(Operator):
 		
 		gameName = bpy.context.scene["modWorkspace_gameName"]
 		presetList = []
-		presetDir = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")
+		presetDir = PRESET_DIR
 		gamePresetDir = os.path.join(presetDir,gameName)
 		print(f"Preset Directory:{gamePresetDir}")
 		
@@ -623,7 +623,7 @@ class WM_OT_ConvertToREEngine(Operator):
 					materialInfoDict[item.oldMaterialName]["bakeAO"] = False
 			gameName = bpy.context.scene["modWorkspace_gameName"]
 			bpy.context.scene.re_mdf_toolpanel.activeGame = gameName
-			presetDir = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")
+			presetDir = PRESET_DIR
 			
 			
 			bakeTextureDir = os.path.join(bpy.context.scene["modWorkspace_directory"],"textures_bake")

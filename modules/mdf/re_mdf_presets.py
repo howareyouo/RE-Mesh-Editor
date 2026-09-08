@@ -4,7 +4,7 @@ import os
 import re
 import bpy
 
-from ..gen_functions import textColors,raiseWarning
+from ..gen_functions import textColors,raiseWarning,PRESET_DIR
 from ..blender_utils import showErrorMessageBox,createEmpty
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
@@ -12,7 +12,6 @@ from .blender_re_mdf import checkNameUsage
 from .blender_re_mdf import boolPropertySet,colorPropertySet
 
 PRESET_VERSION = 5#To be changed when there are changes to material variables
-PRESET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")
 def saveAsPreset(activeObj,presetName,gameName):
 	folderPath = os.path.join(PRESET_DIR,gameName)
 	if activeObj != None:

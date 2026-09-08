@@ -7,8 +7,8 @@ from ..gen_functions import raiseWarning
 
 from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection,checkNameUsage
 from .ui_re_sfur_panels import tag_redraw
+from ..gen_functions import PRESET_DIR
 
-PRESET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")
 class WM_OT_NewSFurHeader(Operator):
 	bl_label = "Create SFur Collection"
 	bl_idname = "re_sfur.create_sfur_collection"

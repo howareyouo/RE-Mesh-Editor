@@ -234,6 +234,9 @@ def getAdjacentFileVersion(rootPath,fileType):
 	return fileVersion
 
 IS_WINDOWS = platform.system() == 'Windows'
+# Addon install root (folder containing __init__.py) and shared Presets directory
+ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PRESET_DIR = os.path.join(ADDON_ROOT, "Presets")
 def splitInt64(value):#Takes int64 and converts to 2 int32's
 	return struct.unpack("ii", value.to_bytes(8, "little", signed=False))
 

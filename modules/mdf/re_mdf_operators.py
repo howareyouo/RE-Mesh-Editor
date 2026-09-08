@@ -5,7 +5,7 @@ import json
 
 from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
-from ..gen_functions import raiseWarning,openFolder
+from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..blender_utils import showErrorMessageBox,createEmpty
 from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF
 from .blender_re_mesh_mdf import importMDF
@@ -13,7 +13,6 @@ from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
 from .file_re_mdf import getMDFVersionToGameName
 
-PRESET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.split(os.path.abspath(__file__))[0])),"Presets")
 class WM_OT_NewMDFHeader(Operator):
 	bl_label = "Create MDF Collection"
 	bl_idname = "re_mdf.create_mdf_collection"
