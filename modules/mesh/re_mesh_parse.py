@@ -1,6 +1,7 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere
 from .mesh_versions import SIX_WEIGHT_MESH_FILE_VERSIONS
+from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
                    "ExtraWeight"]
@@ -115,12 +116,7 @@ def ReadCompressedPosBuffer(vertexPosBuffer, bitFlag, center, relOffset, posDeco
 		scale = posDecodeScale
 		offset = posDecodeOffset
 	else:
-		num = bitFlag.asUInt32
-		divByte = (num >> 24) & 0xFF
-		multByte = (num >> 16) & 0xFF
-		divShift = (divByte - 127)
-		scale = (1 << divShift) if divShift >= 0 else (1.0 / (1 << -divShift))
-		offset = 1 << (multByte - divByte)
+		scale, offset = computePosDecode(bitFlag.asUInt32)
 
 	posArray = (posArray - 0.5 + relOffset * offset) * scale + center
 

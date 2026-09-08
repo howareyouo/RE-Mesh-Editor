@@ -515,16 +515,33 @@ class StreamingInfo():
 
 		currentPos = file.tell()
 		file.seek(self.entryOffset)
-		for i in range(0, self.entryCount):
-			entry = StreamingInfoEntry()
-			entry.read(file)
-			self.streamingInfoEntryList.append(entry)
+		if self.entryCount > 0:  # batch-read entries (matches file_re_mesh behaviour)
+			raw = file.read(self.entryCount * 8)
+			entry_arr = np.frombuffer(raw, dtype=[('bufferStart', '<u4'), ('bufferLength', '<u4')])
+			for i in range(len(entry_arr)):
+				entry = StreamingInfoEntry()
+				entry.bufferStart = int(entry_arr[i]['bufferStart'])
+				entry.bufferLength = int(entry_arr[i]['bufferLength'])
+				self.streamingInfoEntryList.append(entry)
 		file.seek(currentPos)
 
 	def write(self, file):
 		write_uint(file, self.entryCount)
 		write_uint(file, self.unkn1)
 		write_uint64(file, self.entryOffset)
+
+
+def computePosDecode(bitFlagValue):
+	"""Derive (scale, offset) for compressed vertex positions from a cluster bitflag.
+
+	Shared by MPLY cluster parsing and re_mesh_parse.ReadPosBuffer.
+	"""
+	divByte = (bitFlagValue >> 24) & 0xFF
+	multByte = (bitFlagValue >> 16) & 0xFF
+	divShift = divByte - 127
+	scale = (1 << divShift) if divShift >= 0 else (1.0 / (1 << -divShift))
+	offset = 1 << (multByte - divByte)
+	return scale, offset
 
 
 COMPRESSED_POS_DATA_STRIDE = 6
@@ -574,14 +591,7 @@ class ClusterInfo():
 		self.bitFlag.asUInt32 = bitFlagValue
 
 		# Pre-compute position decode values from bitflag (avoids recomputation per cluster in parsing)
-		divByte = (bitFlagValue >> 24) & 0xFF
-		multByte = (bitFlagValue >> 16) & 0xFF
-		divShift = divByte - 127
-		if divShift >= 0:
-			self.posDecodeScale = 1 << divShift
-		else:
-			self.posDecodeScale = 1.0 / (1 << -divShift)
-		self.posDecodeOffset = 1 << (multByte - divByte)
+		self.posDecodeScale, self.posDecodeOffset = computePosDecode(bitFlagValue)
 
 		self.faceBuffer = file.read(
 			self.faceCount * 3)  # Faces are streamed from streaming mesh, max of 128 faces for non streaming
@@ -736,12 +746,30 @@ class REMeshMPLY():
 		# self.materialNameRemapList.append(read_ushort(file))
 		if self.fileHeader.stringCount:
 			file.seek(self.fileHeader.stringTableOffset)
-			for _ in range(0, self.fileHeader.stringCount):
-				self.rawNameOffsetList.append(read_uint64(file))
+			raw_offsets = file.read(self.fileHeader.stringCount * 8)
+			self.rawNameOffsetList = list(struct.unpack(f'<{self.fileHeader.stringCount}Q', raw_offsets))
 
-			for offset in self.rawNameOffsetList:
-				file.seek(offset)
-				self.rawNameList.append(read_string(file))
+			# Batch read: load the string region in one shot, then split by null
+			# terminators (avoids per-string seek + byte-by-byte read_string calls).
+			# The region is bounded by the next section offset when known; later reads
+			# always re-seek explicitly, so reading to EOF is safe otherwise.
+			if self.rawNameOffsetList:
+				first_offset = self.rawNameOffsetList[0]
+				next_offsets = [o for o in (self.fileHeader.streamingChunkOffset,
+				                            self.fileHeader.gpuMeshletOffset) if o and o > first_offset]
+				file.seek(first_offset)
+				if next_offsets:
+					string_region = file.read(min(next_offsets) - first_offset)
+				else:
+					string_region = file.read()
+				for name_offset in self.rawNameOffsetList:
+					rel_offset = name_offset - first_offset
+					if rel_offset < 0 or rel_offset >= len(string_region):
+						continue
+					end = string_region.find(b'\x00', rel_offset)
+					if end == -1:
+						end = len(string_region)
+					self.rawNameList.append(string_region[rel_offset:end].decode('utf-8'))
 		if self.fileHeader.streamingChunkOffset:
 			file.seek(self.fileHeader.streamingChunkOffset)
 			self.streamingInfoHeader = StreamingInfo()

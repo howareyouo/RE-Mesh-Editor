@@ -31,7 +31,7 @@ import ctypes
 import time
 from io import BytesIO
 from ..gen_functions import *
-from .file_re_mesh_mply import REMeshMPLY
+from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 
 # Version numbers and remap tables live in mesh_versions.py (single source of truth,
 # shared with re_mesh_parse.py and file_re_mesh_mply.py).
@@ -414,46 +414,6 @@ class ShadowHeader():
 
 
 # WILDS
-class StreamingInfoEntry():
-	def __init__(self):
-		self.bufferStart = 0
-		self.bufferLength = 0
-
-	def read(self, file):
-		self.bufferStart, self.bufferLength = struct.unpack_from('<II', file.read(8))
-
-	def write(self, file):
-		file.write(struct.pack('<II', self.bufferStart, self.bufferLength))
-
-
-class StreamingInfo():
-	def __init__(self):
-		self.entryCount = 0
-		self.unkn1 = 0
-		self.entryOffset = 0
-		self.streamingInfoEntryList = []
-
-	def read(self, file):
-		self.entryCount = read_uint(file)
-		self.unkn1 = read_uint(file)
-		self.entryOffset = read_uint64(file)
-
-		currentPos = file.tell()
-		file.seek(self.entryOffset)
-		if self.entryCount > 0:
-			raw = file.read(self.entryCount * 8)
-			entry_arr = np.frombuffer(raw, dtype=[('bufferStart', '<u4'), ('bufferLength', '<u4')])
-			for i in range(len(entry_arr)):
-				entry = StreamingInfoEntry()
-				entry.bufferStart = int(entry_arr[i]['bufferStart'])
-				entry.bufferLength = int(entry_arr[i]['bufferLength'])
-				self.streamingInfoEntryList.append(entry)
-		file.seek(currentPos)
-
-	def write(self, file):
-		file.write(struct.pack('<IIQ', self.entryCount, self.unkn1, self.entryOffset))
-
-
 class StreamingBufferHeaderEntry():
 	def __init__(self):
 		self.unkn0 = 0
@@ -1336,6 +1296,14 @@ class FloatData():
 		file.seek(startPos)
 
 
+def checkWriteOffset(file, label, expected):
+	"""Warn when the write cursor does not match the header offset being written.
+
+	`expected` comes from the header; a mismatch means the offset math above is wrong.
+	"""
+	if expected and expected != file.tell():
+		print(f"ERROR IN OFFSET CALCULATION - {label} - expected {expected}, actual {file.tell()}")
+
 class REMesh():
 	def __init__(self):
 		self.meshVersion = 0
@@ -1470,51 +1438,37 @@ class REMesh():
 		self.fileHeader.write(file, version)
 
 		if self.fileHeader.meshGroupOffset:
-			if self.fileHeader.meshGroupOffset != file.tell():
-				print(
-					f"ERROR IN OFFSET CALCULATION - meshGroupOffset - expected {self.fileHeader.meshGroupOffset}, actual {file.tell()}")
+			checkWriteOffset(file, "meshGroupOffset", self.fileHeader.meshGroupOffset)
 			self.lodHeader.write(file, version)
 
 		if self.fileHeader.shadowMeshGroupOffset:
-			if self.fileHeader.shadowMeshGroupOffset != file.tell():
-				print(
-					f"ERROR IN OFFSET CALCULATION - shadowMeshGroupOffset - expected {self.fileHeader.shadowMeshGroupOffset}, actual {file.tell()}")
+			checkWriteOffset(file, "shadowMeshGroupOffset", self.fileHeader.shadowMeshGroupOffset)
 			self.shadowHeader.write(file, version)
 
 		if self.fileHeader.skeletonOffset:
-			if self.fileHeader.skeletonOffset != file.tell():
-				print(
-					f"ERROR IN OFFSET CALCULATION - skeletonOffset - expected {self.fileHeader.skeletonOffset}, actual {file.tell()}")
+			checkWriteOffset(file, "skeletonOffset", self.fileHeader.skeletonOffset)
 			self.skeletonHeader.write(file)
 
-		if self.fileHeader.materialNameRemapOffset and self.fileHeader.materialNameRemapOffset != file.tell():
-			print(
-				f"ERROR IN OFFSET CALCULATION - materialNameRemapOffset - expected {self.fileHeader.materialNameRemapOffset}, actual {file.tell()}")
+		checkWriteOffset(file, "materialNameRemapOffset", self.fileHeader.materialNameRemapOffset)
 		# Batch write material remap table (single struct.pack instead of per-entry write_ushort)
 		if self.materialNameRemapList:
 			file.write(struct.pack(f'<{len(self.materialNameRemapList)}H', *self.materialNameRemapList))
 
 		file.seek(getPaddedPos(file.tell(), 16))
-		if self.fileHeader.boneNameRemapOffset and self.fileHeader.boneNameRemapOffset != file.tell():
-			print(
-				f"ERROR IN OFFSET CALCULATION - boneNameRemapOffset - expected {self.fileHeader.boneNameRemapOffset}, actual {file.tell()}")
+		checkWriteOffset(file, "boneNameRemapOffset", self.fileHeader.boneNameRemapOffset)
 		# Batch write bone remap table
 		if self.boneNameRemapList:
 			file.write(struct.pack(f'<{len(self.boneNameRemapList)}H', *self.boneNameRemapList))
 
 		file.seek(getPaddedPos(file.tell(), 16))
-		if self.fileHeader.blendShapeNameOffset and self.fileHeader.blendShapeNameOffset != file.tell():
-			print(
-				f"ERROR IN OFFSET CALCULATION - boneNameRemapOffset - expected {self.fileHeader.blendShapeNameOffset}, actual {file.tell()}")
+		checkWriteOffset(file, "blendShapeNameOffset", self.fileHeader.blendShapeNameOffset)
 		# Batch write blend shape remap table
 		if self.blendShapeNameRemapList:
 			file.write(struct.pack(f'<{len(self.blendShapeNameRemapList)}H', *self.blendShapeNameRemapList))
 
 		file.seek(getPaddedPos(file.tell(), 16))
 
-		if self.fileHeader.nameOffsetsOffset and self.fileHeader.nameOffsetsOffset != file.tell():
-			print(
-				f"ERROR IN OFFSET CALCULATION - nameOffsetsOffset - expected {self.fileHeader.nameOffsetsOffset}, actual {file.tell()}")
+		checkWriteOffset(file, "nameOffsetsOffset", self.fileHeader.nameOffsetsOffset)
 
 		# Batch write name offset list (single struct.pack instead of per-entry write_uint64)
 		if self.rawNameOffsetList:
@@ -1528,15 +1482,11 @@ class REMesh():
 		file.seek(getPaddedPos(file.tell(), 16))
 
 		if self.fileHeader.aabbOffset:
-			if self.fileHeader.aabbOffset != file.tell():
-				print(
-					f"ERROR IN OFFSET CALCULATION - aabbOffset - expected {self.fileHeader.aabbOffset}, actual {file.tell()}")
+			checkWriteOffset(file, "aabbOffset", self.fileHeader.aabbOffset)
 			self.boneBoundingBoxHeader.write(file)
 
 		if self.fileHeader.meshOffset:
-			if self.fileHeader.meshOffset != file.tell():
-				print(
-					f"ERROR IN OFFSET CALCULATION - meshOffset - expected {self.fileHeader.meshOffset}, actual {file.tell()}")
+			checkWriteOffset(file, "meshOffset", self.fileHeader.meshOffset)
 			self.meshBufferHeader.write(file, version)
 
 		file.write(b'\x00' * getPaddingAmount(file.tell(), 16))  # Write end of file padding
