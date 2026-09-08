@@ -7,7 +7,7 @@ import contextlib
 import tempfile
 import traceback
 
-ADDON_ROOT = os.path.dirname(os.path.abspath(__file__))
+ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ADDON_ROOT not in sys.path:
     sys.path.insert(0, ADDON_ROOT)
 

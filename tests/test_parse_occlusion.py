@@ -3,7 +3,7 @@ import os
 import sys
 import struct
 
-ADDON_ROOT = os.path.dirname(os.path.abspath(__file__))
+ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ADDON_ROOT)
 
 import numpy as np

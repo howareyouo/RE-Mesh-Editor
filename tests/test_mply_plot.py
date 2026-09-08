@@ -1,4 +1,10 @@
 #Author: NSA Cloud
+import os
+import sys
+
+ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ADDON_ROOT)
+
 from modules.mesh.file_re_mesh import readREMesh,writeREMesh,ParsedREMeshToREMesh
 from modules.mesh.re_mesh_parse import ParsedREMesh,Skeleton,LODLevel,VisconGroup
 
