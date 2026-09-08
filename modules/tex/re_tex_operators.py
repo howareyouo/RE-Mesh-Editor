@@ -11,7 +11,7 @@ from .file_re_tex import getTexVersionFromGameName
 from .blender_re_tex import convertTexDDSList
 from .re_tex_propertyGroups import PNGConversionEntryPropertyGroup
 from ..mdf.file_re_mdf import getMDFVersionToGameName
-from .re_tex_utils import DDSToTex,ImageListToDDS
+from .re_tex_utils import DDSToTex,ImageListToDDS,getStreamingTexturePath
 from ..gen_functions import openFolder
 import shutil
 #from .re_tex_utils import
@@ -96,6 +96,10 @@ class WM_OT_PNGToTexConversionWindow(Operator):
 	   name = "Generate Mipmaps",
 	   description = "Generates lower quality texture levels for lower texture settings. Leave this on unless these are UI textures",
 	   default = True)
+	createStreamingTex : bpy.props.BoolProperty(
+	   name = "Create Streaming Tex",
+	   description = "Creates a companion streaming tex file containing the high resolution mipmaps.\nThe streaming tex must be placed in the streaming folder of the texture path in the mod directory, the Copy Converted Tex Files operator handles this automatically",
+	   default = False)
 	skipPrompt : bpy.props.BoolProperty(
 	   name = "Skip Prompt",
 	   description = "Internal, used to determine if called by a script or by user",
@@ -133,7 +137,7 @@ class WM_OT_PNGToTexConversionWindow(Operator):
 				   preferencesName = addon.module
 				   texToPNG = bpy.context.preferences.addons[addon.module].preferences.convertTexToPNG
 				   break
-		successCount,failCount = convertTexDDSList(fileNameList = ddsTexList,inDir = self.directory, outDir = self.outDir, gameName = bpy.context.scene.re_mdf_toolpanel.activeGame,createStreamingTex=False,texToPNG = texToPNG)
+		successCount,failCount = convertTexDDSList(fileNameList = ddsTexList,inDir = self.directory, outDir = self.outDir, gameName = bpy.context.scene.re_mdf_toolpanel.activeGame,createStreamingTex = self.createStreamingTex,texToPNG = texToPNG)
 		
 		#Delete converted dds files after converting to tex
 		for ddsPath in convertedDDSList:
@@ -196,6 +200,7 @@ class WM_OT_PNGToTexConversionWindow(Operator):
 			type='DEFAULT'
 			)
 		layout.prop(self,"generateMipmaps")
+		layout.prop(self,"createStreamingTex")
 	
 
 class WM_OT_ConvertFolderToTex(Operator):
@@ -208,6 +213,10 @@ class WM_OT_ConvertFolderToTex(Operator):
 	   description = "Skip prompt to convert images to DDS.\nIf non DDS files are selected, the compression type will be set automatically",
 	   default = False,
 	   options = {"HIDDEN"})
+	createStreamingTex : bpy.props.BoolProperty(
+	   name = "Create Streaming Tex",
+	   description = "Creates a companion streaming tex file containing the high resolution mipmaps",
+	   default = False)
 	def execute(self, context):
 		texVersion = 28
 		gameName = bpy.context.scene.re_mdf_toolpanel.activeGame
@@ -236,6 +245,7 @@ class WM_OT_ConvertFolderToTex(Operator):
 					directory = texDir,
 					outDir = convertedDir,
 					skipPrompt = self.skipPrompt,
+					createStreamingTex = self.createStreamingTex,
 					)
 				return {"FINISHED"}
 				if bpy.context.scene.re_mdf_toolpanel.openConvertedFolder:
@@ -267,16 +277,23 @@ class WM_OT_CopyConvertedTextures(Operator):
 					   pathDict[os.path.split(textureBinding.path)[1]] = textureBinding.path
 		if os.path.isdir(convertedDir):
 			for entry in os.scandir(convertedDir):
-				if entry.is_file() and os.path.splitext(entry.name)[0] in pathDict:
-					path = os.path.join(convertedDir,entry.name)
-					outPath = os.path.realpath(os.path.join(modDir,pathDict[os.path.splitext(entry.name)[0]]+os.path.splitext(entry.name)[1]))
-					os.makedirs(os.path.split(outPath)[0],exist_ok = True)
-					shutil.copyfile(path, outPath)
-					print(f"Copied {os.path.split(path)[1]} to {outPath}")
-					copyCount += 1
-					totalTextureCount += 1
-				elif entry.is_file() and ".tex." in entry.name:
-					totalTextureCount += 1
+				if entry.is_file():
+					# Streaming tex files are marked with " #STREAMING" before the extension,
+					# they get copied into the streaming folder of the texture path
+					isStreamingTex = " #STREAMING" in entry.name
+					lookupName = os.path.splitext(entry.name)[0].replace(" #STREAMING","")
+					if lookupName in pathDict:
+						path = os.path.join(convertedDir,entry.name)
+						outPath = os.path.realpath(os.path.join(modDir,pathDict[lookupName]+os.path.splitext(entry.name)[1]))
+						if isStreamingTex:
+							outPath = getStreamingTexturePath(outPath)
+						os.makedirs(os.path.split(outPath)[0],exist_ok = True)
+						shutil.copyfile(path, outPath)
+						print(f"Copied {os.path.split(path)[1]} to {outPath}")
+						copyCount += 1
+						totalTextureCount += 1
+					elif ".tex." in entry.name:
+						totalTextureCount += 1
 			self.report({"INFO"},f"Copied {copyCount}/{totalTextureCount} textures to mod directory")
 		else:
 			self.report({"ERROR"},f"Texture directory does not exist")

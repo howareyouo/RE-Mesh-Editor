@@ -116,19 +116,24 @@ def convertTexDDSList (fileNameList,inDir,outDir,gameName,createStreamingTex = F
 		
 		#Single Texture Conversion
 		for ddsPath in ddsConversionList:
-			texPath = os.path.join(outDir,os.path.splitext(os.path.split(ddsPath)[1])[0])+f".tex.{str(texVersion)}"
+			baseName = os.path.splitext(os.path.split(ddsPath)[1])[0]
+			texPath = os.path.join(outDir,baseName)+f".tex.{str(texVersion)}"
 			print(str(texPath))
-			DDSToTex([ddsPath],texVersion,texPath,streamingFlag = False)#TODO Streaming
+			# The streaming tex holds the high resolution mips, the copy operator
+			# recognizes it by the #STREAMING marker and places it in the streaming folder
+			streamingOutPath = os.path.join(outDir,baseName+" #STREAMING")+f".tex.{str(texVersion)}" if createStreamingTex else None
+			DDSToTex([ddsPath],texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
 			conversionCount += 1
-		
-		
+
+
 		#Array Texture Conversion
 		for key in ddsArrayConversionDict.keys():
 			ddsPathList = sorted(ddsArrayConversionDict[key])
 			#print(key)
 			#print(ddsPathList)
 			texPath = os.path.join(outDir,key+f".tex.{str(texVersion)}")
-			DDSToTex(ddsPathList,texVersion,texPath,streamingFlag = False)#TODO Streaming
+			streamingOutPath = os.path.join(outDir,key+" #STREAMING"+f".tex.{str(texVersion)}") if createStreamingTex else None
+			DDSToTex(ddsPathList,texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
 			conversionCount += 1
 	
 	ddsToPNGConversionList = []

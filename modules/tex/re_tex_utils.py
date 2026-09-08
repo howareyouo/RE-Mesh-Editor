@@ -92,20 +92,26 @@ def convertTexFileToDDS(texPath, outputPath):
     return texInfo
 
 
-def makeTexHeader(texVersion, ddsHeader, imageCount):
+def makeTexHeader(texVersion, ddsHeader, imageCount, mipStart=0, mipEnd=None):
     newTexFile = RE_TexFile()
     texHeader = newTexFile.tex.header
+    if mipEnd == None:
+        mipEnd = ddsHeader.dwMipMapCount
+    mipCount = mipEnd - mipStart
     texHeader.version = texVersion
     texHeader.width = ddsHeader.dwWidth
     texHeader.height = ddsHeader.dwHeight
     texHeader.depth = ddsHeader.dwDepth
     texHeader.imageCount = imageCount
-    texHeader.mipCount = ddsHeader.dwMipMapCount  # For DMC5/RE2
-    texHeader.imageMipHeaderSize = ddsHeader.dwMipMapCount << 4
+    texHeader.mipCount = mipCount  # For DMC5/RE2
+    texHeader.imageMipHeaderSize = mipCount << 4
     #texHeader.imageCount = (ddsHeader.dwMipMapCount << 12) | imageCount
     #print(f"imageCount {imageCount}")
     #print(f"dwMipMapCount {ddsHeader.dwMipMapCount}")
     #print(f"tex image count {texHeader.imageCount}")
+    if mipStart > 0:  # Header dimensions must match the largest mip actually contained in the file
+        texHeader.width = max(ddsHeader.dwWidth >> mipStart, 1)
+        texHeader.height = max(ddsHeader.dwHeight >> mipStart, 1)
     texHeader.formatString = format_ops.buildFormatString(ddsHeader)
     texHeader.format = texenum.formatStringToTexFormatDict[texHeader.formatString]
     cubemap = (ddsHeader.ddsCaps2 & 0x00000200 != 0)*1  # DDSCAPS2_CUBEMAP
@@ -122,25 +128,37 @@ def padding(image, ddsSl, capSl, linecount):
     return result
 
 
-def packageTextures(ddsHeader, ddsList, compress, formatData):
+def packageTextures(ddsHeader, ddsList, compress, formatData, mipStart=0, mipEnd=None):
     """Pads and compresses textures aas needed, stores information relative to their size for header generation"""
     compressor = GDeflate()
+    if mipEnd == None:
+        mipEnd = ddsHeader.dwMipMapCount
+
+    def mipDimensions(mip):
+        x, y = tmath.ruD(ddsHeader.dwWidth, 2 **
+                         mip), tmath.ruD(ddsHeader.dwHeight, 2**mip)
+        z = tmath.ruD(ddsHeader.dwDepth, 2**mip)
+        xcount, ycount = tmath.ruD(
+            x, formatData.tx), tmath.ruD(y, formatData.ty)
+        mpacketSize = tmath.ruD(format_ops.packetSize, round(
+            tmath.product(tmath.dotDivide(formatData.pixelPerPacket, formatData.texelSize))))
+        # texelSize = packetTexelPacking and mTexelSize = tx,ty
+        bytelen = xcount*ycount*z*mpacketSize
+        return xcount, ycount, z, mpacketSize, bytelen
+
     miptex = []
     for dds in ddsList:
         offset = 0
+        # Skip past the byte range of the mips that aren't part of this file
+        for mip in range(mipStart):
+            offset += mipDimensions(mip)[4]
         mips = []
         minima = formatData.scanlineMinima
         #print(f"image {tex}")
-        for mip in range(ddsHeader.dwMipMapCount):
-            x, y = tmath.ruD(ddsHeader.dwWidth, 2 **
-                             mip), tmath.ruD(ddsHeader.dwHeight, 2**mip)
-            z = tmath.ruD(ddsHeader.dwDepth, 2**mip)
-            xcount, ycount = tmath.ruD(
-                x, formatData.tx), tmath.ruD(y, formatData.ty)
-            mpacketSize = tmath.ruD(format_ops.packetSize, round(
-                tmath.product(tmath.dotDivide(formatData.pixelPerPacket, formatData.texelSize))))
-            # texelSize = packetTexelPacking and mTexelSize = tx,ty
-            bytelen = xcount*ycount*z*mpacketSize
+        for mip in range(mipStart, mipEnd):
+            xcount, ycount, z, mpacketSize, bytelen = mipDimensions(mip)
+            x = tmath.ruD(ddsHeader.dwWidth, 2**mip)
+            y = tmath.ruD(ddsHeader.dwHeight, 2**mip)
             mipmap = dds.data[offset:offset+bytelen]
             capcomScanline = tmath.ruNX(xcount*mpacketSize, minima)
             ddsScanline = mpacketSize * xcount
@@ -172,7 +190,8 @@ def storeTextures(ddsHeader, texFile, miptex, compress):
     texHeader = texFile.tex.header
     texVersion = texHeader.version
     imageCount = len(miptex)
-    mipCount = ddsHeader.dwMipMapCount
+    # Use the mip count actually stored in this file, the mip chain may have been split for streaming
+    mipCount = len(miptex[0]) if miptex else 0
     mipstride = 0x10
     baseHeader = (8 if texVersion >= 28 and texVersion != 190820018 else 0) + 0x20
     mipbase = baseHeader + mipstride*imageCount*mipCount
@@ -204,22 +223,75 @@ def storeTextures(ddsHeader, texFile, miptex, compress):
     return texFile
 
 
-def getTexFileFromDDS(ddsList, texVersion, streamingFlag=False):
+def getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=None):
     ddsHeader = ddsList[0].header
     isGDeflate = texVersion in GDEFLATE_VERSIONS
-    newTexFile = makeTexHeader(texVersion, ddsHeader, len(ddsList))
+    newTexFile = makeTexHeader(texVersion, ddsHeader, len(ddsList), mipStart, mipEnd)
     formatData = format_ops.packetSizeData(newTexFile.tex.header.formatString)
-    miptex = packageTextures(ddsHeader, ddsList, isGDeflate, formatData)
+    miptex = packageTextures(ddsHeader, ddsList, isGDeflate, formatData, mipStart, mipEnd)
     return storeTextures(ddsHeader, newTexFile, miptex, isGDeflate)
 
 
-def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False):
+# Mips with both dimensions at or above this size are written into the streaming tex file
+STREAMING_MIP_MIN_SIZE = 128
+
+
+def getStreamingMipCount(ddsHeader):
+    """Returns the amount of top mips that belong in the streaming tex file.
+
+    RE Engine streams the high resolution mips from a companion tex file inside
+    the streaming folder, the main tex file only holds the low resolution tail
+    of the mip chain."""
+    count = 0
+    for mip in range(ddsHeader.dwMipMapCount):
+        mipWidth = max(ddsHeader.dwWidth >> mip, 1)
+        mipHeight = max(ddsHeader.dwHeight >> mip, 1)
+        if mipWidth >= STREAMING_MIP_MIN_SIZE and mipHeight >= STREAMING_MIP_MIN_SIZE:
+            count += 1
+        else:
+            break  # Mip chain is strictly decreasing
+    return min(count, ddsHeader.dwMipMapCount - 1)  # The main tex file always keeps at least one mip
+
+
+def writeStreamingTexFiles(ddsList, texVersion, mainOutPath, streamingOutPath, streamingMipCount):
+    """Writes a tex file pair. The streaming tex keeps the full resolution header
+    and holds the high resolution mips, the main tex holds the remaining low
+    resolution mips with its header sized to the largest mip it contains."""
+    mipCount = ddsList[0].header.dwMipMapCount
+    streamingTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=streamingMipCount)
+    streamingTexFile.write(streamingOutPath)
+    mainTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=streamingMipCount, mipEnd=mipCount)
+    mainTexFile.write(mainOutPath)
+
+
+def getStreamingTexturePath(texPath):
+    """Returns the streaming tex path for a tex file inside a mod directory.
+
+    The streaming folder is placed directly under the game folder and mirrors
+    the texture's relative path, ex:
+    natives/STM/Art/Model/foo/pl_foo_ALB.tex.241106027 ->
+    natives/STM/streaming/Art/Model/foo/pl_foo_ALB.tex.241106027"""
+    parts = texPath.replace("/", os.sep).replace("\\", os.sep).split(os.sep)
+    for i, part in enumerate(parts):
+        if part.lower() == "natives" and i + 2 < len(parts):  # natives/<game folder>/...
+            return os.sep.join(parts[:i+2] + ["streaming"] + parts[i+2:])
+    return os.path.join(os.path.dirname(texPath), "streaming", os.path.basename(texPath))
+
+
+def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOutPath=None):
+
+    streamingMipCount = 0
+    if streamingFlag and streamingOutPath != None:
+        streamingMipCount = getStreamingMipCount(getDDSHeader(ddsPathList[0]))
 
     if len(ddsPathList) == 1:
         ddsFile = DDSFile()
         ddsFile.read(ddsPathList[0])
-        texFile = getTexFileFromDDS([ddsFile.dds], texVersion, streamingFlag)
-        texFile.write(outPath)
+        if streamingMipCount > 0:
+            writeStreamingTexFiles([ddsFile.dds], texVersion, outPath, streamingOutPath, streamingMipCount)
+        else:
+            texFile = getTexFileFromDDS([ddsFile.dds], texVersion)
+            texFile.write(outPath)
     else:  # Array texture
         baseHeader = getDDSHeader(ddsPathList[0])
         # Preparse dds files to make sure they have the same height,width,format and mip count as the first
@@ -267,8 +339,11 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False):
                 ddsFile.read(ddsPath)
                 ddsList.append(ddsFile.dds)
 
-            texFile = getTexFileFromDDS(ddsList, texVersion, streamingFlag)
-            texFile.write(outPath)
+            if streamingMipCount > 0:
+                writeStreamingTexFiles(ddsList, texVersion, outPath, streamingOutPath, streamingMipCount)
+            else:
+                texFile = getTexFileFromDDS(ddsList, texVersion)
+                texFile.write(outPath)
 
 def ImageListToDDS(imageConvertList,outDir,generateMipMaps):
 
