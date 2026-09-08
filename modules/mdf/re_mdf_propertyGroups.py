@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import bpy
 import os
-from .file_re_mdf import MDFFlags,MDFFlagsB
+from .file_re_mdf import MDFFlags,MDFFlagsB,MDFFlags_bits,MDFFlagsB_bits
 from bpy.props import (StringProperty,
 					   BoolProperty,
 					   IntProperty,
@@ -343,178 +343,42 @@ class MDFFlagsPropertyGroup(bpy.types.PropertyGroup):
 		description="This value is inaccessible by the user, it is used to determine whether the user changed a value or an update function did so that an infinite loop doesn't happen",
 		default = False,
 		)
-	BaseTwoSideEnable: BoolProperty(
-		name = "BaseTwoSideEnable",
-		description="",
-		update = update_IntFromFlags
-	)
-	BaseAlphaTestEnable: BoolProperty(
-		name = "BaseAlphaTestEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	ShadowCastDisable: BoolProperty(
-		name = "ShadowCastDisable",
-		description="",
-		update = update_IntFromFlags
-		)
-	VertexShaderUsed: BoolProperty(
-		name = "VertexShaderUsed",
-		description="",
-		update = update_IntFromFlags
-		)
-	EmissiveUsed: BoolProperty(
-		name = "EmissiveUsed",
-		description="",
-		update = update_IntFromFlags
-		)
-	TessellationEnable: BoolProperty(
-		name = "TessellationEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	EnableIgnoreDepth: BoolProperty(
-		name = "EnableIgnoreDepth",
-		description="",
-		update = update_IntFromFlags
-		)
-	AlphaMaskUsed: BoolProperty(
-		name = "AlphaMaskUsed",
-		description="",
-		update = update_IntFromFlags
-		)
-	ForcedTwoSideEnable: BoolProperty(
-		name = "ForcedTwoSideEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	TwoSideEnable: BoolProperty(
-		name = "TwoSideEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	TransparentZPostPassEnable: BoolProperty(
-		name = "TransparentZPostPassEnable*",
-		description="*SF6 (version 31) or newer only, this bit is a part of TessFactor on earlier versions",
-		update = update_IntFromFlags
-		)
-	TessFactor: IntProperty(
-		name = "TessFactor",
-		description="",
-		min = 0,
-		max = 31,#5 bits
-		update = update_IntFromFlags
-		)
-	PhongFactor: IntProperty(
-		name = "PhongFactor",
-		description="",
-		min = 0,
-		max = 255,
-		update = update_IntFromFlags
-		)
-	RoughTransparentEnable: BoolProperty(
-		name = "RoughTransparentEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	ForcedAlphaTestEnable: BoolProperty(
-		name = "ForcedAlphaTestEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	AlphaTestEnable: BoolProperty(
-		name = "AlphaTestEnable",
-		description="",
-		update = update_IntFromFlags
-		)
-	SSSProfileUsed: BoolProperty(
-		name = "SSSProfileUsed",
-		description="",
-		update = update_IntFromFlags
-		)
-	EnableStencilPriority: BoolProperty(
-		name = "EnableStencilPriority",
-		description="",
-		update = update_IntFromFlags
-		)
-	RequireDualQuaternion: BoolProperty(
-		name = "RequireDualQuaternion",
-		description="",
-		update = update_IntFromFlags
-		)
-	PixelDepthOffsetUsed: BoolProperty(
-		name = "PixelDepthOffsetUsed",
-		description="",
-		update = update_IntFromFlags
-		)
-	NoRayTracing: BoolProperty(
-		name = "NoRayTracing",
-		description="",
-		update = update_IntFromFlags
-		)
-	
-	#Extended Flags
-	TransparentDistortionEnable: BoolProperty(
-		name = "TransparentDistortionEnable",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	AlphaUsed: BoolProperty(
-		name = "AlphaUsed",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	BakeTextureUseSecondaryUV: BoolProperty(
-		name = "BakeTextureUseSecondaryUV",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	ForwardPrepassEnabled: BoolProperty(
-		name = "ForwardPrepassEnabled",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	ForcedAlphaTestEnableShadow: BoolProperty(
-		name = "ForcedAlphaTestEnableShadow",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	TessellationZPrepassDisable: BoolProperty(
-		name = "TessellationZPrepassDisable",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	DitheredLodTransitionEnable: BoolProperty(
-		name = "DitheredLodTransitionEnable",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	reserved0: BoolProperty(
-		name = "reserved0",
-		description="*SF6 (version 31) or newer only",
-		update = update_IntFromFlags
-		)
-	TransparentPriorityBias: IntProperty(
-		name = "TransparentPriorityBias",
-		description="",
-		min = 0,
-		max = 255,
-		update = update_IntFromFlags
-		)
-	reserved1: IntProperty(
-		name = "reserved1",
-		description="",
-		min = 0,
-		max = 255,
-		update = update_IntFromFlags
-		)
-	reserved2: IntProperty(
-		name = "reserved2",
-		description="",
-		min = 0,
-		max = 255,
-		update = update_IntFromFlags
-		)
+#Generate the flag properties from the ctypes bit-field definitions in file_re_mdf so the
+#file format stays the single source of truth (update_FlagsFromInt/update_IntFromFlags already
+#iterate the same _fields_). Each 1-bit field becomes a BoolProperty, wider fields an
+#IntProperty with the matching range.
+_FLAG_DESCRIPTION_OVERRIDES = {
+	#display name and description overrides for flags whose UI text differs from the field name
+	"TransparentZPostPassEnable": ("TransparentZPostPassEnable*",
+				"*SF6 (version 31) or newer only, this bit is a part of TessFactor on earlier versions"),
+	}
+_SF6_ONLY_DESCRIPTION = "*SF6 (version 31) or newer only"
+
+for _bitStruct,_sf6Only in ((MDFFlags_bits,False),(MDFFlagsB_bits,True)):
+	for _fieldName,_fieldType,_bitWidth in _bitStruct._fields_:
+		if _fieldName in _FLAG_DESCRIPTION_OVERRIDES:
+			_displayName,_description = _FLAG_DESCRIPTION_OVERRIDES[_fieldName]
+		elif _sf6Only:
+			_displayName,_description = _fieldName,_SF6_ONLY_DESCRIPTION
+		else:
+			_displayName,_description = _fieldName,""
+		if _bitWidth == 1:
+			MDFFlagsPropertyGroup.__annotations__[_fieldName] = BoolProperty(
+				name = _displayName,
+				description = _description,
+				update = update_IntFromFlags
+				)
+		else:
+			MDFFlagsPropertyGroup.__annotations__[_fieldName] = IntProperty(
+				name = _fieldName,
+				description = "",
+				min = 0,
+				max = (1 << _bitWidth) - 1,
+				update = update_IntFromFlags
+				)
+
+
+
 	
 class MDFPropPropertyGroup(bpy.types.PropertyGroup):
     prop_name: bpy.props.StringProperty(
