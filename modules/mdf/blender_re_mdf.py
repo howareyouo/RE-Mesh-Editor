@@ -246,16 +246,22 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 
 #MDF EXPORT
 
-def reindexMaterials(mdfCollection):
+def reindexMaterials(mdfCollection, stripSuffix = True):
 
 	if mdfCollection != None:
 
 		# Sort by material name (case-insensitive, matching the Rename Meshes
 		# operator) and capitalize each word of the material name the same way,
 		# so MDF material order and names stay consistent with the mesh.
-		# A trailing "_Mat" suffix is dropped (case-insensitive) in both places.
+		# stripSuffix = True (the manual "Reindex Materials" operator) also
+		# drops a trailing "_Mat" suffix (case-insensitive). Export paths pass
+		# stripSuffix = False so "_Mat" names are preserved in the output file.
+		def normalizeMaterialName(name):
+			if stripSuffix:
+				name = stripREMatSuffix(name)
+			return capitalizeREMaterialName(name)
 		materialObjs = [obj for obj in mdfCollection.all_objects if obj.get("~TYPE",None) == "RE_MDF_MATERIAL"]
-		materialObjs.sort(key = lambda obj: stripREMatSuffix(obj.re_mdf_material.materialName).lower())
+		materialObjs.sort(key = lambda obj: normalizeMaterialName(obj.re_mdf_material.materialName).lower())
 		for currentIndex, obj in enumerate(materialObjs):
 			#Change the material name in the mdf material settings to the one in the object name
 			#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
@@ -263,7 +269,7 @@ def reindexMaterials(mdfCollection):
 				objMaterialName = obj.name.rsplit("(",1)[1].split(")")[0]
 				if objMaterialName != obj.re_mdf_material.materialName:
 					obj.re_mdf_material.materialName = objMaterialName
-			obj.re_mdf_material.materialName = capitalizeREMaterialName(stripREMatSuffix(obj.re_mdf_material.materialName))
+			obj.re_mdf_material.materialName = normalizeMaterialName(obj.re_mdf_material.materialName)
 			obj.name = "Material "+str(currentIndex).zfill(2)+ " ("+obj.re_mdf_material.materialName+")"
 def MDFErrorCheck(collectionName):
 	print("\nChecking for problems with MDF structure...")
@@ -362,7 +368,7 @@ def buildMDF(mdfCollectionName,mdfVersion = None):
 	if mdfVersion == None:
 		
 		mdfVersion = getMDFVersionToGameName(bpy.context.scene.re_mdf_toolpanel.activeGame)
-	reindexMaterials(mdfCollection)
+		reindexMaterials(mdfCollection, stripSuffix = False)
 	if mdfCollection != None:
 		valid = MDFErrorCheck(mdfCollectionName)
 	else:

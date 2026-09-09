@@ -27,8 +27,6 @@ STANDARD_SAMPLES = 1
 AO_SAMPLES = 1024
 
 
-
-
 def does_region_exist(region):
 	""" hack: https://github.com/blender/blender/blob/83dcaf0501390bef1c6073f9e3103923c405050a/scripts/addons_core/bl_pkg/bl_extension_notify.py#L544 """
 	try:
@@ -878,7 +876,7 @@ class WM_OT_ConvertToREEngine(Operator):
 					materialSubMeshIndexDict[obj.data.materials[0].name] = 0
 				obj.name = f"Group_0_Sub_{materialSubMeshIndexDict[obj.data.materials[0].name]}__"+materialInfoDict[obj.data.materials[0].name]["materialName"]
 				materialSubMeshIndexDict[obj.data.materials[0].name] += 1
-			reindexMaterials(mdfCollection)
+			reindexMaterials(mdfCollection, stripSuffix = False)
 			
 			bpy.ops.re_tex.convert_tex_directory(skipPrompt = True)
 			bpy.ops.re_tex.copy_converted_tex()
