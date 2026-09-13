@@ -22,7 +22,8 @@ from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
 from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, getREMeshMaterialName
-from ..blender_utils import showErrorMessageBox, showMessageBox, getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix
+from ..blender_utils import (showErrorMessageBox, showMessageBox, getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix,
+	findMDFCollectionForMesh, getMDFMaterialNames, MESH_COLLECTION_TYPE)
 import time
 import numpy as np
 import math
@@ -931,7 +932,7 @@ def importREMeshFile(filePath, options):
 			parentCollection = getCollection(meshFileName.split(".mesh")[0], makeNew=True)
 		meshCollection = getCollection(meshFileName, parentCollection, makeNew=True)
 		meshCollection.color_tag = "COLOR_01"
-		meshCollection["~TYPE"] = "RE_MESH_COLLECTION"
+		meshCollection["~TYPE"] = MESH_COLLECTION_TYPE
 		meshCollection["LODGroupNameHash"] = str(reMesh.fileHeader.lodGroupNameHash)
 		setAssetPathFromFilePath(filePath, meshCollection)
 		bpy.context.scene.re_mdf_toolpanel.meshCollection = meshCollection
@@ -2126,11 +2127,20 @@ def exportREMeshFile(filePath, options):
 
 	# Warning: Compare the exported mesh materials against the materials in the mesh's MDF file
 	if parsedMesh.materialNameList:
-		mdfPath = findMDFPathFromMeshPath(filePath, gameName)
-		if mdfPath != None and os.path.isfile(mdfPath):
+		# Prefer the MDF data in the scene (live, reflects renames made after import)
+		mdfMaterialNameSet = getMDFMaterialNames(findMDFCollectionForMesh(targetCollection)) or None
+		if mdfMaterialNameSet == None:
+			# No MDF data in the scene for this mesh, fall back to the .mdf2 on disk
+			mdfPath = findMDFPathFromMeshPath(filePath, gameName)
+			if mdfPath != None and os.path.isfile(mdfPath):
+				try:
+					mdfMaterialNameSet = set(
+						material.materialName for material in readMDF(mdfPath).materialList)
+				except Exception as err:
+					print(f"Could not read MDF to compare mesh materials: {str(err)}")
+					mdfMaterialNameSet = None
+		if mdfMaterialNameSet is not None:
 			try:
-				mdfMaterialNameSet = set(
-					material.materialName for material in readMDF(mdfPath).materialList)
 				mdfLowerNameDict = {name.lower(): name for name in mdfMaterialNameSet}
 				for materialName in parsedMesh.materialNameList:
 					if materialName.lower() in mdfLowerNameDict:

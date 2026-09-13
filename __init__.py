@@ -19,7 +19,7 @@ from bpy_extras.io_utils import ExportHelper,ImportHelper
 from bpy.props import StringProperty, BoolProperty,IntProperty, EnumProperty, CollectionProperty,PointerProperty
 from bpy.types import Operator, OperatorFileListElement,AddonPreferences
 from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder,parseFileVersion
-from .modules.blender_utils import printEditorHeader
+from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .modules.mesh.blender_re_mesh import importREMeshFile,exportREMeshFile
@@ -830,7 +830,7 @@ class ExportREMesh(Operator, ExportHelper):
 		
 		if self.targetCollection in bpy.data.collections:
 			collection = bpy.data.collections[self.targetCollection]
-			if not collection.get("~TYPE") == "RE_MESH_COLLECTION" and not collection.name.endswith(".mesh"):
+			if not isMeshCollection(collection):
 				row = layout.row()
 				row.alert=True
 				row.label(icon = "ERROR",text="Collection is not a mesh collection.")
@@ -997,7 +997,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_05")
 		if self.targetCollection in bpy.data.collections:
 			collection = bpy.data.collections[self.targetCollection]
-			if not collection.get("~TYPE") == "RE_MDF_COLLECTION" and not collection.name.endswith(".mdf2"):
+			if not isMDFCollection(collection):
 				row = layout.row()
 				row.alert=True
 				row.label(icon = "ERROR",text="Collection is not a MDF collection.")
@@ -1225,7 +1225,7 @@ class ExportRESFur(bpy.types.Operator, ExportHelper):
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_08")
 		if self.targetCollection in bpy.data.collections:
 			collection = bpy.data.collections[self.targetCollection]
-			if not collection.get("~TYPE") == "RE_SFUR_COLLECTION" and not collection.name.endswith(".sfur"):
+			if not isSFurCollection(collection):
 				row = layout.row()
 				row.alert=True
 				row.label(icon = "ERROR",text="Collection is not a SFUR collection.")

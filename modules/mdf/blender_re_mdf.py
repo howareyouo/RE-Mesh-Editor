@@ -1,7 +1,9 @@
 import os
 import bpy
 
-from ..blender_utils import showMessageBox,showErrorMessageBox,createRECollection,setAssetPathFromFilePath,createEmpty,checkNameUsage
+from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
+	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
+	isMDFCollection, isMeshCollection)
 from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .ui_re_mdf_panels import tag_redraw
@@ -119,7 +121,7 @@ def findHeaderObj():
 def createMDFCollection(collectionName,parentCollection = None):
 	collection = createRECollection(
 		collectionName, parentCollection,
-		color_tag="COLOR_05", customProps={"~TYPE": "RE_MDF_COLLECTION"})
+		color_tag="COLOR_05", customProps={"~TYPE": MDF_COLLECTION_TYPE})
 	bpy.context.scene.re_mdf_toolpanel.mdfCollection = collection
 	return collection
 
@@ -208,7 +210,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 	#MATERIALS IMPORT
 	for index, material in enumerate(mdfFile.materialList):
 		name = "Material "+str(index).zfill(2)+ " ("+material.materialName+")"
-		materialObj = createEmpty(name,[("~TYPE","RE_MDF_MATERIAL")],None,mdfCollection)
+		materialObj = createEmpty(name,[("~TYPE",MDF_MATERIAL_TYPE)],None,mdfCollection)
 		#gameName = getMDFVersionToGameName(mdfVersion)
 		if gameName != -1:
 			materialObj.re_mdf_material.gameName = gameName
@@ -260,7 +262,7 @@ def reindexMaterials(mdfCollection, stripSuffix = True):
 			if stripSuffix:
 				name = stripREMatSuffix(name)
 			return capitalizeREMaterialName(name)
-		materialObjs = [obj for obj in mdfCollection.all_objects if obj.get("~TYPE",None) == "RE_MDF_MATERIAL"]
+		materialObjs = list(iterMDFMaterialObjects(mdfCollection))
 		materialObjs.sort(key = lambda obj: normalizeMaterialName(obj.re_mdf_material.materialName).lower())
 		for currentIndex, obj in enumerate(materialObjs):
 			#Change the material name in the mdf material settings to the one in the object name
@@ -297,13 +299,13 @@ def MDFErrorCheck(collectionName):
 		findHeader = True
 	for obj in objList:
 		
-		if obj.get("~TYPE",None) == "RE_MDF_MATERIAL":
+		if obj.get("~TYPE",None) == MDF_MATERIAL_TYPE:
 			if obj.re_mdf_material.materialName not in materialNameSet:
 				materialNameSet.add(obj.re_mdf_material.materialName)
 			else:
 				errorList.append("Duplicate material name on " + obj.name+". Set the material name in the custom properties of the material object to a different name.")
 	
-	meshCollectionName = collectionName.replace(".mdf2",".mesh",1).replace("_v00","",1).replace("_Mat","",1)
+	meshCollectionName = getMeshCollectionNameFromMDFName(collectionName)
 	meshCollection = bpy.data.collections.get(meshCollectionName,None)
 	if meshCollection != None:
 		for obj in meshCollection.all_objects:
@@ -375,7 +377,7 @@ def buildMDF(mdfCollectionName,mdfVersion = None):
 		showErrorMessageBox("MDF collection is not set, cannot export")
 		valid = False
 	if valid:
-		materialObjList = sorted([child for child in mdfCollection.all_objects if child.get("~TYPE",None) == "RE_MDF_MATERIAL"],key = lambda item: item.re_mdf_material.materialName)
+		materialObjList = sorted(iterMDFMaterialObjects(mdfCollection),key = lambda item: item.re_mdf_material.materialName)
 		newMDFFile = MDFFile()
 		newMDFFile.fileVersion = mdfVersion
 		newMDFFile.Header.version = 1

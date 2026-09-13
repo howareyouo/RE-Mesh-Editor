@@ -15,6 +15,7 @@ from bpy.props import (StringProperty,
 from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
+from ..blender_utils import isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName
 
 
 
@@ -43,13 +44,13 @@ except Exception as err:
 #print(editablePropsSet)
 
 def filterMDFCollection(self, collection):
-    return True if ((collection.get("~TYPE") == "RE_MDF_COLLECTION") or (".mdf2" in collection.name)) else False
+    return isMDFCollection(collection)
 
 def filterMeshCollection(self, collection):
-    return True if ((collection.get("~TYPE") == "RE_MESH_COLLECTION") or (".mesh" in collection.name)) else False
+    return isMeshCollection(collection)
 
 def filterSFurCollection(self, collection):
-    return True if ((collection.get("~TYPE") == "RE_SFUR_COLLECTION") or (".sfur" in collection.name)) else False
+    return isSFurCollection(collection)
 
 
 flags = MDFFlags()#Bitflag struct
@@ -74,7 +75,7 @@ def linkBlenderMaterial(materialObj,materialName):
 				mdfCollectionName = collection.name
 		
 		if mdfCollectionName != None:
-			meshCollection = bpy.data.collections.get(mdfCollectionName.replace(".mdf2",".mesh",1).replace("_v00","",1).replace("_Mat","",1),None)
+			meshCollection = bpy.data.collections.get(getMeshCollectionNameFromMDFName(mdfCollectionName),None)
 			
 			if meshCollection != None:
 				meshObj = None#Mesh object with mdf material assigned to it
@@ -92,8 +93,9 @@ def linkBlenderMaterial(materialObj,materialName):
 							break						
 
 def update_mdfCollection(self, context):#Set mesh collection automatically if it exists when active mdf is changed
-	if self.mdfCollection != None and self.mdfCollection.name.replace(".mdf2",".mesh") in bpy.data.collections:
-		self.meshCollection = bpy.data.collections[self.mdfCollection.name.replace(".mdf2",".mesh")]
+	meshCollectionName = getMeshCollectionNameFromMDFName(self.mdfCollection.name) if self.mdfCollection != None else None
+	if meshCollectionName != None and meshCollectionName in bpy.data.collections:
+		self.meshCollection = bpy.data.collections[meshCollectionName]
 								
 def update_materialNodes(self,context):
 	obj = self.id_data

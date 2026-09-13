@@ -65,6 +65,77 @@ def setAssetPathFromFilePath(filePath, collection):
 	except:
 		print("Failed to set asset path from file path, file is likely not in a natives folder.")
 
+# ---------------------------------------------------------------- RE collection helpers
+# Mesh/MDF/SFur collections are identified by a "~TYPE" custom property (set on
+# import) and/or by their name suffix (.mesh / .mdf2 / .sfur). These helpers are the
+# single source of truth for that convention; importers, exporters and operators all
+# route through them so the rules can't drift apart.
+MDF_COLLECTION_TYPE = "RE_MDF_COLLECTION"
+MESH_COLLECTION_TYPE = "RE_MESH_COLLECTION"
+SFUR_COLLECTION_TYPE = "RE_SFUR_COLLECTION"
+MDF_MATERIAL_TYPE = "RE_MDF_MATERIAL"
+
+def isMDFCollection(collection):
+	"""True if the collection is an RE MDF collection (by ~TYPE or .mdf2 name)."""
+	return collection != None and (collection.get("~TYPE") == MDF_COLLECTION_TYPE or ".mdf2" in collection.name)
+
+def isMeshCollection(collection):
+	"""True if the collection is an RE mesh collection (by ~TYPE or .mesh name)."""
+	return collection != None and (collection.get("~TYPE") == MESH_COLLECTION_TYPE or ".mesh" in collection.name)
+
+def isSFurCollection(collection):
+	"""True if the collection is an RE SFur collection (by ~TYPE or .sfur name)."""
+	return collection != None and (collection.get("~TYPE") == SFUR_COLLECTION_TYPE or ".sfur" in collection.name)
+
+def getMeshCollectionNameFromMDFName(mdfCollectionName):
+	"""Derive the mesh collection name from a MDF collection name.
+
+	"<name>.mdf2" -> "<name>.mesh", dropping the optional _v00 / _Mat modifiers
+	used by some games' MDF files."""
+	return mdfCollectionName.replace(".mdf2", ".mesh", 1).replace("_v00", "", 1).replace("_Mat", "", 1)
+
+def iterMDFMaterialObjects(collection):
+	"""Yield the RE_MDF_MATERIAL objects inside a collection (empty if collection is None)."""
+	if collection == None:
+		return
+	for obj in collection.all_objects:
+		if obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
+			yield obj
+
+def getMDFMaterialNames(mdfCollection):
+	"""Return the set of material names held by an MDF collection, read live from the
+	scene (so it reflects any renames made after import)."""
+	return set(obj.re_mdf_material.materialName for obj in iterMDFMaterialObjects(mdfCollection))
+
+def findMDFCollectionForMesh(meshCollection):
+	"""Find the MDF collection associated with a mesh collection.
+
+	Resolution order:
+	1. Naming convention: <base>.mdf2 / <base>_Mat.mdf2 / <base>_v00.mdf2
+	2. A sibling MDF collection under the same parent collection
+	3. The MDF collection currently selected in the MDF tool panel
+	Returns None if no MDF collection is found."""
+	if meshCollection == None:
+		return None
+	# 1. Naming convention
+	baseName = meshCollection.name
+	if baseName.endswith(".mesh"):
+		baseName = baseName[:-len(".mesh")]
+	for candidate in (f"{baseName}.mdf2", f"{baseName}_Mat.mdf2", f"{baseName}_v00.mdf2"):
+		collection = bpy.data.collections.get(candidate)
+		if collection != None:
+			return collection
+	# 2. Sibling MDF collection under the same parent collection
+	for parent in (col for col in bpy.data.collections if meshCollection.name in col.children):
+		for child in parent.children:
+			if isMDFCollection(child):
+				return child
+	# 3. MDF collection selected in the MDF tool panel
+	panel = getattr(bpy.context.scene, "re_mdf_toolpanel", None)
+	if panel != None and panel.mdfCollection != None and panel.meshCollection == meshCollection:
+		return panel.mdfCollection
+	return None
+
 def createEmpty(name, propertyList, parent=None, collection=None):
 	"""Create a Blender Empty object with display type PLAIN_AXES, custom
 	properties, and link to a collection."""

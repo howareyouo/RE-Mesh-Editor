@@ -124,6 +124,88 @@ def test_export_warnings(tmpDir):
     check("unused MDF material listed", "[OtherMat]" in out2)
 
 
+# ---------------------------------------------------------------- 2c. Renamed MDF must be read live
+def test_mdf_renamed_in_blender(tmpDir):
+    """Regression: after renaming mesh/materials in Blender, the exporter must
+    compare against the MDF data in the scene, not a stale .mdf2 on disk.
+    A stale disk MDF is simulated by stubbing findMDFPathFromMeshPath/readMDF to
+    return the OLD material names; the live MDF collection holds the NEW names."""
+    import modules.mesh.blender_re_mesh as m
+    m.showMessageBox = lambda *a, **k: None
+
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    arm = bpy.data.armatures.new("Arm")
+    armObj = bpy.data.objects.new("Armature", arm)
+    bpy.context.scene.collection.objects.link(armObj)
+    bpy.context.view_layer.objects.active = armObj
+    bpy.ops.object.mode_set(mode='EDIT')
+    e1 = arm.edit_bones.new("J_Bip_C_Head")
+    e1.head, e1.tail = (0, 0, 0), (0, 0, 0.1)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    parent = bpy.data.collections.new("HookGun")
+    bpy.context.scene.collection.children.link(parent)
+    meshCol = bpy.data.collections.new("HookGun.mesh")
+    parent.children.link(meshCol)
+    meshCol["~TYPE"] = "RE_MESH_COLLECTION"
+    mdfCol = bpy.data.collections.new("HookGun.mdf2")
+    parent.children.link(mdfCol)
+    mdfCol["~TYPE"] = "RE_MDF_COLLECTION"
+
+    me = bpy.data.meshes.new("m")
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me.update()
+    me.uv_layers.new(name="UVMap")
+    me.materials.append(bpy.data.materials.new("NewMat"))
+    obj = bpy.data.objects.new("Group_0_Sub_0__NewMat", me)
+    meshCol.objects.link(obj)
+    vg = obj.vertex_groups.new(name="J_Bip_C_Head")
+    vg.add([0, 1, 2], 1.0, 'REPLACE')
+
+    # Live MDF material object holding the NEW (renamed) material name
+    matObj = bpy.data.objects.new("Material 00 (NewMat)", None)
+    matObj["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj.re_mdf_material.materialName = "NewMat"
+    mdfCol.objects.link(matObj)
+
+    meshPath = os.path.join(tmpDir, "HookGun.mesh.221108797")
+    options = dict(EXPORT_OPTIONS)
+    options["targetCollection"] = meshCol.name
+
+    class StubMaterial:
+        def __init__(self, name):
+            self.materialName = name
+
+    class StaleMDF:
+        materialList = [StubMaterial("OldMat")]
+
+    originalFindMDF = m.findMDFPathFromMeshPath
+    originalReadMDF = m.readMDF
+    m.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
+    m.readMDF = lambda path: StaleMDF()
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = m.exportREMeshFile(meshPath, dict(options))
+        out = buf.getvalue()
+    finally:
+        m.findMDFPathFromMeshPath = originalFindMDF
+        m.readMDF = originalReadMDF
+
+    check("renamed-mdf export succeeds", result is True)
+    check("stale-disk MDF material NOT reported as unused",
+          "[OldMat]" not in out)
+    check("renamed material NOT reported as missing from MDF",
+          "[NewMat]" not in out)
+    check("no MDF material mismatch warning at all",
+          "MDF Material Not Used By Mesh" not in out
+          and "Mesh Material Missing From MDF" not in out)
+
+
 # ---------------------------------------------------------------- 3. Streaming tex conversion
 def makeFakeDDS(width, height):
     from modules.dds.file_dds import DDS, DX10_Header
@@ -246,6 +328,10 @@ def main():
         test_export_warnings(tmpDir)
     except Exception:
         check("export warnings test crashed", False, traceback.format_exc())
+    try:
+        test_mdf_renamed_in_blender(tmpDir)
+    except Exception:
+        check("renamed-mdf test crashed", False, traceback.format_exc())
     try:
         test_streaming_tex(tmpDir)
     except Exception:

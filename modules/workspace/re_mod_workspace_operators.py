@@ -18,7 +18,7 @@ from .texturepacker.texture_bake import bakeMaterialMaps
 from .texturepacker.texture_pack import packTextures
 from .texturepacker.re_texture_analysis import analyzeMaterial,analyzePreset
 from .texturepacker.image_utils import generatePlaceholderMaps
-from ..blender_utils import showMessageBox
+from ..blender_utils import showMessageBox, findMDFCollectionForMesh
 
 FILE_FORMAT = "TARGA"#Only viable option for all softwares, png is annoying to open in photoshop, tiff conversion doesn't work on linux, only problem is tga files are big
 FILE_EXT = ".tga"
@@ -513,21 +513,10 @@ class WM_OT_ConvertToREEngine(Operator):
 			if bpy.context.scene["REMeshLastImportedCollection"] in bpy.data.collections:
 				meshCollection = bpy.data.collections[bpy.context.scene["REMeshLastImportedCollection"]]
 				self.meshCollectionName = meshCollection.name
-				#Find mdf collection by finding parent collection of mesh and then searching the child collection for the mdf
-				parentCollection = None
-				if meshCollection.users > 1:
-					for collection in bpy.data.collections:
-						if meshCollection.name in collection.children:
-							parentCollection = collection
-							break
-				if parentCollection != None:
-					for collection in parentCollection.children:
-						if collection.get("~TYPE") == "RE_MDF_COLLECTION":
-							mdfCollection = collection
-							self.mdfCollectionName = mdfCollection.name
-							break
-				else:
-					mdfCollection = None
+				#Find the mdf collection associated with the mesh (name convention, sibling collection, or tool panel)
+				mdfCollection = findMDFCollectionForMesh(meshCollection)
+				if mdfCollection != None:
+					self.mdfCollectionName = mdfCollection.name
 					
 		
 		materialNameSet = set()
