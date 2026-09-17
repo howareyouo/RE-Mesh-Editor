@@ -125,7 +125,80 @@ def test_export_warnings(tmpDir):
     check("unused MDF material listed", "[OtherMat]" in out2)
 
 
-# ---------------------------------------------------------------- 2c. Renamed MDF must be read live
+# ---------------------------------------------------------------- 2c. Combined mesh+MDF export
+def test_export_mesh_with_mdf(tmpDir):
+    """The File > Export "RE Mesh + MDF" entry exports both files when an MDF
+    collection is present in the scene collection, and only the mesh when it's
+    not. The regular mesh export must keep exporting only the mesh."""
+    import modules.mesh.blender_re_mesh_export as mex
+    mex.showMessageBox = lambda *a, **k: None
+
+    exporter = bpy.ops.re_mesh.exportfile_with_mdf.get_rna_type()
+    check("mesh+mdf export operator is registered",
+          "exportfile_with_mdf" in dir(bpy.ops.re_mesh))
+    props = exporter.properties.keys()
+    check("mesh+mdf export operator has mesh collection option", "targetCollection" in props)
+    check("mesh+mdf export operator has mesh version option", "filename_ext" in props)
+
+    # Plain mesh export must NOT gain an MDF side effect
+    plainExporter = bpy.ops.re_mesh.exportfile.get_rna_type()
+    check("plain mesh export has no MDF option", "exportMDFToo" not in plainExporter.properties.keys())
+
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    parent = bpy.data.collections.new("Char")
+    bpy.context.scene.collection.children.link(parent)
+    meshCol = bpy.data.collections.new("Char.mesh")
+    parent.children.link(meshCol)
+    meshCol["~TYPE"] = "RE_MESH_COLLECTION"
+    mdfCol = bpy.data.collections.new("Char.mdf2")
+    parent.children.link(mdfCol)
+    mdfCol["~TYPE"] = "RE_MDF_COLLECTION"
+
+    me = bpy.data.meshes.new("m")
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me.update()
+    me.uv_layers.new(name="UVMap")
+    me.materials.append(bpy.data.materials.new("Shirts_Mat"))
+    obj = bpy.data.objects.new("Group_0_Sub_0__Shirts_Mat", me)
+    meshCol.objects.link(obj)
+
+    matObj = bpy.data.objects.new("Material 00 (Shirts_Mat)", None)
+    matObj["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj.re_mdf_material.materialName = "Shirts_Mat"
+    mdfCol.objects.link(matObj)
+
+    meshPath = os.path.join(tmpDir, "Char.mesh.221108797")
+    mdfPath = os.path.join(tmpDir, "Char.mdf2.32")
+
+    # 2c1. Plain mesh export writes ONLY the mesh, even with an MDF collection present
+    result = bpy.ops.re_mesh.exportfile(filepath=meshPath, targetCollection="Char.mesh")
+    check("plain mesh export finishes", result == {'FINISHED'})
+    check("plain mesh export writes mesh file", os.path.isfile(meshPath))
+    check("plain mesh export does NOT write MDF", not os.path.isfile(mdfPath))
+    os.remove(meshPath)
+
+    # 2c2. Mesh + MDF written together by the combined operator
+    result = bpy.ops.re_mesh.exportfile_with_mdf(filepath=meshPath, targetCollection="Char.mesh")
+    check("mesh+mdf combined export finishes", result == {'FINISHED'})
+    check("mesh file written", os.path.isfile(meshPath))
+    check("MDF file written alongside mesh", os.path.isfile(mdfPath))
+    check("MDF collection stores export path", "BatchExport_path" in mdfCol and mdfCol["BatchExport_path"] == mdfPath)
+
+    # 2c3. No MDF collection in scene -> only the mesh is written
+    bpy.data.objects.remove(matObj, do_unlink=True)
+    bpy.data.collections.remove(mdfCol)
+    meshPath2 = os.path.join(tmpDir, "Char2.mesh.221108797")
+    result2 = bpy.ops.re_mesh.exportfile_with_mdf(filepath=meshPath2, targetCollection="Char.mesh")
+    check("mesh-only combined export finishes", result2 == {'FINISHED'})
+    check("mesh still exported without MDF collection", os.path.isfile(meshPath2))
+    check("no MDF written when MDF collection absent",
+          not os.path.isfile(os.path.join(tmpDir, "Char2.mdf2.32")))
+
+# ---------------------------------------------------------------- 2d. Renamed MDF must be read live
 def test_mdf_renamed_in_blender(tmpDir):
     """Regression: after renaming mesh/materials in Blender, the exporter must
     compare against the MDF data in the scene, not a stale .mdf2 on disk.
@@ -456,6 +529,10 @@ def main():
         test_export_warnings(tmpDir)
     except Exception:
         check("export warnings test crashed", False, traceback.format_exc())
+    try:
+        test_export_mesh_with_mdf(tmpDir)
+    except Exception:
+        check("mesh+mdf export test crashed", False, traceback.format_exc())
     try:
         test_mdf_renamed_in_blender(tmpDir)
     except Exception:
