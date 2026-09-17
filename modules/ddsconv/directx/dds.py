@@ -9,7 +9,6 @@ Notes:
 
 import ctypes as c
 from enum import IntEnum
-import os
 
 from . import util
 from .dxgi_format import DXGI_FORMAT, FOURCC_TO_DXGI, BITMASK_TO_DXGI
@@ -443,60 +442,3 @@ class DDSHeader(c.LittleEndianStructure):
         if self.is_array():
             t += "_array"
         return t
-
-
-class DDS:
-    def __init__(self, header, slices=None):
-        self.header = header
-        self.slice_bin_list = slices
-
-    @staticmethod
-    def load(file, verbose=False):
-        with open(file, 'rb') as f:
-            header = DDSHeader.read(f)
-            data_size = util.get_size(f) - f.tell()
-            num_slices = header.get_num_slices()
-            slice_size = data_size // num_slices
-            slices = [f.read(slice_size) for i in range(num_slices)]
-        return DDS(header, slices)
-
-    def save(self, file):
-        folder = os.path.dirname(file)
-        if folder not in ['.', ''] and not os.path.exists(folder):
-            util.mkdir(folder)
-
-        with open(file, 'wb') as f:
-            self.header.write(f)
-            for d in self.slice_bin_list:
-                f.write(d)
-
-    def is_cube(self):
-        return self.header.is_cube()
-
-    def get_array_size(self):
-        return self.header.get_array_size()
-
-    def get_disassembled_dds_list(self):
-        new_dds_num = self.header.depth * self.get_array_size()
-        num_slices = 1 + (5 * self.is_cube())
-        self.header.disassemble()
-        dds_list = []
-        for i in range(new_dds_num):
-            dds = DDS(
-                self.header,
-                self.slice_bin_list[i * num_slices: (i + 1) * num_slices]
-            )
-            dds_list.append(dds)
-        return dds_list
-
-    @staticmethod
-    def assemble(dds_list, is_array=True):
-        header = dds_list[0].header
-        header.assemble(is_array, len(dds_list))
-        for dds in dds_list[1:]:
-            if header.dxgi_format != dds.header.dxgi_format:
-                raise RuntimeError("Failed to assemble dds files. DXGI formats should be the same")
-            if header.width != dds.header.width or header.height != dds.header.height:
-                raise RuntimeError("Failed to assemble dds files. Texture sizes should be the same")
-        slice_bin_list = sum([dds.slice_bin_list for dds in dds_list], [])
-        return DDS(header, slice_bin_list)

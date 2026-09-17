@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Union, Optional
 from enum import IntEnum
 import platform
+from ..gen_functions import IS_WINDOWS, IS_LINUX, IS_MAC
 
 class GDeflateCompressionLevel(IntEnum):
     """
@@ -23,17 +24,6 @@ class GDeflateError(Exception):
     """Custom exception for GDeflate-related errors"""
     pass
 
-
-def is_windows():
-    return platform.system() == 'Windows'
-
-
-def is_linux():
-    return platform.system() == 'Linux'
-
-
-def is_mac():
-    return platform.system() == 'Darwin'
 
 class GDeflate:
     """
@@ -57,9 +47,9 @@ class GDeflate:
             # Try to find the DLL next to the .py file first
             module_dir = Path(__file__).parent.absolute()
 			
-            if is_windows():
+            if IS_WINDOWS:
                 dll_name = "GDeflateWrapper.dll"
-            elif is_linux():
+            elif IS_LINUX:
                 dll_name = "libGDeflateWrapper.so"
 			#elif is_mac():
 				#Maybe TODO

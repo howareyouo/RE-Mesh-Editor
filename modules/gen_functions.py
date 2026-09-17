@@ -306,6 +306,8 @@ def getAdjacentFileVersion(rootPath,fileType):
 	return fileVersion
 
 IS_WINDOWS = platform.system() == 'Windows'
+IS_LINUX = platform.system() == 'Linux'
+IS_MAC = platform.system() == 'Darwin'
 # Addon install root (folder containing __init__.py) and shared Presets directory
 ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRESET_DIR = os.path.join(ADDON_ROOT, "Presets")

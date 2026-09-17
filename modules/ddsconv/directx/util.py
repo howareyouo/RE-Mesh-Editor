@@ -2,6 +2,7 @@
 
 import os
 import platform
+from ...gen_functions import IS_WINDOWS, IS_LINUX, IS_MAC
 
 
 def mkdir(directory):
@@ -27,15 +28,15 @@ def get_os_name():
 
 
 def is_windows():
-    return get_os_name() == 'Windows'
+    return IS_WINDOWS
 
 
 def is_linux():
-    return get_os_name() == 'Linux'
+    return IS_LINUX
 
 
 def is_mac():
-    return get_os_name() == 'Darwin'
+    return IS_MAC
 
 
 def is_arm():

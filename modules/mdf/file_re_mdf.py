@@ -101,17 +101,6 @@ class MDFHeader():
 		self.version = read_ushort(file)
 		self.materialCount = read_ushort(file)
 		self.materialFlags = read_uint64(file)
-	def read_fast(self,file):
-		file.seek(6,1)
-		"""
-		self.magic = read_uint(file)
-		if self.magic != 4605005:
-			raiseError("File is not an MDF file.")
-		self.version = read_ushort(file)
-		"""
-		self.materialCount = read_ushort(file)
-		file.seek(8,1)
-		#self.reserved = read_uint64(file)
 	def write(self,file):
 		write_uint(file,self.magic)
 		write_ushort(file,self.version)
@@ -369,50 +358,6 @@ class Material():
 			#print(f"\tProperty {i} padding amount: {propertyEntry.padding}")
 		file.seek(currentPos)
 		debugprint(self)
-	def read_fast(self,file,version):
-		self.matNameOffset = read_uint64(file)
-		file.seek(12,1)
-		#self.matNameHash = read_uint(file)
-		#self.propBlockSize = read_int(file)
-		#self.propertyCount = read_int(file)
-		self.textureCount = read_int(file)
-		file.seek(24,1)
-		if version >= 31:
-			file.seek(12,1)
-		if version >= 51:
-			file.seek(8,1)
-		#self.flags.read(file)
-		#self.shaderType = read_int(file)
-		#self.propHeadersOffset = read_uint64(file)
-		self.texHeadersOffset = read_uint64(file)
-		#self.GPUBufferOffset = read_uint64(file)
-		#self.propDataOffset = read_uint64(file)
-		#self.mmtrPathOffset = read_uint64(file)
-		currentPos = file.tell()+24
-		if version >= 31:
-			currentPos += 8
-		file.seek(self.matNameOffset)
-		self.materialName = read_unicode_string(file)
-		#file.seek(self.mmtrPathOffset)
-		#self.mmtrPath = read_unicode_string(file)
-		#debugprint(self)
-		file.seek(self.texHeadersOffset)
-		self.textureList = []
-		for i in range(0,self.textureCount):
-			textureEntry = TextureBinding()
-			textureEntry.read(file,version)
-			debugprint(textureEntry)
-			self.textureList.append(textureEntry)
-		"""
-		file.seek(self.propHeadersOffset)
-		self.propertyList = []
-		for i in range(0,self.propertyCount):
-			propertyEntry = Property()
-			propertyEntry.read(file)
-			debugprint(propertyEntry)
-			self.propertyList.append(propertyEntry)
-		"""
-		file.seek(currentPos)
 	def write(self,file,version):
 		write_uint64(file, self.matNameOffset)
 		write_uint(file, self.matNameHash)
@@ -460,15 +405,6 @@ class MDFFile():
 		for i in range(0,self.Header.materialCount):
 			materialEntry = Material()
 			materialEntry.read(file,version)
-			debugprint(materialEntry)
-			self.materialList.append(materialEntry)
-		
-	def read_fast(self,file,version):
-		self.Header.read_fast(file)
-		debugprint(self.Header)
-		for i in range(0,self.Header.materialCount):
-			materialEntry = Material()
-			materialEntry.read_fast(file,version)
 			debugprint(materialEntry)
 			self.materialList.append(materialEntry)
 	
@@ -682,16 +618,6 @@ def readMDF(filepath):
 		mdfFile = MDFFile()
 		mdfFile.fileVersion = version
 		mdfFile.read(file,version)
-	return mdfFile
-def readMDFFast(filepath):
-	print("Opening " + filepath)
-	version = parseFileVersion(filepath, 23)
-	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
-		raiseWarning("No number extension found on mdf file, defaulting to version 23")
-	with openFileRead(filepath) as file:
-		mdfFile = MDFFile()
-		debugprint("File Version "+str(version))
-		mdfFile.read_fast(file,version)
 	return mdfFile
 def writeMDF(mdfFile,filepath):
 	print("Opening " + filepath)
