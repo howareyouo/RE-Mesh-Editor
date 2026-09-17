@@ -6,6 +6,7 @@ from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollec
 	isMDFCollection, isMeshCollection)
 from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
+from .mdf_value import boolPropertySet,colorPropertySet,classify_prop,getPropValue,setPropValue,getPropValueJSON
 from .ui_re_mdf_panels import tag_redraw
 
 MDFGameNameConflictDict = set(["RE2","RE2RT","DD2"])
@@ -82,8 +83,6 @@ def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 	
 
 excludedPropertyNames = set(["~TYPE","_RNA_UI","_vs","s_curve"])
-boolPropertySet = set(["BackFaceNormalFilp","uv1or2_AlphaMap"])#Manually define properties that are bools
-colorPropertySet = set([])#Manually define properties that are colors
 matShaderTypeEnum = {
 	"Standard" : 0x0,
 	"Decal" : 0x1,
@@ -133,19 +132,8 @@ def addPropsToPropList(obj,matPropertyList):
 		newListItem.prop_name = prop.propName
 		newListItem.padding = prop.padding
 		newListItem.frontPadding = prop.frontPadding
-		lowerPropName = prop.propName.lower()
-		if prop.propName in colorPropertySet or (prop.paramCount == 4 and ("color" in lowerPropName or "_col_" in lowerPropName) and "rate" not in lowerPropName):
-			newListItem.data_type = "COLOR"
-			newListItem.color_value = prop.propValue
-		elif prop.paramCount == 1 and ("Use" in prop.propName or "_or_" in prop.propName or prop.propName.startswith("is")) or prop.propName in boolPropertySet:
-			newListItem.data_type = "BOOL"
-			newListItem.bool_value = bool(prop.propValue[0])
-		elif prop.paramCount > 1:
-			newListItem.data_type = "VEC4"
-			newListItem.float_vector_value = tuple(prop.propValue)
-		else:
-			newListItem.data_type = "FLOAT"
-			newListItem.float_value = float(prop.propValue[0])
+		newListItem.data_type = classify_prop(prop.propName, prop.paramCount)
+		setPropValue(newListItem, newListItem.data_type, prop.propValue)
 
 def getTextureBindings(matTextureList):
 	RNADict = {"~TYPE":{"description":"For internal use. Do not change"},"~KEY_ORDER":{"description":"For internal use. Do not change"}}
@@ -341,22 +329,6 @@ def MDFErrorCheck(collectionName):
 		print(errorString)
 		print(textColors.FAIL + "__________________________________\nMDF export failed."+textColors.ENDC)
 		return False
-
-def getPropValue(propertyEntry):
-	if propertyEntry.data_type == "VEC4":
-		value = propertyEntry.float_vector_value 
-	elif propertyEntry.data_type == "COLOR":
-		value = propertyEntry.color_value
-		
-	elif propertyEntry.data_type == "BOOL":
-		if propertyEntry.bool_value:
-			value = [1.0]
-		else:
-			value = [0.0]
-	else:#float
-		value = [propertyEntry.float_value]
-	
-	return value
 
 def fixTexPath(path):#Fix potential path problems
 	if not path.endswith(".rtex"):

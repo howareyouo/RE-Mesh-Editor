@@ -9,7 +9,7 @@ from ..blender_utils import showErrorMessageBox,createEmpty
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
 
-from .blender_re_mdf import boolPropertySet,colorPropertySet
+from .mdf_value import getPropValueJSON,setPropValue
 
 PRESET_VERSION = 5#To be changed when there are changes to material variables
 def saveAsPreset(activeObj,presetName,gameName):
@@ -43,20 +43,7 @@ def saveAsPreset(activeObj,presetName,gameName):
 				
 				materialJSONDict["Property List"] = []
 				for prop in activeObj.re_mdf_material.propertyList_items:
-					
-					if prop.data_type == "VEC4":
-						value = list(prop.float_vector_value)
-					elif prop.data_type == "COLOR":
-						value = list(prop.color_value)
-						
-					elif prop.data_type == "BOOL":
-						if prop.bool_value:
-							value = 1.0
-						else:
-							value = 0.0
-					else:#float
-						value = prop.float_value
-						
+					value = getPropValueJSON(prop)
 					if value.__class__.__name__ == "IDPropertyArray":
 						value = value.to_list()
 					#print(value)	
@@ -163,16 +150,8 @@ def readPresetJSON(filepath,targetCollection = None):
 				prop.frontPadding = propEntry["FrontPadding"]
 			except:
 				pass
-			if prop.data_type == "VEC4":
-				prop.float_vector_value = propEntry["Value"]
-			elif prop.data_type == "COLOR":
-				prop.color_value = propEntry["Value"]
-				
-			elif prop.data_type == "BOOL":
-				prop.bool_value = propEntry["Value"] == 1.0
-			else:#float
-				prop.float_value = propEntry["Value"]
-				
+			setPropValue(prop, prop.data_type, propEntry["Value"])
+			
 		for bindingEntry in materialJSONDict["Texture Bindings"]:
 			binding = materialObj.re_mdf_material.textureBindingList_items.add()
 			binding.textureType = bindingEntry["Texture Type"]

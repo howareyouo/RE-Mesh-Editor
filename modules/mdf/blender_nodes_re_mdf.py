@@ -1,6 +1,6 @@
 import bpy
 import os
-from .blender_re_mdf import colorPropertySet
+from .mdf_value import is_color_prop
 from .blender_re_mesh_mdf import albedoTypeSet
 
 from mathutils import Vector
@@ -376,8 +376,7 @@ def addPropertyNode(prop,currentPos,node_tree):
 	if prop.propName in node_tree.nodes:
 		propNode = node_tree.nodes[prop.propName]
 	else:
-		lowerPropName = prop.propName.lower()
-		if prop.propName in colorPropertySet or (prop.paramCount == 4 and ("color" in lowerPropName or "_col_" in lowerPropName) and "rate" not in lowerPropName):
+		if is_color_prop(prop.propName, prop.paramCount):
 			#RGBA Color
 			nodeGroup = getColorNodeGroup(node_tree)
 			nodeGroup.inputs["Color"].default_value = prop.propValue
