@@ -77,9 +77,10 @@ EXPORT_OPTIONS = {"targetCollection": "", "selectedOnly": False, "exportAllLODs"
 
 def test_export_warnings(tmpDir):
     import modules.mesh.blender_re_mesh as m
+    import modules.mesh.blender_re_mesh_export as mex
 
     # Don't pop message boxes in background mode
-    m.showMessageBox = lambda *a, **k: None
+    mex.showMessageBox = lambda *a, **k: None
 
     meshPath = os.path.join(tmpDir, "test.mesh.221108797")
 
@@ -105,18 +106,18 @@ def test_export_warnings(tmpDir):
     class StubMDF:
         materialList = [StubMaterial("OtherMat")]
 
-    originalFindMDF = m.findMDFPathFromMeshPath
-    originalReadMDF = m.readMDF
-    m.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
-    m.readMDF = lambda path: StubMDF()
+    originalFindMDF = mex.findMDFPathFromMeshPath
+    originalReadMDF = mex.readMDF
+    mex.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
+    mex.readMDF = lambda path: StubMDF()
     try:
         buf2 = io.StringIO()
         with contextlib.redirect_stdout(buf2):
             result2 = m.exportREMeshFile(meshPath, dict(EXPORT_OPTIONS))
         out2 = buf2.getvalue()
     finally:
-        m.findMDFPathFromMeshPath = originalFindMDF
-        m.readMDF = originalReadMDF
+        mex.findMDFPathFromMeshPath = originalFindMDF
+        mex.readMDF = originalReadMDF
     check("export still succeeds with MDF mismatch", result2 is True)
     check("MeshMaterialsMissingFromMDF warning raised", "Mesh Material Missing From MDF" in out2)
     check("missing material name listed", "[TestMat]" in out2)
@@ -131,7 +132,8 @@ def test_mdf_renamed_in_blender(tmpDir):
     A stale disk MDF is simulated by stubbing findMDFPathFromMeshPath/readMDF to
     return the OLD material names; the live MDF collection holds the NEW names."""
     import modules.mesh.blender_re_mesh as m
-    m.showMessageBox = lambda *a, **k: None
+    import modules.mesh.blender_re_mesh_export as mex
+    mex.showMessageBox = lambda *a, **k: None
 
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -183,18 +185,18 @@ def test_mdf_renamed_in_blender(tmpDir):
     class StaleMDF:
         materialList = [StubMaterial("OldMat")]
 
-    originalFindMDF = m.findMDFPathFromMeshPath
-    originalReadMDF = m.readMDF
-    m.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
-    m.readMDF = lambda path: StaleMDF()
+    originalFindMDF = mex.findMDFPathFromMeshPath
+    originalReadMDF = mex.readMDF
+    mex.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
+    mex.readMDF = lambda path: StaleMDF()
     try:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             result = m.exportREMeshFile(meshPath, dict(options))
         out = buf.getvalue()
     finally:
-        m.findMDFPathFromMeshPath = originalFindMDF
-        m.readMDF = originalReadMDF
+        mex.findMDFPathFromMeshPath = originalFindMDF
+        mex.readMDF = originalReadMDF
 
     check("renamed-mdf export succeeds", result is True)
     check("stale-disk MDF material NOT reported as unused",
@@ -281,6 +283,8 @@ def test_streaming_tex(tmpDir):
 # ---------------------------------------------------------------- 4. Occlusion import branch
 def test_occlusion_import():
     import modules.mesh.blender_re_mesh as m
+    from modules.mesh.blender_re_mesh_import import importLODGroup
+    from modules.mesh.blender_re_mesh_utils import createMaterialDict
     from modules.mesh.re_mesh_parse import ParsedREMesh, LODLevel, VisconGroup, SubMesh
 
     parsedMesh = ParsedREMesh()
@@ -304,8 +308,8 @@ def test_occlusion_import():
     parsedMesh.occlusionMeshLODList = [lod]
 
     objectNamesBefore = set(obj.name for obj in bpy.data.objects)
-    materialDict = m.createMaterialDict(["TestMat"])
-    m.importLODGroup(parsedMesh, "Occlusion Mesh", bpy.context.scene.collection,
+    materialDict = createMaterialDict(["TestMat"])
+    importLODGroup(parsedMesh, "Occlusion Mesh", bpy.context.scene.collection,
                      materialDict, None, set(), {}, importAllLODs=False,
                      createCollections=True, importShadowMeshes=False, rotate90=True,
                      mergeGroups=False, importBoundingBoxes=False)
@@ -316,6 +320,51 @@ def test_occlusion_import():
           f"new={len(newObjects)}")
     if newObjects:
         check("occlusion object has geometry", len(newObjects[0].data.polygons) == 1)
+
+
+# ---------------------------------------------------------------- 4b. importMesh must accept numpy buffers directly
+def test_import_meshbuffer_numpy():
+    """Parsed meshes carry numpy buffers; the import hot path must accept them
+    without truth-value errors (`arr or []` raises on array truthiness)."""
+    import numpy as np
+    import modules.mesh.blender_re_mesh as m
+    from modules.mesh.blender_re_mesh_import import importLODGroup
+    from modules.mesh.blender_re_mesh_utils import createMaterialDict
+    from modules.mesh.re_mesh_parse import ParsedREMesh, LODLevel, VisconGroup, SubMesh
+
+    parsedMesh = ParsedREMesh()
+    parsedMesh.materialNameList = ["TestMat"]
+    lod = LODLevel()
+    lod.lodDistance = 100.0
+    viscon = VisconGroup()
+    viscon.visconGroupNum = 0
+    sub = SubMesh()
+    sub.materialIndex = 0
+    sub.subMeshIndex = 1
+    sub.meshVertexOffset = 0
+    sub.isReusedMesh = False
+    sub.vertexPosList = np.asarray([(0, 0, 0), (1, 0, 0), (0, 1, 0)], dtype=np.float32)
+    sub.faceList = np.asarray([(0, 1, 2)], dtype=np.uint32)
+    sub.normalList = np.asarray([(0, 0, 1)] * 3, dtype=np.float32)
+    sub.uvList = np.asarray([(0, 0), (1, 0), (0, 1)], dtype=np.float32)
+    sub.blendShapeList = []
+    viscon.subMeshList = [sub]
+    lod.visconGroupList = [viscon]
+    parsedMesh.occlusionMeshLODList = [lod]
+
+    objectNamesBefore = set(obj.name for obj in bpy.data.objects)
+    materialDict = createMaterialDict(["TestMat"])
+    importLODGroup(parsedMesh, "Occlusion Mesh", bpy.context.scene.collection,
+                     materialDict, None, set(), {}, importAllLODs=False,
+                     createCollections=True, importShadowMeshes=False, rotate90=True,
+                     mergeGroups=False, importBoundingBoxes=False)
+    newObjects = [obj for obj in bpy.data.objects
+                  if obj.name not in objectNamesBefore
+                  and obj.name.startswith("Group_0_Sub_1__TestMat")]
+    check("numpy import creates mesh objects", len(newObjects) == 1,
+          f"new={len(newObjects)}")
+    if newObjects:
+        check("numpy import has geometry", len(newObjects[0].data.polygons) == 1)
 
 
 # ---------------------------------------------------------------- 4. Rename meshes keeps MDF material names in sync
@@ -423,6 +472,10 @@ def main():
         test_occlusion_import()
     except Exception:
         check("occlusion import test crashed", False, traceback.format_exc())
+    try:
+        test_import_meshbuffer_numpy()
+    except Exception:
+        check("numpy import test crashed", False, traceback.format_exc())
 
     print("\n================================")
     if FAILURES:
