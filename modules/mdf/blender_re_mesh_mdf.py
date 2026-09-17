@@ -365,6 +365,50 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	return inputPath	
 
 
+def addPropertyNodeFallback(matInfo, propNames, nodeTree):
+	"""Return a PropertyNode for the first propName present in matInfo's props,
+	or None. Collapses the repeated if/elif fallback chains (Roughness,
+	Metallic, ...) into one lookup."""
+	for propName in propNames:
+		if propName in matInfo["mPropDict"]:
+			return addPropertyNode(matInfo["mPropDict"][propName], matInfo["currentPropPos"], nodeTree)
+	return None
+
+
+def connectAlphaProperty(matInfo, nodes, links, nodeTree, propName):
+	"""Attach a scalar alpha property to matInfo['alphaSocket'], multiplying it
+	into any existing alpha chain. Shared by the Alpha/AlphaIntensity/
+	Transparent fallback chain."""
+	alphaNode = addPropertyNode(matInfo["mPropDict"][propName], matInfo["currentPropPos"], nodeTree)
+	if matInfo["alphaSocket"] == None:
+		matInfo["alphaSocket"] = alphaNode.outputs["Value"]
+	else:
+		alphaMultNode = nodes.new("ShaderNodeMath")
+		alphaMultNode.location = matInfo["alphaSocket"].node.location + Vector((300, 0))
+		alphaMultNode.operation = "MULTIPLY"
+		links.new(matInfo["alphaSocket"], alphaMultNode.inputs[0])
+		links.new(alphaNode.outputs["Value"], alphaMultNode.inputs[1])
+		matInfo["alphaSocket"] = alphaMultNode.outputs["Value"]
+
+
+def addLayerUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, tilingProp, offsetProp):
+	"""Wire a dual-UV mapping node group driven by a UV_TilingN property
+	(layer 1/2). Returns the group node, or None if tilingProp is absent."""
+	if tilingProp not in matInfo["mPropDict"]:
+		return None
+	tilingNode = addPropertyNode(matInfo["mPropDict"][tilingProp], matInfo["currentPropPos"], nodeTree)
+	groupNode = getDualUVMappingNodeGroup(nodeTree)
+	groupNode.location = tilingNode.location + Vector((-300, 0))
+	nodeTree.links.new(UVMap1Node.outputs["UV"], groupNode.inputs["UV1"])
+	nodeTree.links.new(UVMap2Node.outputs["UV"], groupNode.inputs["UV2"])
+	nodeTree.links.new(tilingNode.outputs["Value"], groupNode.inputs["Tiling"])
+	if offsetProp in matInfo["mPropDict"]:
+		offsetNode = addPropertyNode(matInfo["mPropDict"][offsetProp], matInfo["currentPropPos"], nodeTree)
+		nodeTree.links.new(offsetNode.outputs[0], groupNode.inputs["OffsetX"])
+		nodeTree.links.new(offsetNode.outputs[1], groupNode.inputs["OffsetY"])
+	return groupNode
+
+
 def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
@@ -666,14 +710,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					#TODO Look into correct way to apply hair over, alpha is used to blend through two hairover colors, also input order may need to be changed. Alma's hair does not display correctly with inputs not swapped, but swapping causes issues on things without hairover.
 					matInfo["albedoNodeLayerGroup"].addMixLayer(hairOverOutSocket,factorOutSocket = useHairOverFactorSocket,mixType = "MULTIPLY",mixFactor = 1.0,swapInputs = False)
 				#Base layer overrides
-				if "Roughness" in matInfo["mPropDict"]:
-					roughnessNode = addPropertyNode(matInfo["mPropDict"]["Roughness"], matInfo["currentPropPos"], nodeTree)
-					matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
-				elif "Roughness_Param" in matInfo["mPropDict"]:
-					roughnessNode = addPropertyNode(matInfo["mPropDict"]["Roughness_Param"], matInfo["currentPropPos"], nodeTree)
-					matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
-				elif "RoughnessParam" in matInfo["mPropDict"]:
-					roughnessNode = addPropertyNode(matInfo["mPropDict"]["RoughnessParam"], matInfo["currentPropPos"], nodeTree)
+				roughnessNode = addPropertyNodeFallback(matInfo, ["Roughness", "Roughness_Param", "RoughnessParam"], nodeTree)
+				if roughnessNode != None:
 					matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
 				
 				
@@ -769,32 +807,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						#Use secondary uv on base alpha texture if it's enabled on the layer mask
 						#TODO Check this in game, there's a mesh that uses secondary uv but doesn't have base secondary uv flag enabled: "RE4_EXTRACT\re_chunk_000\natives\STM\_Chainsaw\Environment\sm\sm2X\sm21\sm21_515\sm21_515_00.mesh.221108797"
 						links.new(layerMaskUVMappingGroupNode.outputs["Vector"],nodeTree.nodes["BaseAlphaMap"].inputs["Vector"])
-					layer1UVMappingGroupNode = None
-					layer2UVMappingGroupNode = None
-					if "UV_Tiling1" in matInfo["mPropDict"]:
-						uvTiling1Node = addPropertyNode(matInfo["mPropDict"]["UV_Tiling1"], matInfo["currentPropPos"], nodeTree)
-						layer1UVMappingGroupNode = getDualUVMappingNodeGroup(nodeTree)
-						layer1UVMappingGroupNode.location = uvTiling1Node.location + Vector((-300,0))
-						nodeTree.links.new(UVMap1Node.outputs["UV"],layer1UVMappingGroupNode.inputs["UV1"])
-						nodeTree.links.new(UVMap2Node.outputs["UV"],layer1UVMappingGroupNode.inputs["UV2"])
-						nodeTree.links.new(uvTiling1Node.outputs["Value"],layer1UVMappingGroupNode.inputs["Tiling"])
-						if "UV_Tiling_Offset1" in matInfo["mPropDict"]:
-							uvTiling1LocationNode = addPropertyNode(matInfo["mPropDict"]["UV_Tiling_Offset1"], matInfo["currentPropPos"], nodeTree)
-							nodeTree.links.new(uvTiling1LocationNode.outputs[0],layer1UVMappingGroupNode.inputs["OffsetX"])
-							nodeTree.links.new(uvTiling1LocationNode.outputs[1],layer1UVMappingGroupNode.inputs["OffsetY"])
+					layer1UVMappingGroupNode = addLayerUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, "UV_Tiling1", "UV_Tiling_Offset1")
+					layer2UVMappingGroupNode = addLayerUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, "UV_Tiling2", "UV_Tiling_Offset2")
 							
 					
-					if "UV_Tiling2" in matInfo["mPropDict"]:
-						uvTiling2Node = addPropertyNode(matInfo["mPropDict"]["UV_Tiling2"], matInfo["currentPropPos"], nodeTree)
-						layer2UVMappingGroupNode = getDualUVMappingNodeGroup(nodeTree)
-						layer2UVMappingGroupNode.location = uvTiling2Node.location + Vector((-300,0))
-						nodeTree.links.new(UVMap1Node.outputs["UV"],layer2UVMappingGroupNode.inputs["UV1"])
-						nodeTree.links.new(UVMap2Node.outputs["UV"],layer2UVMappingGroupNode.inputs["UV2"])
-						nodeTree.links.new(uvTiling2Node.outputs["Value"],layer2UVMappingGroupNode.inputs["Tiling"])
-						if "UV_Tiling_Offset2" in matInfo["mPropDict"]:
-							uvTiling2LocationNode = addPropertyNode(matInfo["mPropDict"]["UV_Tiling_Offset2"], matInfo["currentPropPos"], nodeTree)
-							nodeTree.links.new(uvTiling2LocationNode.outputs[0],layer2UVMappingGroupNode.inputs["OffsetX"])
-							nodeTree.links.new(uvTiling2LocationNode.outputs[1],layer2UVMappingGroupNode.inputs["OffsetY"])
+					#UV_Tiling2 wired via addLayerUVMapping above
 						
 					
 					if "BaseDielectricMapBase" in matInfo["textureNodeDict"]:
@@ -1169,38 +1186,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						matInfo["isAlphaBlend"] = True
 						
 				if "Alpha" in matInfo["mPropDict"] and "StitchMap" not in matInfo["textureNodeDict"]:  
-					alphaNode = addPropertyNode(matInfo["mPropDict"]["Alpha"], matInfo["currentPropPos"], nodeTree)
-					if matInfo["alphaSocket"] == None:
-						matInfo["alphaSocket"] = alphaNode.outputs["Value"]
-					else:
-						alphaMultNode = nodes.new("ShaderNodeMath")
-						alphaMultNode.location = matInfo["alphaSocket"].node.location + Vector((300,0))
-						alphaMultNode.operation = "MULTIPLY"
-						links.new(matInfo["alphaSocket"],alphaMultNode.inputs[0])
-						links.new(alphaNode.outputs["Value"],alphaMultNode.inputs[1])
-						matInfo["alphaSocket"] = alphaMultNode.outputs["Value"]
+					connectAlphaProperty(matInfo, nodes, links, nodeTree, "Alpha")
 				elif "AlphaIntensity" in matInfo["mPropDict"]:  
-					alphaNode = addPropertyNode(matInfo["mPropDict"]["AlphaIntensity"], matInfo["currentPropPos"], nodeTree)
-					if matInfo["alphaSocket"] == None:
-						matInfo["alphaSocket"] = alphaNode.outputs["Value"]
-					else:
-						alphaMultNode = nodes.new("ShaderNodeMath")
-						alphaMultNode.location = matInfo["alphaSocket"].node.location + Vector((300,0))
-						alphaMultNode.operation = "MULTIPLY"
-						links.new(matInfo["alphaSocket"],alphaMultNode.inputs[0])
-						links.new(alphaNode.outputs["Value"],alphaMultNode.inputs[1])
-						matInfo["alphaSocket"] = alphaMultNode.outputs["Value"]
+					connectAlphaProperty(matInfo, nodes, links, nodeTree, "AlphaIntensity")
 				elif "Transparent" in matInfo["mPropDict"]:  
-					alphaNode = addPropertyNode(matInfo["mPropDict"]["Transparent"], matInfo["currentPropPos"], nodeTree)
-					if matInfo["alphaSocket"] == None:
-						matInfo["alphaSocket"] = alphaNode.outputs["Value"]
-					else:
-						alphaMultNode = nodes.new("ShaderNodeMath")
-						alphaMultNode.location = matInfo["alphaSocket"].node.location + Vector((300,0))
-						alphaMultNode.operation = "MULTIPLY"
-						links.new(matInfo["alphaSocket"],alphaMultNode.inputs[0])
-						links.new(alphaNode.outputs["Value"],alphaMultNode.inputs[1])
-						matInfo["alphaSocket"] = alphaMultNode.outputs["Value"]
+					connectAlphaProperty(matInfo, nodes, links, nodeTree, "Transparent")
 			
 				
 				# MH WILDS FIXES
@@ -1432,16 +1422,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					clampNode.location = (matInfo["metallicNodeLayerGroup"].currentOutSocket.node.location[0]+300,matInfo["metallicNodeLayerGroup"].currentOutSocket.node.location[1])
 					
 					links.new(clampNode.outputs["Result"],nodeBSDF.inputs["Metallic"])
-					metallicNode = None
-					if "Metallic" in matInfo["mPropDict"]:
-						metallicNode = addPropertyNode(matInfo["mPropDict"]["Metallic"], matInfo["currentPropPos"], nodeTree)
-						#matInfo["metallicNodeLayerGroup"].addMixLayer(metallicNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
-					elif "Metallic_Param" in matInfo["mPropDict"]:
-						metallicNode = addPropertyNode(matInfo["mPropDict"]["Metallic_Param"], matInfo["currentPropPos"], nodeTree)
-						#matInfo["metallicNodeLayerGroup"].addMixLayer(metallicNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
-					elif "MetalParam" in matInfo["mPropDict"]:
-						metallicNode = addPropertyNode(matInfo["mPropDict"]["MetalParam"], matInfo["currentPropPos"], nodeTree)
-						#matInfo["metallicNodeLayerGroup"].addMixLayer(metallicNode.outputs["Value"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
+					metallicNode = addPropertyNodeFallback(matInfo, ["Metallic", "Metallic_Param", "MetalParam"], nodeTree)
 					
 					
 					if matInfo["isDielectric"]:
