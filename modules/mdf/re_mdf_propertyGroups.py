@@ -21,26 +21,37 @@ from ..blender_utils import isMDFCollection, isMeshCollection, isSFurCollection,
 
 
 
-def getUsableProps(propFileList):
-	propSet = set()
-	path = os.path.split(__file__)[0]
-	for file in propFileList:
-		f = open(os.path.join(path,file),"r")
-		for line in f.readlines():
-			if "addPropertyNode(matInfo[\"mPropDict\"]" in line:
-				propName = line.split("addPropertyNode(matInfo[\"mPropDict\"][\"")[1].split("\"]",1)[0]
-				propSet.add(propName)
-		f.close()
-	return propSet
-try:
-	editablePropsSet = getUsableProps(
-	propFileList = [
-		
-		"blender_re_mesh_mdf.py",
-		"blender_nodes_re_mdf.py",])
-except Exception as err:
-	print(f"Unable to load usable properties - {str(err)}")
-	editablePropsSet = set()
+#Property names made editable in the material UI - statically maintained
+#(previously scanned from blender_re_mesh_mdf.py / blender_nodes_re_mdf.py at
+#import time via getUsableProps, which broke once property lookups were
+#parameterized; keep in sync when adding new addPropertyNode wiring).
+editablePropsSet = set([
+	"AlphaTestRef","Alpha_UseSecondaryUV","BaseColor","BaseTranslucency",
+	"Cavity_UseSecondaryUV","ColorLayer_A","ColorLayer_B","ColorLayer_G","ColorLayer_R",
+	"ColorParam","ColorParam_MetalMasked","CustomizeColor_0","CustomizeColor_1",
+	"CustomizeColor_2","CustomizeColor_3","CustomizeColor_4","CustomizeColor_5",
+	"CustomizeColor_6","CustomizeColor_7","CustomizeMetal_0","CustomizeMetal_1",
+	"CustomizeMetal_2","CustomizeMetal_3","CustomizeMetal_4","CustomizeMetal_5",
+	"CustomizeMetal_6","CustomizeMetal_7","CustomizeRoughness_0","CustomizeRoughness_1",
+	"CustomizeRoughness_2","CustomizeRoughness_3","CustomizeRoughness_4",
+	"CustomizeRoughness_5","CustomizeRoughness_6","CustomizeRoughness_7",
+	"DetailMap_Level","DetailMap_Tiling_Offset","Detail_Cavity","Detail_NormalBlend",
+	"Detail_Normal_Intensity","Detail_RoughnessBlend","Detail_UVScale","DirtColor1",
+	"DirtColor2","DirtColor3","DirtColorControl","DirtMap_Use_SecondaryUV",
+	"DirtMask_Brightness","DirtMask_Contrast","DirtWearMap_Tiling",
+	"DirtWearMap_Tiling_Offset","Dirt_Roughness","DisappearanceRate","DissolveThreshold",
+	"EmissiveColor","EmissiveIntensity","Emissive_Color","Emissive_Color1",
+	"Emissive_Intensity","Emissive_MaskStrength","Emissive_Power","Emissive_color",
+	"Emissive_intensity","Eyelash_Color","HairOverColorA","HairOverColorB",
+	"LayerMask_Use_SecondaryUV","Nuki","Nuki_Dissolve","OcclusionMap_UseSecondaryUV",
+	"Occlusion_UseSecondaryUV","SSSParam","S_col_G","S_col_G_Emissive_intensity",
+	"S_col_R","S_col_R_Emissive_intensity","Sheen","Stitch_Brightness","Stitch_Color",
+	"Stitch_Contrast","Stitch_Normal_Rate","Stitch_Scale","Stitch_U_offset",
+	"Stitch_V_offset","TearBlendRate","TearColor","TearRoughness","Translucency",
+	"Translucency_Param","UV","UV_Tiling","UV_Tiling_Offset","UseAOSecondaryUV",
+	"UseHairOverMap","UseNuki_Dissolve","UseSecondaryUV_ColorLayer_MaskMap",
+	"Use_A","Use_B","Use_G","Use_R",
+])
 #print(editablePropsSet)
 
 def filterMDFCollection(self, collection):

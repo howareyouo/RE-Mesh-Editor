@@ -164,9 +164,6 @@ from .modules.workspace.ui_re_mod_workspace_panels import (
 	)
 
 
-os.system("color")#Enable console colors
-
-
 def setModDirectoryFromFilePath(filePath):
 	if "re_chunk_000" not in filePath and "re_dlc_stm" not in filePath and "natives" in filePath:
 		try:

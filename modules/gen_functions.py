@@ -41,7 +41,8 @@ class ClampNameList(list):
 
 
 #---General Functions---#
-os.system("color")#Enable console colors
+if platform.system() == 'Windows':
+	os.system("color")  # Enable console colors (Windows only)
 class textColors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'

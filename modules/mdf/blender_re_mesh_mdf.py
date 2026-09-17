@@ -10,25 +10,18 @@ from ..gen_functions import isLinux,resolveLinuxPath,fname
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
 
-def getUsedTextureNodes(propFileList):
-	propSet = set()
-	path = os.path.split(__file__)[0]
-	for file in propFileList:
-		f = open(os.path.join(path,file),"r")
-		for line in f.readlines():
-			if "matInfo[\"textureNodeDict\"][\"" in line:
-				propName = line.split("matInfo[\"textureNodeDict\"][\"")[1].split("\"]",1)[0]
-				propSet.add(propName)
-		f.close()
-	return propSet
-try:
-	usedTextureSet = getUsedTextureNodes(
-	propFileList = [
-		"blender_re_mesh_mdf.py",
-		"blender_nodes_re_mdf.py",])
-except Exception as err:
-	print(f"Unable to load usable properties - {str(err)}")
-	usedTextureSet = set()
+#Texture types referenced via matInfo["textureNodeDict"] - statically maintained
+#(previously scanned from this file at import time via getUsedTextureNodes).
+#Keep in sync when adding new texture node wiring.
+usedTextureSet = set([
+	"BaseDielectricMap_B","BaseDielectricMap_G","BaseDielectricMap_R",
+	"BaseDielectricMapBase","BaseDielectricMap1","BaseDielectricMap2",
+	"NormalRoughnessMap_B","NormalRoughnessMap_G","NormalRoughnessMap_R",
+	"NormalRoughnessCavityMapBase","NormalRoughnessCavityMap1","NormalRoughnessCavityMap2",
+	"DetailMap","DetailMaskMap","DirtWearMap","HairOverMap","LayerMaskOcclusionMap",
+	"MaskMap","OcclusionCavityTranslucentDetailMap","SecondaryBaseColorMap","SkinMap",
+	"Tex2D_0","Tex_Dirty","Tex_Effect","Tex_Normal","tex_lineMusk","tex_noise",
+])
 
 #Detail maps that use regular normal maps
 legacyDetailMapGames = set(["RE2","RE2RT","RE3","RE3RT","RE7RT","DMC5","PRAG"])
