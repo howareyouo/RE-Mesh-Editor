@@ -544,6 +544,10 @@ class ImportREMesh(Operator, ImportHelper):
 	   name = "Merge Mesh Groups",
 	   description = "Merges all submeshes of a mesh group. IMPORTANT: MERGED MESHES CANNOT BE EXPORTED BACK TO MESH",
 	   default = False)
+	mergeSameMaterialSubmeshes : BoolProperty(
+	   name = "Merge Same Material Submeshes",
+	   description = "WARNING: MERGED MESHES LOSE THEIR PER-SUBMESH IDENTITY AND CANNOT BE EXPORTED BACK TO MESH.\nCombines all submeshes that share the same material into one mesh to speed up import. Submeshes with blend shapes, extra weights or DD2 secondary weights are never merged",
+	   default = False)
 	importOcclusionMeshes : BoolProperty(
 	   name = "Import Occlusion Mesh",
 	   description = "Imports occlusion meshes if present",
@@ -608,6 +612,7 @@ class ImportREMesh(Operator, ImportHelper):
 			column2.prop(self, "importAllLODs")
 			column2.prop(self, "createCollections")
 			column2.prop(self, "mergeGroups")
+			column2.prop(self, "mergeSameMaterialSubmeshes")
 			column2.prop(self, "importArmatureOnly")
 		
 			column2.prop(self, "rotate90")
@@ -622,7 +627,7 @@ class ImportREMesh(Operator, ImportHelper):
 			raiseWarning("Could not create texture cache directory at " + bpy.context.preferences.addons[__name__].preferences.textureCachePath)
 		if self.mergeArmature:
 			self.clearScene = False
-		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
+		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"mergeSameMaterialSubmeshes":self.mergeSameMaterialSubmeshes,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
 		printEditorHeader(bl_info)
 		
 		if bpy.context.preferences.addons[__name__].preferences.showConsole:

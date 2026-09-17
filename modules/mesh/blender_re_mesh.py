@@ -541,20 +541,15 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 	return meshObj
 
 
-# Opt-in: build ONE Blender mesh per (viscon group, material) instead of one per
-# submesh, by concatenating same-material submeshes in numpy before creating the
-# mesh. The dominant import cost on many-submesh files is the per-submesh Blender
-# build (mesh create + normals + uv layers + link), so collapsing N submeshes
-# into ~N/materials builds speeds up large imports substantially.
+# Option (importLODGroup's mergeSameMaterialSubmeshes, exposed in the import
+# dialog, OFF by default): build ONE Blender mesh per (viscon group, material)
+# instead of one per submesh, by concatenating same-material submeshes in numpy
+# before creating the mesh. The dominant import cost on many-submesh files is the
+# per-submesh Blender build (mesh create + normals + uv layers + link), so merging
+# N submeshes into ~N/materials builds speeds up large imports substantially.
 # NOTE: merged meshes lose per-submesh identity, so the exported file structure
 # differs from the original on re-export. Reused meshes, blend shapes, extra
 # weights and DD2 secondary weights are never merged (they keep the safe path).
-MERGE_SAME_MATERIAL_SUBMESHES = True
-# A merged mesh must not exceed the RE standard 16-bit index vertex limit (65536),
-# otherwise re-export warns "exceeded the standard limit ... Enabling extended
-# vertex limit". When a bucket's cumulative vertex count would exceed this, the
-# bucket is split into multiple merged meshes. Kept below 65536 to leave headroom
-# for export-time solveRepeatedUVs, which can add vertices by splitting UVs.
 MERGE_VERTEX_LIMIT = 60000
 
 
@@ -626,7 +621,8 @@ def _importMergedSubMeshes(subMeshList, materialName, LODNum, groupNum, boneName
 
 def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureObj, hiddenCollectionSet,
                    meshOffsetDict, importAllLODs=False, createCollections=True, importShadowMeshes=False,
-                   rotate90=True, mergeGroups=False, importBoundingBoxes=False):
+                   rotate90=True, mergeGroups=False, importBoundingBoxes=False,
+                   mergeSameMaterialSubmeshes=False):
 	if meshType == "Main Mesh":
 		shortName = "Main"
 		targetLODList = parsedMesh.mainMeshLODList
@@ -653,7 +649,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 	# Offsets that are referenced by isReusedMesh consumers must stay reachable
 	# through meshOffsetDict, so their source submeshes are never merged.
 	reuseSourceOffsets = set()
-	if MERGE_SAME_MATERIAL_SUBMESHES:
+	if mergeSameMaterialSubmeshes:
 		for lod in targetLODList:
 			for visconGroup in lod.visconGroupList:
 				for subMesh in visconGroup.subMeshList:
@@ -686,7 +682,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 			objMergeList = []
 			LODNum = f"LOD_{str(lodIndex)}_" if importAllLODs else ""
 			mergedSubMeshIDs = set()
-			if MERGE_SAME_MATERIAL_SUBMESHES and not parsedMesh.isMPLY:
+			if mergeSameMaterialSubmeshes and not parsedMesh.isMPLY:
 				# Pre-pass: bucket mergeable same-material submeshes and build each
 				# bucket as ONE larger mesh (fewer Blender builds = faster import).
 				# Buckets are vertex-capped: once adding a submesh would push the
@@ -786,7 +782,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 		firstLOD = False
 	if totalMergedMeshes:
 		print(f"Merged {totalMergedSubMeshes} submeshes into {totalMergedMeshes} meshes "
-		      f"(MERGE_SAME_MATERIAL_SUBMESHES).")
+		      f"(merge same material submeshes).")
 
 
 def importBoundingBox(bbox, bboxName, meshCollection, armatureObj=None, boneParent=None, rotate90=True):
@@ -953,14 +949,16 @@ def importREMeshFile(filePath, options):
 		importLODGroup(parsedMesh, "Main Mesh", meshCollection, materialDict, armatureObj,
 		               hiddenCollectionSet, meshOffsetDict, options["importAllLODs"],
 		               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
-		               options["mergeGroups"], options["importBoundingBoxes"])
+		               options["mergeGroups"], options["importBoundingBoxes"],
+		               options.get("mergeSameMaterialSubmeshes", False))
 		printElapsed("Mesh build", meshBuildStartTime)
 		if options["importOcclusionMeshes"] and parsedMesh.occlusionMeshLODList != []:
 			occlusionBuildStartTime = time.time()
 			importLODGroup(parsedMesh, "Occlusion Mesh", meshCollection, materialDict, armatureObj,
 			               hiddenCollectionSet, meshOffsetDict, options["importAllLODs"],
 			               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
-			               options["mergeGroups"], options["importBoundingBoxes"])
+			               options["mergeGroups"], options["importBoundingBoxes"],
+			               options.get("mergeSameMaterialSubmeshes", False))
 			printElapsed("Occlusion mesh build", occlusionBuildStartTime)
 		if _IMPORT_PHASES:
 			phaseStr = ", ".join(f"{name} {sec * 1000:.0f}ms" for name, sec in sorted(_IMPORT_PHASES.items()))

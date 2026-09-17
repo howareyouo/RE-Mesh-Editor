@@ -283,8 +283,6 @@ def test_occlusion_import():
     import modules.mesh.blender_re_mesh as m
     from modules.mesh.re_mesh_parse import ParsedREMesh, LODLevel, VisconGroup, SubMesh
 
-    m.MERGE_SAME_MATERIAL_SUBMESHES = False  # plain path for the synthetic submesh
-
     parsedMesh = ParsedREMesh()
     parsedMesh.materialNameList = ["TestMat"]
     lod = LODLevel()
