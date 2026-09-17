@@ -14,7 +14,7 @@ import bmesh
 import os
 from math import sqrt
 from mathutils import Vector, Matrix
-from .file_re_mesh import readREMesh, writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
+from .file_re_mesh import readREMesh, writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict, SIX_WEIGHT_MESH_FILE_VERSIONS
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
 from ..mdf.file_re_mdf import readMDF
@@ -1238,10 +1238,11 @@ def exportREMeshFile(filePath, options):
 	maxWeightsPerVertex = 8
 	maxWeightsPerVertexExtended = 16
 	maxWeightedBones = 256
-	SIX_WEIGHT_GAMES = set(["SF6", "MHWILDS", "PRAG"])
-	EXTENDED_WEIGHT_GAMES = set(
-		["MHWILDS", "PRAG", "MHS3", ])  # Games with support for extended weight buffers
-	if gameName in SIX_WEIGHT_GAMES:
+	EXTENDED_WEIGHT_GAMES = set(["MHWILDS", "PRAG", "MHS3"])  # Games with support for extended weight buffers
+	# 6-weight packing must agree with ParsedREMeshToREMesh's isSixWeight, which
+	# keys off the mesh FILE version (mesh_versions.SIX_WEIGHT_MESH_FILE_VERSIONS),
+	# not the game name - keying off gameName here previously skipped MHS3.
+	if meshVersion in SIX_WEIGHT_MESH_FILE_VERSIONS:
 		maxWeightsPerVertex = 6
 		maxWeightsPerVertexExtended = 12
 		maxWeightedBones = 1024

@@ -3,45 +3,10 @@ import os
 
 from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,getStringTableOffset,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
+from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
 import ctypes
 
 DEBUG_MODE = False
-
-gameNameMDFVersionDict = {
-	10:"RE2",#DMC5
-	13:"RE3",
-	19:"RE8",
-	20:"RE8",#RE Verse, imported as RE8
-	21:"RE2RT",#RE3RT
-	23:"MHRSB",
-	31:"SF6",
-	32:"RE4",
-	40:"DD2",
-	#40:"DR",
-	45:"MHWILDS",
-	46:"ONI2",
-	#51:"PRAG",
-	51:"RE9",
-	
-	"DMC5":10,
-	"RE2":10,
-	"RE3":13,
-	"RE8":19,
-	"RE2RT":21,
-	"RE3RT":21,
-	"MHRSB":23,
-	"SF6":31,
-	"RE4":32,
-	"DD2":40,#KG
-	"KG":40,
-	"DR":40,
-	"MHWILDS":45,
-	"ONI2":46,
-	"PRAG":51,
-	"RE9":51,
-	}
-def getMDFVersionToGameName(gameName):
-	return gameNameMDFVersionDict.get(gameName,-1)
 class SIZEDATA():
 	def __init__(self,version):
 		self.HEADER_SIZE = 16

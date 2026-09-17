@@ -217,6 +217,7 @@ baseUVTilingList = set([#Node types that use UV_Tiling property
 
 
 from ..gen_functions import raiseWarning,getBit,wildCardFileSearch
+from ..game_versions import mdfVersionDict, texVersionDict
 from .file_re_mdf import readMDF,getMDFVersionToGameName
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,getMHWildsDetailMapNodeGroup
@@ -251,30 +252,6 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 	fileRoot = glob.escape(split[0])
 	# Take the version from the last dot of the filename (handles e.g. .mesh_.221108797)
 	meshVersion = os.path.splitext(meshPath)[1]
-	mdfVersionDict = {
-		".1808312334":".10",#RE2
-		".1902042334":".13",#RE3
-		".32":".6",#RE7
-		".2101050001":".19",#RE8
-		".2102020001":".20",#RE VERSE
-		".1808282334":".10",#DMC5
-		".2008058288":".19",#MHRise
-		".2109148288":".23",#MHRiseSunbreak
-		".2010231143":".19",#REVerse
-		".2109108288":".21",#RERT
-		".220128762":".21",#RE7RT
-		".221108797":".32",#RE4
-		".230110883":".31",#SF6
-		".231011879":".40",#DD2
-		".240423143":".40",#DD2NEW
-		".240424828":".40",#DR
-		".240820143":".45",#MHWILDS
-		".241111606":".45",#MHWILDS
-		".240827123":".46",#ONI2
-		".250604100":".49",#MHS3
-		#".250925211":".51",#PRAG
-		".250925211":".51",#RE9
-	}
 	mdfVersion = mdfVersionDict.get(meshVersion,None)
 	if mdfVersion == None:#Allow for importing of mdfs that haven't had support added for them yet
 		raiseWarning(f"Attempting to import unknown mdf version (parsed mesh version: {meshVersion}). Falling back to wildcard file search.")	
@@ -365,19 +342,7 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 		mdfPath = None
 			
 	return mdfPath
-texVersionDict = {
-	6:".8",
-	10:".10",
-	13:".190820018",
-	19:".30",
-	20:".31",
-	#21":".34",#Commented out so RE7RT streaming textures will be found
-	23:".28",
-	32:".143221013",
-	#40:".760230703",
-	45:".241106027",
-	51:".250813143",
-  }	
+
 def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	inputPath = None
 	texVersion = texVersionDict.get(mdfVersion,"")
