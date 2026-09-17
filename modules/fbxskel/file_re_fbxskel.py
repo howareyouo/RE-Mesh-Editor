@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte,collectStringOffsets
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte,StringTableBuilder
 from ..hashing.mmh3.pymmh3 import hashUTF16
 
 DEBUG_MODE = False
@@ -137,7 +137,7 @@ class FBXSkelFile():
 		self.header = FBXSkelHeader()
 		self.boneEntryList = []
 		self.boneHashList = []#Sorted by hash value
-		self.stringList = []#Used during writing
+		self.stringTable = StringTableBuilder(write_duplicates=True)
 	def read(self,file):
 		self.header.read(file)
 		debugprint(self.header)
@@ -153,18 +153,17 @@ class FBXSkelFile():
 			entry.read(file)
 			self.boneHashList.append(entry)
 		
-	def gatherStrings(self):
-		return collectStringOffsets(bone.boneName for bone in self.boneEntryList)
-	def recalculateHashesAndOffsets(self,stringOffsetDict):
+	def recalculateHashesAndOffsets(self):
 		self.header.boneCount = len(self.boneEntryList)
 		
 		boneEntriesSize = self.sizeData.BONE_ENTRY_SIZE * len(self.boneEntryList)
 		self.header.hashOffset = self.sizeData.HEADER_SIZE + boneEntriesSize
 		
 		stringTableOffset = self.header.hashOffset + (self.header.boneCount * self.sizeData.HASH_ENTRY_SIZE)
+		self.stringTable = StringTableBuilder(write_duplicates=True)
 		for bone in self.boneEntryList:
 			bone.boneMMH3Hash = hashUTF16(bone.boneName)
-			bone.boneNameOffset = stringOffsetDict[bone.boneName] + stringTableOffset
+			bone.boneNameOffset = self.stringTable.add(bone.boneName) + stringTableOffset
 		self.boneHashList = []
 		for index,boneEntry in enumerate(self.boneEntryList):
 			hashEntry = HashEntry()
@@ -175,8 +174,7 @@ class FBXSkelFile():
 		
 	def write(self,file,version):
 		self.header.version = version
-		stringOffsetDict = self.gatherStrings()
-		self.recalculateHashesAndOffsets(stringOffsetDict)
+		self.recalculateHashesAndOffsets()
 		self.header.write(file)
 		file.seek(self.header.boneOffset)
 		print("Writing Bone Entries")
@@ -189,8 +187,7 @@ class FBXSkelFile():
 			hashEntry.write(file)
 		#Loop to write property headers
 		print("Writing Bone Strings")
-		for boneEntry in self.boneEntryList:
-			write_unicode_string(file, boneEntry.boneName)
+		self.stringTable.write(file)
 def readFBXSkel(filepath):
 	print(textColors.OKCYAN + "__________________________________\nFBXSkel read started." + textColors.ENDC)
 	print("Opening " + filepath)

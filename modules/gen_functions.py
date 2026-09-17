@@ -121,6 +121,61 @@ def getStringTableOffset(stringOffsetDict,string,currentStringOffset):#Returns t
     return offset
 
 
+class StringTableBuilder:
+	"""Capcom-style UTF-16 string table builder with shared string offsets.
+
+	Offsets returned by add()/add_always() are relative to the table start;
+	callers add the table's absolute file offset when storing entry offsets.
+
+	Serialization is deferred to write() so offsets can be gathered in any
+	pass order. write_duplicates controls what write() emits:
+	  False -> each unique string once, in first-seen order (sfur,
+	           previously collectStringOffsets(...).keys())
+	  True  -> every added string, duplicates included, in add order (mdf,
+	           fbxskel - matches vanilla file layout)
+
+	  add()         shared offset: first use allocates, later repeats reuse it.
+	  add_always()  fresh offset on every call (mdf material names).
+	"""
+
+	def __init__(self, write_duplicates=False):
+		self._offsets = {}
+		self._serialized = []
+		self._seen = set()
+		self._cursor = 0
+		self._write_duplicates = write_duplicates
+
+	def add(self, string):
+		offset = self._offsets.get(string)
+		if offset is None:
+			offset = self._cursor
+			self._offsets[string] = offset
+			self._cursor += len(string) * 2 + 2
+		if self._write_duplicates or string not in self._seen:
+			self._serialized.append(string)
+			self._seen.add(string)
+		return offset
+
+	def add_always(self, string):
+		offset = self._cursor
+		self._cursor += len(string) * 2 + 2
+		if self._write_duplicates or string not in self._seen:
+			self._serialized.append(string)
+			self._seen.add(string)
+		return offset
+
+	def offset_of(self, string):
+		return self._offsets[string]
+
+	@property
+	def size(self):
+		return self._cursor
+
+	def write(self, file):
+		for string in self._serialized:
+			write_unicode_string(file, string)
+
+
 def getPaddingAmount(currentPos,alignment):
     return (currentPos*-1)%alignment
 

@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion,collectStringOffsets
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion,StringTableBuilder
 
 class SIZEDATA():
 	def __init__(self,version):
@@ -123,7 +123,7 @@ class SFurFile():
 		
 		self.header = SFurHeader()
 		self.furEntryList = []
-		self.stringList = []#Used during writing
+		self.stringTable = StringTableBuilder()
 	def read(self,file):
 		self.header.read(file)
 		for entryOffset in self.header.offsetList:
@@ -132,9 +132,7 @@ class SFurFile():
 			entry.read(file,self.header.version)
 			self.furEntryList.append(entry)
 		
-	def gatherStrings(self):
-		return collectStringOffsets(string for entry in self.furEntryList for string in (entry.materialName,entry.groomingTexturePath))
-	def recalculateHashesAndOffsets(self,stringOffsetDict):
+	def recalculateHashesAndOffsets(self):
 		
 		self.header.matCount = len(self.furEntryList)
 		
@@ -145,19 +143,17 @@ class SFurFile():
 		currentEntryOffset = self.header.tblOffset + (self.header.matCount * 8)
 		stringTableOffset = currentEntryOffset + furEntrySize
 		self.header.offsetList.clear()
+		self.stringTable = StringTableBuilder()
 		for entry in self.furEntryList:
-			entry.materialNameOffset = stringOffsetDict[entry.materialName] + stringTableOffset
-			entry.groomingTexturePathOffset = stringOffsetDict[entry.groomingTexturePath] + stringTableOffset
+			entry.materialNameOffset = self.stringTable.add(entry.materialName) + stringTableOffset
+			entry.groomingTexturePathOffset = self.stringTable.add(entry.groomingTexturePath) + stringTableOffset
 			self.header.offsetList.append(currentEntryOffset)
 			currentEntryOffset += self.sizeData.SFUR_ENTRY_SIZE
 			
-		for string in stringOffsetDict.keys():
-			self.stringList.append(string)
 	def write(self,file,version):
 		self.header.version = version
 		self.sizeData = SIZEDATA(version)
-		stringOffsetDict = self.gatherStrings()
-		self.recalculateHashesAndOffsets(stringOffsetDict)
+		self.recalculateHashesAndOffsets()
 		self.header.write(file)
 		
 		print("Writing Fur Entries")
@@ -167,8 +163,7 @@ class SFurFile():
 			furEntry = self.furEntryList[index]
 			furEntry.write(file,self.header.version)
 		print("Writing Strings")
-		for string in self.stringList:
-			write_unicode_string(file, string)
+		self.stringTable.write(file)
 def readSFur(filepath):
 	print(textColors.OKCYAN + "__________________________________\nSFur read started." + textColors.ENDC)
 	print("Opening " + filepath)
