@@ -1,16 +1,21 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_uint,read_uint64,read_float,read_ushort,read_ubyte,read_unicode_string,write_uint,write_uint64,write_float,write_ushort,write_ubyte,write_unicode_string,parseFileVersion,StringTableBuilder
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_unicode_string,write_unicode_string,parseFileVersion,StringTableBuilder
+from ..binary_struct import BinaryStruct,u32,u64,f32,u8,u16,arr
 
 class SIZEDATA():
 	def __init__(self,version):
 		self.SFUR_ENTRY_SIZE = 72
 		if version < 5:
 			self.SFUR_ENTRY_SIZE = 80
-		
+			
 
-class SFurHeader():
+class SFurHeader(BinaryStruct):
+	_fields_ = [
+		u32("magic"),u32("version"),u32("matCount"),u32("unkn"),u64("tblOffset"),
+		arr("offsetList","Q","matCount"),
+	]
 	def __init__(self):
 		self.magic = 1381320275#sfur
 		self.version = 5
@@ -18,29 +23,22 @@ class SFurHeader():
 		self.unkn = 0
 		self.tblOffset = 0
 		self.offsetList = []
-	def read(self,file):
-		self.magic = read_uint(file)
+	def post_read(self,file,version):
 		if self.magic != 1381320275:
 			raiseError("File is not an SFur file.")
-		self.version = read_uint(file)
-		self.matCount = read_uint(file)
-		self.unkn = read_uint(file)
-		self.tblOffset = read_uint64(file)
-		self.offsetList.clear()
-		for i in range(0,self.matCount):
-			self.offsetList.append(read_uint64(file))
-	def write(self,file):
-		write_uint(file,self.magic)
-		write_uint(file,self.version)
-		write_uint(file,self.matCount)
-		write_uint(file,self.unkn)
-		write_uint64(file,self.tblOffset)
-		for entry in self.offsetList:
-			write_uint64(file,entry)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class SFurEntry():
+class SFurEntry(BinaryStruct):
+	_fields_ = [
+		u32("shellCount"),u32("shellThinType"),u32("groomingTexCoordType"),
+		f32("shellHeight"),f32("bendRate"),f32("bendRootRate"),f32("normalTransformRate"),
+		f32("stiffness"),f32("stiffnessDistribution"),f32("springCoefficient"),
+		f32("damping"),f32("gravityForceScale"),f32("directWindForceScale"),
+		u8("isForceTwoSide"),u8("isForceAlphaTest"),u16("padding"),
+		u64("unknOffset",cond=lambda v: v < 5),
+		u64("materialNameOffset"),u64("groomingTexturePathOffset"),
+	]
 	def __init__(self):
 		self.shellCount = 0
 		self.shellThinType = 0
@@ -63,57 +61,15 @@ class SFurEntry():
 		self.materialName = "MATERIAL_NAME"
 		self.groomingTexturePathOffset = 0
 		self.groomingTexturePath = ""
-		
-		
-	def read(self,file,version):
-		self.shellCount = read_uint(file)
-		self.shellThinType = read_uint(file)
-		self.groomingTexCoordType = read_uint(file)
-		self.shellHeight = read_float(file)
-		self.bendRate = read_float(file)
-		self.bendRootRate = read_float(file)
-		self.normalTransformRate = read_float(file)
-		self.stiffness = read_float(file)
-		self.stiffnessDistribution = read_float(file)
-		self.springCoefficient = read_float(file)
-		self.damping = read_float(file)
-		self.gravityForceScale = read_float(file)
-		self.directWindForceScale = read_float(file)
-		self.isForceTwoSide = bool(read_ubyte(file))
-		self.isForceAlphaTest = bool(read_ubyte(file))
-		self.padding = read_ushort(file)
-		if version < 5:#WILDS
-			self.unknOffset = read_uint64(file)
-		self.materialNameOffset = read_uint64(file)
-		self.groomingTexturePathOffset = read_uint64(file)
+	def post_read(self,file,version):
+		self.isForceTwoSide = bool(self.isForceTwoSide)
+		self.isForceAlphaTest = bool(self.isForceAlphaTest)
 		currentPos = file.tell()
 		file.seek(self.materialNameOffset)
 		self.materialName = read_unicode_string(file)
 		file.seek(self.groomingTexturePathOffset)
 		self.groomingTexturePath = read_unicode_string(file)
 		file.seek(currentPos)
-	def write(self,file,version):
-		write_uint(file, self.shellCount)
-		write_uint(file, self.shellThinType)
-		write_uint(file, self.groomingTexCoordType)
-		write_float(file, self.shellHeight)
-		write_float(file, self.bendRate)
-		write_float(file, self.bendRootRate)
-		write_float(file, self.normalTransformRate)
-		write_float(file, self.stiffness)
-		write_float(file, self.stiffnessDistribution)
-		write_float(file, self.springCoefficient)
-		write_float(file, self.damping)
-		write_float(file, self.gravityForceScale)
-		write_float(file, self.directWindForceScale)
-		write_ubyte(file, int(self.isForceTwoSide))
-		write_ubyte(file, int(self.isForceAlphaTest))
-		write_ushort(file, self.padding)
-		if version < 5:#WILDS
-			write_uint64(file, self.unknOffset)
-		write_uint64(file, self.materialNameOffset)
-		write_uint64(file, self.groomingTexturePathOffset)
-		
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
