@@ -30,9 +30,9 @@ class OBJECT_PT_MDFObjectModePanel(Panel):
 		layout.prop_search(re_mdf_toolpanel, "mdfCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_05")
 		layout.label(text = "Active Game")
 		layout.prop(re_mdf_toolpanel, "activeGame")
-		layout.operator("re_mdf.reindex_materials")
 		layout.operator("re_mdf.nullify_texture_bindings")
-		
+		layout.operator("re_mdf.clear_unused_textures")
+		layout.operator("re_mdf.reindex_materials")
 		
 		
 class OBJECT_PT_MDFMaterialPresetPanel(Panel):
@@ -56,7 +56,6 @@ class OBJECT_PT_MDFMaterialPresetPanel(Panel):
 		col2 = split.column()
 		col2.prop(re_mdf_toolpanel, "materialPresets")
 		col2.operator("re_mdf.add_preset_material")
-		
 		col2.operator("re_mdf.save_selected_as_preset")
 		col2.operator("re_mdf.open_preset_folder")
 
@@ -64,9 +63,9 @@ class OBJECT_PT_MDFMaterialPreviewPanel(Panel):
 	bl_label = "MDF Preview"
 	bl_idname = "OBJECT_PT_mdf_material_preview_panel"
 	bl_parent_id = "OBJECT_PT_mdf_tools_panel"  # Specify the ID of the parent panel
-	bl_space_type = "VIEW_3D"   
+	bl_space_type = "VIEW_3D"
 	bl_region_type = "UI"
-	bl_category = "RE Mesh"   
+	bl_category = "RE Mesh"
 	bl_options = {'DEFAULT_CLOSED'}
 	
 	def draw(self, context):

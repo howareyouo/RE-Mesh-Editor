@@ -207,6 +207,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 	mdfCollection = createMDFCollection(mdfFileName,parentCollection)
 	bpy.context.scene["REMeshLastImportedMDFVersion"] = mdfVersion
 	setAssetPathFromFilePath(filePath, mdfCollection)
+	mdfCollection["~MDFFILEPATH"] = filePath #Store the source file path so operators can locate the MDF folder
 	#MATERIALS IMPORT
 	for index, material in enumerate(mdfFile.materialList):
 		name = "Material "+str(index).zfill(2)+ " ("+material.materialName+")"

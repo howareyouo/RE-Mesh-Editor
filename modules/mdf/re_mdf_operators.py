@@ -7,7 +7,7 @@ from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
 from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..blender_utils import showErrorMessageBox,createEmpty
-from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF
+from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF,fixTexPath,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
@@ -321,3 +321,105 @@ class WM_OT_NullifyTextureBindings(Operator):
 			return {'FINISHED'}
 		else:
 			return {'CANCELLED'}
+
+class WM_OT_ClearUnusedTextures(Operator):
+	bl_label = "Clear Unused Textures"
+	bl_idname = "re_mdf.clear_unused_textures"
+	bl_context = "objectmode"
+	bl_description = "Moves .tex files in the same folder as the imported MDF that are not referenced by the MDF into a _unused subfolder"
+	@classmethod
+	def poll(self,context):
+		return context.scene.re_mdf_toolpanel.mdfCollection is not None
+
+	def getTexBaseName(self,fname):
+		#Get the .tex base name of a texture file, e.g. "foo.tex" from "foo.tex.123" or "foo.tex.123.pc".
+		#Returns None for files that are not texture files (".rtex", ".txt", etc)
+		lowerName = fname.lower()
+		index = lowerName.find(".tex")
+		if index <= 0:#Ignore junk names like ".tex"
+			return None
+		suffix = lowerName[index+4:]
+		if suffix != "" and not suffix.startswith("."):
+			return None
+		return fname[:index+4]
+
+	def getUnusedTextures(self):
+		#Returns (mdfDir, unusedFileList), or (None,None) if the MDF file path was not stored on the collection or the folder no longer exists
+		mdfCollection = bpy.context.scene.re_mdf_toolpanel.mdfCollection
+		mdfPath = mdfCollection.get("~MDFFILEPATH",None)
+		if mdfPath == None:
+			return (None,None)
+		mdfDir = os.path.dirname(mdfPath)
+		try:
+			fnameList = os.listdir(mdfDir)
+		except OSError as err:
+			print(f"Could not list MDF folder {mdfDir}: {err}")
+			return (None,None)
+		referencedSet = set()
+		for materialObj in iterMDFMaterialObjects(mdfCollection):
+			for binding in materialObj.re_mdf_material.textureBindingList_items:
+				refBase = os.path.basename(fixTexPath(binding.path)).replace("@","").lower()
+				if refBase.endswith(".tex"):
+					referencedSet.add(refBase)
+		unusedList = []
+		for fname in fnameList:
+			filePath = os.path.join(mdfDir,fname)
+			if not os.path.isfile(filePath):
+				continue
+			texBase = self.getTexBaseName(fname)
+			if texBase != None and texBase.lower() not in referencedSet:
+				unusedList.append(filePath)
+		return (mdfDir,unusedList)
+
+	def execute(self, context):
+		mdfDir, unusedList = self.getUnusedTextures()
+		if unusedList == None:
+			self.report({"ERROR"},"The MDF file path was not found on the collection or the folder no longer exists. Re-import the MDF to enable this feature.")
+			return {'CANCELLED'}
+		if len(unusedList) == 0:
+			self.report({"INFO"},"No unused textures found.")
+			return {'CANCELLED'}
+		unusedDir = os.path.join(mdfDir,"_unused")
+		try:
+			os.makedirs(unusedDir,exist_ok = True)
+		except Exception as err:
+			self.report({"ERROR"},"Could not create the _unused folder: "+str(err))
+			return {'CANCELLED'}
+		movedCount = 0
+		for filePath in unusedList:
+			fileName = os.path.basename(filePath)
+			destPath = os.path.join(unusedDir,fileName)
+			suffixIndex = 1
+			while os.path.exists(destPath):
+				name, ext = os.path.splitext(fileName)
+				destPath = os.path.join(unusedDir,f"{name} ({suffixIndex}){ext}")
+				suffixIndex += 1
+			try:
+				os.rename(filePath,destPath)
+				movedCount += 1
+			except Exception as err:
+				print(f"Failed to move {filePath} to _unused: {err}")
+		self.report({"INFO"},f"Moved {movedCount} unused textures to {unusedDir}")
+		return {'FINISHED'}
+
+	def draw(self,context):
+		layout = self.layout
+		layout.label(text = f"Move {self.unusedCount} unused .tex file(s) to the _unused subfolder?")
+		if getattr(self,"otherMDFCount",0) > 0:
+			layout.label(text = f"Warning: {self.otherMDFCount} other MDF file(s) found in the same folder. Textures used by those MDFs will also be moved.",icon = "ERROR")
+
+	def invoke(self, context, event):
+		mdfDir, unusedList = self.getUnusedTextures()
+		if unusedList == None:
+			self.report({"ERROR"},"The MDF file path was not found on the collection or the folder no longer exists. Re-import the MDF to enable this feature.")
+			return {'CANCELLED'}
+		if len(unusedList) == 0:
+			self.report({"INFO"},"No unused textures found.")
+			return {'CANCELLED'}
+		self.unusedCount = len(unusedList)
+		otherMDFCount = 0
+		for fname in os.listdir(mdfDir):
+			if os.path.isfile(os.path.join(mdfDir,fname)) and ".mdf2" in fname.lower():
+				otherMDFCount += 1
+		self.otherMDFCount = otherMDFCount - 1#Exclude the active MDF itself
+		return context.window_manager.invoke_props_dialog(self)

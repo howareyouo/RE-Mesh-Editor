@@ -86,6 +86,7 @@ from .modules.mdf.re_mdf_operators import (
 	WM_OT_FindReplaceAddItem,
 	WM_OT_FindReplaceRemoveItem,
 	WM_OT_NullifyTextureBindings,
+	WM_OT_ClearUnusedTextures,
 	FindReplaceItem,
 	FindReplacePropertyGroup,
 )
@@ -1346,6 +1347,7 @@ classes = [
 	WM_OT_FindReplaceAddItem,
 	WM_OT_FindReplaceRemoveItem,
 	WM_OT_NullifyTextureBindings,
+	WM_OT_ClearUnusedTextures,
 	FindReplaceItem,
 	FindReplacePropertyGroup,
 	
