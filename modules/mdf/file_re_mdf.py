@@ -1,9 +1,10 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,getStringTableOffset,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getStringTableOffset,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_unicode_string,write_uint,write_int,write_uint64,write_float,write_unicode_string
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
+from ..binary_struct import BinaryStruct,u32,u16,u64,i32,skip
 import ctypes
 
 DEBUG_MODE = False
@@ -88,28 +89,27 @@ class MDFFlagsB(ctypes.Union):
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
-class MDFHeader():
+class MDFHeader(BinaryStruct):
+	_fields_ = [
+		u32("magic"),u16("version"),u16("materialCount"),u64("materialFlags"),
+	]
 	def __init__(self):
 		self.magic = 4605005
 		self.version  = 1
 		self.materialCount = 0
 		self.materialFlags = 0
-	def read(self,file):
-		self.magic = read_uint(file)
+	def post_read(self,file,version):
 		if self.magic != 4605005:
 			raise Exception("File is not an MDF file.")
-		self.version = read_ushort(file)
-		self.materialCount = read_ushort(file)
-		self.materialFlags = read_uint64(file)
-	def write(self,file):
-		write_uint(file,self.magic)
-		write_ushort(file,self.version)
-		write_ushort(file,self.materialCount)
-		write_uint64(file,self.materialFlags)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class Property():
+class Property(BinaryStruct):
+	_fields_ = [
+		u64("propNameOffset"),u32("unicodeMMH3Hash"),u32("asciiMMH3Hash"),
+		i32("propDataOffset",cond=lambda v: v >= 13),i32("paramCount",cond=lambda v: v >= 13),
+		i32("paramCount",cond=lambda v: v < 13),i32("propDataOffset",cond=lambda v: v < 13),
+	]
 	def __init__(self):
 		self.propNameOffset = 0
 		self.unicodeMMH3Hash = 0
@@ -121,38 +121,24 @@ class Property():
 		
 		self.padding = 0#To account for SF6's weird spacing between mmtrs properties
 		self.frontPadding = 0
-	def read(self,file,matPropertyDataOffset,version):
-		self.propNameOffset = read_uint64(file)
-		self.unicodeMMH3Hash = read_uint(file)
-		self.asciiMMH3Hash = read_uint(file)
-		if version >= 13:
-			self.propDataOffset = read_int(file)
-			self.paramCount = read_int(file)
-		else:
-			self.paramCount = read_int(file)
-			self.propDataOffset = read_int(file)
+		self.matPropertyDataOffset = 0#Internal: base offset set by Material.read before read()
+	def post_read(self,file,version):
 		currentPos = file.tell()
 		file.seek(self.propNameOffset)
 		self.propName = read_unicode_string(file)
-		file.seek(matPropertyDataOffset+self.propDataOffset)
+		file.seek(self.matPropertyDataOffset+self.propDataOffset)
 		for i in range(0,self.paramCount):
 			self.propValue.append(read_float(file))
 		file.seek(currentPos)
 		debugprint(self)
-	def write(self,file,version):
-		write_uint64(file,self.propNameOffset)
-		write_uint(file,self.unicodeMMH3Hash)
-		write_uint(file,self.asciiMMH3Hash)
-		if version >= 13:
-			write_int(file,self.propDataOffset)
-			write_int(file,self.paramCount)
-		else:
-			write_int(file,self.paramCount)
-			write_int(file,self.propDataOffset)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class TextureBinding():
+class TextureBinding(BinaryStruct):
+	_fields_ = [
+		u64("textureTypeOffset"),u32("unicodeMMH3Hash"),u32("asciiMMH3Hash"),
+		u64("texturePathOffset"),skip(8,cond=lambda v: v >= 13),
+	]
 	def __init__(self):
 		self.textureTypeOffset = 0
 		self.unicodeMMH3Hash = 0
@@ -161,27 +147,14 @@ class TextureBinding():
 		self.textureType = ""
 		self.texturePath = ""
 
-	def read(self,file,version):
-		self.textureTypeOffset = read_uint64(file)
-		self.unicodeMMH3Hash = read_uint(file)
-		self.asciiMMH3Hash = read_uint(file)
-		self.texturePathOffset = read_uint64(file)
+	def post_read(self,file,version):
 		currentPos = file.tell()
 		file.seek(self.textureTypeOffset)
 		self.textureType = read_unicode_string(file)
 		file.seek(self.texturePathOffset)
 		self.texturePath = read_unicode_string(file)
 		file.seek(currentPos)
-		if version >= 13:
-			file.seek(8,1)
 		debugprint(self)
-	def write(self,file,version):
-		write_uint64(file,self.textureTypeOffset)
-		write_uint(file,self.unicodeMMH3Hash)
-		write_uint(file,self.asciiMMH3Hash)
-		write_uint64(file,self.texturePathOffset)
-		if version >= 13:
-			file.seek(8,1)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
@@ -212,27 +185,22 @@ class MMTRSData():
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class GPBFEntry():
+class GPBFEntry(BinaryStruct):
+	_fields_ = [
+		u64("nameOffset"),u32("nameUTF16Hash"),u32("nameUTF8Hash"),
+	]
 	def __init__(self):
 		self.nameOffset = 0
 		self.nameUTF16Hash = 0
 		self.nameUTF8Hash = 0
 		self.name = ""
 
-	def read(self,file):
-		self.nameOffset = read_uint64(file)
-		self.nameUTF16Hash = read_uint(file)
-		self.nameUTF8Hash = read_uint(file)
+	def post_read(self,file,version):
 		currentPos = file.tell()
 		file.seek(self.nameOffset)
 		self.name = read_unicode_string(file)
 		file.seek(currentPos)
 		debugprint(self)
-	def write(self,file):
-		write_uint64(file,self.nameOffset)
-		write_uint(file,self.nameUTF16Hash)
-		write_uint(file,self.nameUTF8Hash)
-		
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
@@ -341,7 +309,8 @@ class Material():
 		#Get padding size of properties for SF6
 		for i in range(0,self.propertyCount):
 			propertyEntry = Property()
-			propertyEntry.read(file,self.propDataOffset,version)
+			propertyEntry.matPropertyDataOffset = self.propDataOffset
+			propertyEntry.read(file,version)
 			#debugprint(propertyEntry)
 			self.propertyList.append(propertyEntry)
 		#print(self.materialName)
