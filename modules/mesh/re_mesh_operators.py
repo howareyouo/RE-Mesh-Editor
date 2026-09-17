@@ -15,7 +15,8 @@ from bpy.props import (StringProperty,
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
 from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix
-from ..blender_utils import showErrorMessageBox
+from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh,
+                             isMDFCollection, isMeshCollection, iterMDFMaterialObjects)
 
 
 class WM_OT_DeleteLoose(Operator):
@@ -83,6 +84,42 @@ class WM_OT_DeleteLoose(Operator):
 		return {'FINISHED'}
 
 
+def renameMDFMaterialsForMeshes(renameMap, meshObjects):
+	"""Rename MDF material objects to match renamed meshes.
+
+	The RE engine requires the mesh object name's material suffix (the part after
+	`__`) to match the MDF material name one-to-one, so every MDF material whose
+	materialName matches a renamed mesh material is renamed to the mesh's new
+	suffix. Targets the MDF collections associated with the mesh objects via
+	findMDFCollectionForMesh; falls back to every MDF material object in the scene
+	when no association can be found. Returns the number of renamed materials.
+	"""
+	if not renameMap or not meshObjects:
+		return 0
+
+	mdfCollections = []
+	for obj in meshObjects:
+		for collection in obj.users_collection:
+			if not isMeshCollection(collection):
+				continue
+			mdfCollection = findMDFCollectionForMesh(collection)
+			if mdfCollection != None and mdfCollection not in mdfCollections:
+				mdfCollections.append(mdfCollection)
+	if not mdfCollections:
+		# No mesh collection -> MDF association, fall back to every MDF in the scene
+		mdfCollections = [col for col in bpy.data.collections if isMDFCollection(col)]
+
+	renamedCount = 0
+	for collection in mdfCollections:
+		for materialObj in iterMDFMaterialObjects(collection):
+			materialName = materialObj.re_mdf_material.materialName
+			newName = renameMap.get(materialName.lower())
+			if newName != None and newName != materialName:
+				materialObj.re_mdf_material.materialName = newName
+				renamedCount += 1
+	return renamedCount
+
+
 class WM_OT_RenameMeshToREFormat(Operator):
 	bl_label = "Rename Meshes"
 	bl_idname = "re_mesh.rename_meshes"
@@ -95,29 +132,44 @@ class WM_OT_RenameMeshToREFormat(Operator):
 			selection = bpy.context.scene.objects
 
 		groupDict = dict()
+		meshObjects = []
 		for selectedObj in selection:
 			if selectedObj.type == "MESH":
 				groupID = parseREMeshGroupID(selectedObj.name)
-				materialName = stripREMatSuffix(getREMeshMaterialName(selectedObj))
+				# Raw material name (as stored in the MDF) so the MDF materials
+				# can be matched later, before the RE-suffix stripping.
+				rawMaterialName = getREMeshMaterialName(selectedObj)
+				materialName = stripREMatSuffix(rawMaterialName)
 				if groupID not in groupDict:
 					groupDict[groupID] = []
-				groupDict[groupID].append((selectedObj, materialName))
+				groupDict[groupID].append((selectedObj, materialName, rawMaterialName))
+				meshObjects.append(selectedObj)
 
 		# Level 1 sort: group ID ascending (ignoring the sub_xx part of the name).
 		# Level 2 sort: material name within each group.
 		# Sub index is then assigned in that order, restarting from 0 for every group.
+		renameMap = dict()
 		for groupID in sorted(groupDict):
 			objList = groupDict[groupID]
 			# Case-insensitive so lowercase names (e.g. "diamond") don't all
 			# land after uppercase ones ("Stockings") in the Sub_N order.
 			objList.sort(key=lambda x: x[1].lower())
-			for subIndex, (obj, materialName) in enumerate(objList):
-				obj.name = f"Group_{str(groupID)}_Sub_{str(subIndex)}__{capitalizeREMaterialName(materialName)}"
+			for subIndex, (obj, materialName, rawMaterialName) in enumerate(objList):
+				newMatName = capitalizeREMaterialName(materialName)
+				obj.name = f"Group_{str(groupID)}_Sub_{str(subIndex)}__{newMatName}"
+				renameMap[rawMaterialName.lower()] = newMatName
+
+		# Keep the MDF material names in sync: the RE engine requires the mesh
+		# name suffix (after the Group_/Sub_ prefix) to match the MDF material name.
+		renamedMDFCount = renameMDFMaterialsForMeshes(renameMap, meshObjects)
 
 		if context.selected_objects == []:
-			self.report({"INFO"}, "Renamed all objects to RE Mesh format")
+			message = "Renamed all objects to RE Mesh format"
 		else:
-			self.report({"INFO"}, "Renamed selected objects to RE Mesh format")
+			message = "Renamed selected objects to RE Mesh format"
+		if renamedMDFCount > 0:
+			message += f" ({renamedMDFCount} MDF material{'s' if renamedMDFCount != 1 else ''} renamed)"
+		self.report({"INFO"}, message)
 		return {'FINISHED'}
 
 

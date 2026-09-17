@@ -318,6 +318,87 @@ def test_occlusion_import():
         check("occlusion object has geometry", len(newObjects[0].data.polygons) == 1)
 
 
+# ---------------------------------------------------------------- 4. Rename meshes keeps MDF material names in sync
+def test_rename_meshes_syncs_mdf_materials(tmpDir):
+    """The RE engine requires the mesh name suffix (after the Group_/Sub_ prefix)
+    to match the MDF material name one-to-one, so renaming meshes must also rename
+    the matching MDF materials."""
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    parent = bpy.data.collections.new("HookGun")
+    bpy.context.scene.collection.children.link(parent)
+    meshCol = bpy.data.collections.new("HookGun.mesh")
+    parent.children.link(meshCol)
+    meshCol["~TYPE"] = "RE_MESH_COLLECTION"
+    mdfCol = bpy.data.collections.new("HookGun.mdf2")
+    parent.children.link(mdfCol)
+    mdfCol["~TYPE"] = "RE_MDF_COLLECTION"
+
+    me = bpy.data.meshes.new("m")
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me.update()
+    me.materials.append(bpy.data.materials.new("Shirts_Mat"))
+    obj = bpy.data.objects.new("Group_0_Sub_0__Shirts_Mat", me)
+    meshCol.objects.link(obj)
+
+    matObj = bpy.data.objects.new("Material 00 (Shirts_Mat)", None)
+    matObj["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj.re_mdf_material.materialName = "Shirts_Mat"
+    mdfCol.objects.link(matObj)
+    # Unrelated MDF material must stay untouched
+    otherObj = bpy.data.objects.new("Material 00 (OtherMat)", None)
+    otherObj["~TYPE"] = "RE_MDF_MATERIAL"
+    otherObj.re_mdf_material.materialName = "OtherMat"
+    mdfCol.objects.link(otherObj)
+
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    result = bpy.ops.re_mesh.rename_meshes()
+
+    check("rename meshes operator finishes", result == {'FINISHED'})
+    check("mesh renamed with new suffix", obj.name == "Group_0_Sub_0__Shirts", obj.name)
+    check("MDF material renamed to match new suffix",
+          matObj.re_mdf_material.materialName == "Shirts", matObj.re_mdf_material.materialName)
+    check("MDF material object name updated", matObj.name == "Material 00 (Shirts)", matObj.name)
+    check("unrelated MDF material untouched",
+          otherObj.re_mdf_material.materialName == "OtherMat")
+
+    # Fallback: mesh not linked to a mesh collection still renames scene MDF materials
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    me2 = bpy.data.meshes.new("m2")
+    me2.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me2.update()
+    me2.materials.append(bpy.data.materials.new("Cloth_Mat"))
+    obj2 = bpy.data.objects.new("Group_1_Sub_2__Cloth_Mat", me2)
+    bpy.context.scene.collection.objects.link(obj2)
+
+    mdfCol2 = bpy.data.collections.new("Loose.mdf2")
+    bpy.context.scene.collection.children.link(mdfCol2)
+    mdfCol2["~TYPE"] = "RE_MDF_COLLECTION"
+    matObj2 = bpy.data.objects.new("Material 00 (Cloth_Mat)", None)
+    matObj2["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj2.re_mdf_material.materialName = "Cloth_Mat"
+    mdfCol2.objects.link(matObj2)
+
+    bpy.context.view_layer.objects.active = obj2
+    bpy.ops.object.select_all(action='DESELECT')
+    obj2.select_set(True)
+    bpy.ops.re_mesh.rename_meshes()
+
+    check("mesh renamed without mesh collection",
+          obj2.name == "Group_1_Sub_0__Cloth", obj2.name)
+    check("fallback MDF material renamed",
+          matObj2.re_mdf_material.materialName == "Cloth", matObj2.re_mdf_material.materialName)
+
+
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
     test_addon_props()
@@ -330,6 +411,10 @@ def main():
         test_mdf_renamed_in_blender(tmpDir)
     except Exception:
         check("renamed-mdf test crashed", False, traceback.format_exc())
+    try:
+        test_rename_meshes_syncs_mdf_materials(tmpDir)
+    except Exception:
+        check("rename-meshes MDF sync test crashed", False, traceback.format_exc())
     try:
         test_streaming_tex(tmpDir)
     except Exception:
