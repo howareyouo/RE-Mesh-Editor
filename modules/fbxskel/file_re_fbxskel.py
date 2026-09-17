@@ -1,8 +1,9 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_short,read_ushort,read_ubyte,read_unicode_string,read_byte,write_uint,write_int,write_uint64,write_float,write_short,write_ushort,write_ubyte,write_unicode_string,write_byte,StringTableBuilder
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_unicode_string,write_unicode_string,StringTableBuilder
 from ..hashing.mmh3.pymmh3 import hashUTF16
+from ..binary_struct import BinaryStruct,u32,u64,i16,f32x3,f32x4,skip
 
 DEBUG_MODE = False
 class SIZEDATA():
@@ -16,39 +17,31 @@ class SIZEDATA():
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
-class FBXSkelHeader():
+class FBXSkelHeader(BinaryStruct):
+	_fields_ = [
+		u32("version"),u32("magic"),skip(8),
+		u32("boneOffset"),skip(4),u32("hashOffset"),skip(4),u32("boneCount"),
+	]
 	def __init__(self):
 		self.version = 5
 		self.magic = 1852599155#skln
 		self.boneOffset = 48
 		self.hashOffset = 0
 		self.boneCount = 0
-	def read(self,file):
-		self.version = read_uint(file)
-		self.magic = read_uint(file)
+	def post_read(self,file,version):
 		if self.magic != 1852599155:
 			raiseError("File is not an FBXSkel file.")
-		file.seek(8,1)
-		self.boneOffset = read_uint(file)
-		file.seek(4,1)
-		self.hashOffset = read_uint(file)
-		file.seek(4,1)
-		self.boneCount = read_uint(file)
-		#self.reserved = read_uint64(file)
-	def write(self,file):
-		write_uint(file,self.version)
-		write_uint(file,self.magic)
-		file.seek(8,1)
-		write_uint(file,self.boneOffset)
-		file.seek(4,1)
-		write_uint(file,self.hashOffset)
-		file.seek(4,1)
-		write_uint(file,self.boneCount)
-		#write_uint64(file,self.reserved)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class BoneEntry():
+class BoneEntry(BinaryStruct):
+	_fields_ = [
+		u64("boneNameOffset"),u32("boneMMH3Hash"),i16("parentIndex"),i16("boneIndex"),
+		f32x4("rotation",cond=lambda v: v >= 5),f32x3("translation",cond=lambda v: v >= 5),
+		f32x3("scale",cond=lambda v: v >= 5),u32("segmentScaling",cond=lambda v: v >= 5),skip(4,cond=lambda v: v >= 5),
+		f32x3("translation",cond=lambda v: v < 5),skip(4,cond=lambda v: v < 5),
+		f32x4("rotation",cond=lambda v: v < 5),f32x3("scale",cond=lambda v: v < 5),skip(4,cond=lambda v: v < 5),
+	]
 	def __init__(self):
 		self.boneNameOffset = 0
 		self.boneName = "BONE_NAME"
@@ -59,75 +52,21 @@ class BoneEntry():
 		self.rotation = (0.0,0.0,0.0,1.0)
 		self.scale = (1.0,1.0,1.0)
 		self.segmentScaling = 0
-	def read(self,file,version):
-		self.boneNameOffset = read_uint64(file)
-		debugprint(self.boneNameOffset)
+	def post_read(self,file,version):
 		currentPos = file.tell()
 		file.seek(self.boneNameOffset)
 		self.boneName = read_unicode_string(file)
 		file.seek(currentPos)
-		self.boneMMH3Hash = read_uint(file)
-		self.parentIndex = read_short(file)
-		self.boneIndex = read_short(file)
-		if version >= 5:
-			self.rotation = (read_float(file),read_float(file),read_float(file),read_float(file))
-			self.translation  = (read_float(file),read_float(file),read_float(file))
-			self.scale = (read_float(file),read_float(file),read_float(file))
-			self.segmentScaling = read_uint(file)
-			file.seek(4,1)
-		else:
-			self.translation  = (read_float(file),read_float(file),read_float(file))
-			file.seek(4,1)
-			self.rotation = (read_float(file),read_float(file),read_float(file),read_float(file))
-			self.scale = (read_float(file),read_float(file),read_float(file))
-			file.seek(4,1)
-		
-	def write(self,file,version):
-		write_uint64(file,self.boneNameOffset)
-		write_uint(file,self.boneMMH3Hash)
-		write_short(file,self.parentIndex)
-		write_short(file,self.boneIndex)
-		if version >= 5:
-			write_float(file,self.rotation[0])
-			write_float(file,self.rotation[1])
-			write_float(file,self.rotation[2])
-			write_float(file,self.rotation[3])
-			write_float(file,self.translation[0])
-			write_float(file,self.translation[1])
-			write_float(file,self.translation[2])
-			write_float(file,self.scale[0])
-			write_float(file,self.scale[1])
-			write_float(file,self.scale[2])
-			write_uint(file,self.segmentScaling)
-			file.seek(4,1)
-		else:
-			write_float(file,self.translation[0])
-			write_float(file,self.translation[1])
-			write_float(file,self.translation[2])
-			file.seek(4,1)
-			write_float(file,self.rotation[0])
-			write_float(file,self.rotation[1])
-			write_float(file,self.rotation[2])
-			write_float(file,self.rotation[3])
-			write_float(file,self.scale[0])
-			write_float(file,self.scale[1])
-			write_float(file,self.scale[2])
-			file.seek(4,1)
-		
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
-class HashEntry():
+class HashEntry(BinaryStruct):
+	_fields_ = [
+		u32("mmh3Hash"),u32("boneIndex"),
+	]
 	def __init__(self):
 		self.mmh3Hash = 0
 		self.boneIndex = 0
-	def read(self,file):
-		self.mmh3Hash = read_uint(file)
-		self.boneIndex = read_uint(file)
-	def write(self,file):
-		write_uint(file,self.mmh3Hash)
-		write_uint(file,self.boneIndex)
-		
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
