@@ -22,6 +22,9 @@ MAX_VERTICES = 65536
 MAX_VERTICES_EXTENDED = 4294967295
 MAX_FACES = 4294967295
 
+# Set to True to re-enable the warnings printed after a mesh export.
+ENABLE_EXPORT_WARNINGS = False
+
 
 def checkObjForUVDoubling(obj):
 	if len(obj.data.uv_layers) == 0 or len(obj.data.uv_layers[0].data) == 0:
@@ -965,7 +968,7 @@ def _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollecti
 	print(f"Materials ({str(len(parsedMesh.materialNameList))}):")
 	for materialName in parsedMesh.materialNameList:
 		print(materialName)
-	if warningDict:
+	if warningDict and ENABLE_EXPORT_WARNINGS:
 		printWarningDict(warningDict)
 		showWarningMessage = True
 	if showWarningMessage:

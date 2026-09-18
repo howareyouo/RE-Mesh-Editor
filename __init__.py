@@ -779,6 +779,10 @@ class ExportREMesh(Operator, ExportHelper):
 	   name = "Export Bounding Boxes",
 	   description = "Exports the original bounding boxes from the \"Import Bounding Boxes\" import option. New bounding boxes will be generated for any bones that do not have them",
 	   default = False)
+	exportMDF : BoolProperty(
+	   name = "Export MDF",
+	   description = "Exports the MDF file for this mesh's collection after the mesh is exported, if an MDF collection exists in the scene collection",
+	   default = False)
 	def invoke(self, context, event):
 		if context.scene.get("REMeshLastImportedMeshVersion",0) in meshFileVersionToGameNameDict:
 			if context.scene["REMeshLastImportedMeshVersion"] == 231011879:
@@ -863,6 +867,7 @@ class ExportREMesh(Operator, ExportHelper):
 		layout.prop(self, "useBlenderMaterialName")
 		layout.prop(self, "preserveBoneMatrices")
 		layout.prop(self, "exportBoundingBoxes")
+		layout.prop(self, "exportMDF")
 
 	def execute(self, context):
 		options = {"targetCollection":self.targetCollection,"selectedOnly":self.selectedOnly,"exportAllLODs":self.exportAllLODs,"exportBlendShapes":self.exportBlendShapes,"rotate90":self.rotate90,"useBlenderMaterialName":self.useBlenderMaterialName,"preserveBoneMatrices":self.preserveBoneMatrices,"exportBoundingBoxes":self.exportBoundingBoxes,"autoSolveRepeatedUVs":self.autoSolveRepeatedUVs,"preserveSharpEdges":self.preserveSharpEdges}
@@ -891,227 +896,28 @@ class ExportREMesh(Operator, ExportHelper):
 				bpy.data.collections[self.targetCollection]["BatchExport_exportBoundingBoxes"] = self.exportBoundingBoxes
 		else:
 			self.report({"INFO"},"RE Mesh export failed. See Window > Toggle System Console for info on how to fix it.")
-		
-		if bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
-			setModDirectoryFromFilePath(self.filepath)
-
-		if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try:
-				bpy.ops.wm.console_toggle()
-			except:
-				pass
-		return {"FINISHED"}
-
-class ExportREMeshWithMDF(bpy.types.Operator, ExportHelper):
-	'''Export RE Engine Mesh File And Its MDF File Together'''
-	bl_idname = "re_mesh.exportfile_with_mdf"
-	bl_label = "Export RE Mesh + MDF"
-	bl_options = {'PRESET'}
-
-	filter_glob: StringProperty(default="*.mesh*", options={'HIDDEN'})
-
-	filename_ext: EnumProperty(
-		name="",
-		description="Set which game to export the mesh for",
-		items= [
-				(".1808282334", "Devil May Cry 5", "Devil May Cry 5"), 
-				(".1808312334", "Resident Evil 2", "Resident Evil 2"),
-				(".1902042334", "Resident Evil 3", "Resident Evil 3"),
-				(".2101050001", "Resident Evil 8", "Resident Evil 8"),
-				(".2109108288", "Resident Evil 2 / 3 Ray Tracing", "Resident Evil 2/3 Ray Tracing Version"),
-				(".220128762", "Resident Evil 7 Ray Tracing", "Resident Evil 7 Ray Tracing Version"),
-			    (".2109148288", "Monster Hunter Rise", "Monster Hunter Rise"),
-				(".221108797", "Resident Evil 4", "Resident Evil 4"),
-				(".230110883", "Street Fighter 6", "Street Fighter 6"),
-				(".240423143", "Dragon's Dogma 2", "Dragon's Dogma 2"),
-				(".240306278", "Kunitsu-Gami", "Kunitsu-Gami"),
-				(".240424828", "Dead Rising", "Dead Rising"),
-				(".240827123", "Onimusha 2", "Onimusha 2"),
-				(".241111606", "Monster Hunter Wilds", "Monster Hunter Wilds"),
-				(".250925211", "Resident Evil 9", "Resident Evil 9"),
-				(".250604100", "Monster Hunter Stories 3", "Monster Hunter Stories 3"),
-			   ]
-		)
-	targetCollection: bpy.props.StringProperty(
-		name="",
-		description = "Set the collection containing the meshes to be exported.\nNote: Mesh collections are red and end with .mesh",
-		update = update_targetMeshCollection
-		)
-	selectedOnly : BoolProperty(
-	   name = "Selected Objects Only",
-	   description = "Limit export to selected objects",
-	   default = False)
-	exportAllLODs : BoolProperty(
-	   name = "Export All LODs",
-	   description = "Export all LODs. If disabled, only LOD0 will be exported. Note that LODs meshes must be grouped inside a collection for each level and that collection must be contained in another collection. See a mesh with LODs imported for reference on how it should look. A target collection must also be set",
-	   default = True)
-	exportBlendShapes : BoolProperty(
-	   name = "Export Blend Shapes",
-	   description = "Exports blend shapes from mesh if present",
-	   default = True)
-	rotate90 : BoolProperty(
-	   name = "Convert Z Up To Y Up",
-	   description = "Rotates objects 90 degrees for export. Leaving this option enabled is recommended",
-	   default = True)
-	autoSolveRepeatedUVs : BoolProperty(
-	   name = "Auto Solve Repeated UVs",
-	   description = "Splits connected UV islands if present. The mesh format does not allow for multiple uvs assigned to a vertex.\nNOTE: This will modify the exported mesh. If auto smooth is disabled on the mesh, the normals may change",
-	   default = True)
-	preserveSharpEdges : BoolProperty(
-	   name = "Split Sharp Edges",
-	   description = "Edge splits all edges marked as sharp to preserve them on the exported mesh.\nNOTE: This will modify the exported mesh",
-	   default = True)
-	useBlenderMaterialName : BoolProperty(
-	   name = "Use Blender Material Names",
-	   description = "If left unchecked, the exporter will get the material names to be used from the end of each object name. For example, if a mesh is named LOD_0_Group_0_Sub_0__Shirts_Mat, the material name is Shirts_Mat. If this option is enabled, the material name will instead be taken from the first material assigned to the object",
-	   default = False)
-	preserveBoneMatrices : BoolProperty(
-	   name = "Preserve Bone Matrices",
-	   description = "Export using the original matrices of the imported bones. Note that this option only applies armatures imported with this addon. Any newly added bones will have new matrices calculated",
-	   default = False)
-	exportBoundingBoxes : BoolProperty(
-	   name = "Export Bounding Boxes",
-	   description = "Exports the original bounding boxes from the \"Import Bounding Boxes\" import option. New bounding boxes will be generated for any bones that do not have them",
-	   default = False)
-	def invoke(self, context, event):
-		if context.scene.get("REMeshLastImportedMeshVersion",0) in meshFileVersionToGameNameDict:
-			if context.scene["REMeshLastImportedMeshVersion"] == 231011879:
-				#DD2 version update fix
-				context.scene["REMeshLastImportedMeshVersion"] = 240423143
-			elif context.scene["REMeshLastImportedMeshVersion"] == 2102020001:
-				#Remap RE Verse to RE8
-				context.scene["REMeshLastImportedMeshVersion"] = 2101050001
-			elif context.scene["REMeshLastImportedMeshVersion"] == 240820143:
-				#Remap MH Wilds beta to full release
-				context.scene["REMeshLastImportedMeshVersion"] = 241111606
-		
-		if context.scene.get("REMeshLastExportedMeshVersion",0) in meshFileVersionToGameNameDict:
-			if context.scene["REMeshLastExportedMeshVersion"] == 231011879:
-				#DD2 version update fix
-				context.scene["REMeshLastExportedMeshVersion"] = 240423143
-			elif context.scene["REMeshLastExportedMeshVersion"] == 2102020001:
-				#Remap RE Verse to RE8
-				context.scene["REMeshLastExportedMeshVersion"] = 2101050001
-			elif context.scene["REMeshLastExportedMeshVersion"] == 240820143:
-				#Remap MH Wilds beta to full release
-				context.scene["REMeshLastExportedMeshVersion"] = 241111606
-		
-		if self.targetCollection == "":
-			#Get last exported collection, if there isn't one, get last imported
-			exportCollection = context.scene.get("REMeshLastExportedCollection","")
-			if exportCollection in bpy.data.collections:
-				self.targetCollection = exportCollection
-				if ".mesh" in exportCollection:#Remove blender suffix after .mesh if it exists
-					if context.scene.get("REMeshLastExportedMeshVersion") in meshFileVersionToGameNameDict:
-						self.filename_ext = "."+str(context.scene.get("REMeshLastExportedMeshVersion",1808282334))
-					self.filepath = exportCollection.split(".mesh")[0]+".mesh" + self.filename_ext
+		if self.exportMDF:
+			# Export the MDF for this mesh if an MDF collection exists in the scene collection
+			mdfCollection = findMDFCollectionForMesh(bpy.data.collections.get(self.targetCollection, None))
+			if mdfCollection == None:
+				self.report({"INFO"},"No MDF collection found in the scene collection for this mesh. Only the mesh was exported.")
 			else:
-				prevCollection = context.scene.get("REMeshLastImportedCollection","")
-				if prevCollection in bpy.data.collections:
-					self.targetCollection = prevCollection
-				if ".mesh" in prevCollection:#Remove blender suffix after .mesh if it exists
-					if context.scene.get("REMeshLastImportedMeshVersion") in meshFileVersionToGameNameDict:
-						self.filename_ext = "."+str(context.scene.get("REMeshLastImportedMeshVersion",1808282334))
-					self.filepath = prevCollection.split(".mesh")[0]+".mesh" + self.filename_ext
-
-		context.window_manager.fileselect_add(self)
-		return {'RUNNING_MODAL'}
-	def draw(self, context):
-		layout = self.layout
-		layout.label(text = "Mesh Version:")
-		layout.prop(self, "filename_ext")
-		layout.label(text = "Mesh Collection:")
-		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_01")
-		
-		if self.targetCollection in bpy.data.collections:
-			collection = bpy.data.collections[self.targetCollection]
-			if not isMeshCollection(collection):
-				row = layout.row()
-				row.alert=True
-				row.label(icon = "ERROR",text="Collection is not a mesh collection.")
-			else:
-				#Show whether the MDF for this mesh will also be exported
-				mdfCollection = findMDFCollectionForMesh(collection)
-				if mdfCollection != None:
-					row = layout.row()
-					row.label(icon = "COLLECTION_COLOR_05",text=f"MDF will also be exported: {mdfCollection.name}")
+				# Map the mesh version extension (.221108797) to the matching MDF version (.32)
+				meshVersionExtension = os.path.splitext(self.filepath)[1]
+				mdfVersionExtension = mdfVersionDict.get(meshVersionExtension, None)
+				if mdfVersionExtension == None:
+					self.report({"WARNING"},f"Unable to determine the MDF version for mesh version {meshVersionExtension}. Only the mesh was exported.")
 				else:
-					row = layout.row()
-					row.label(icon = "INFO",text="No MDF collection found in the scene collection. Only the mesh will be exported.")
-		elif self.targetCollection == "":
-			row = layout.row()
-			row.alert=True
-			row.label(icon = "ERROR",text="Collection is not a mesh collection.")
-		else:
-			row = layout.row()
-			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
-			row.alert=True
-		layout.prop(self, "selectedOnly")
-		layout.label(text = "Advanced Options")
-		layout.prop(self, "exportAllLODs")
-		row = layout.row()
-		row.prop(self,"autoSolveRepeatedUVs")
-		row2 = layout.row()
-		row2.prop(self,"preserveSharpEdges")
-		layout.prop(self, "rotate90")
-		layout.prop(self, "useBlenderMaterialName")
-		layout.prop(self, "preserveBoneMatrices")
-		layout.prop(self, "exportBoundingBoxes")
-
-	def execute(self, context):
-		options = {"targetCollection":self.targetCollection,"selectedOnly":self.selectedOnly,"exportAllLODs":self.exportAllLODs,"exportBlendShapes":self.exportBlendShapes,"rotate90":self.rotate90,"useBlenderMaterialName":self.useBlenderMaterialName,"preserveBoneMatrices":self.preserveBoneMatrices,"exportBoundingBoxes":self.exportBoundingBoxes,"autoSolveRepeatedUVs":self.autoSolveRepeatedUVs,"preserveSharpEdges":self.preserveSharpEdges}
-		meshVersion = parseFileVersion(self.filepath, None)
-		if meshVersion is None:
-			self.report({"INFO"},"Mesh file path is missing number extension. Cannot export.")
-			return{"CANCELLED"}
-		printEditorHeader(bl_info)
-		
-		if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try:
-				bpy.ops.wm.console_toggle()
-			except:
-				pass
-		meshSuccess = exportREMeshFile(self.filepath,options)
-		if not meshSuccess:
-			self.report({"INFO"},"RE Mesh export failed. See Window > Toggle System Console for info on how to fix it. MDF was not exported.")
-			if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-				try:
-					bpy.ops.wm.console_toggle()
-				except:
-					pass
-			return {"CANCELLED"}
-		self.report({"INFO"},"Exported RE Mesh successfully.")
-		if self.targetCollection in bpy.data.collections:
-			bpy.data.collections[self.targetCollection]["BatchExport_path"] = self.filepath
-			bpy.data.collections[self.targetCollection]["BatchExport_exportAllLODs"] = self.exportAllLODs
-			bpy.data.collections[self.targetCollection]["BatchExport_preserveSharpEdges"] = self.preserveSharpEdges
-			bpy.data.collections[self.targetCollection]["BatchExport_rotate90"] = self.rotate90
-			bpy.data.collections[self.targetCollection]["BatchExport_exportBlendShapes"] = self.exportBlendShapes
-			bpy.data.collections[self.targetCollection]["BatchExport_useBlenderMaterialName"] = self.useBlenderMaterialName
-			bpy.data.collections[self.targetCollection]["BatchExport_preserveBoneMatrices"] = self.preserveBoneMatrices
-			bpy.data.collections[self.targetCollection]["BatchExport_exportBoundingBoxes"] = self.exportBoundingBoxes
-		
-		# Export the MDF for this mesh if an MDF collection exists in the scene collection
-		mdfCollection = findMDFCollectionForMesh(bpy.data.collections.get(self.targetCollection, None))
-		if mdfCollection == None:
-			self.report({"INFO"},"No MDF collection found in the scene collection for this mesh. Only the mesh was exported.")
-		else:
-			# Map the mesh version extension (.221108797) to the matching MDF version (.32)
-			meshVersionExtension = os.path.splitext(self.filepath)[1]
-			mdfVersionExtension = mdfVersionDict.get(meshVersionExtension, None)
-			if mdfVersionExtension == None:
-				self.report({"WARNING"},f"Unable to determine the MDF version for mesh version {meshVersionExtension}. Only the mesh was exported.")
-			else:
-				# Use the MDF collection's own base name, so _Mat / _v00 MDF collections keep their file name
-				mdfFileName = mdfCollection.name.rsplit(".mdf2", 1)[0] + ".mdf2" + mdfVersionExtension
-				mdfPath = os.path.join(os.path.dirname(self.filepath), mdfFileName)
-				print(f"Exporting MDF: {mdfPath}")
-				mdfSuccess = exportMDFFile(mdfPath, mdfCollection.name)
-				if mdfSuccess:
-					self.report({"INFO"},"Exported RE MDF successfully.")
-					bpy.data.collections[mdfCollection.name]["BatchExport_path"] = mdfPath
-				else:
-					self.report({"WARNING"},"RE MDF export failed. See Window > Toggle System Console for info on how to fix it.")
+					# Use the MDF collection's own base name, so _Mat / _v00 MDF collections keep their file name
+					mdfFileName = mdfCollection.name.rsplit(".mdf2", 1)[0] + ".mdf2" + mdfVersionExtension
+					mdfPath = os.path.join(os.path.dirname(self.filepath), mdfFileName)
+					print(f"Exporting MDF: {mdfPath}")
+					mdfSuccess = exportMDFFile(mdfPath, mdfCollection.name)
+					if mdfSuccess:
+						self.report({"INFO"},"Exported RE MDF successfully.")
+						bpy.data.collections[mdfCollection.name]["BatchExport_path"] = mdfPath
+					else:
+						self.report({"WARNING"},"RE MDF export failed. See Window > Toggle System Console for info on how to fix it.")
 		
 		if bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
 			setModDirectoryFromFilePath(self.filepath)
@@ -1511,7 +1317,6 @@ classes = [
 	
 	ImportREMesh,
 	ExportREMesh,
-	ExportREMeshWithMDF,
 	WM_OT_DeleteLoose,
 	WM_OT_RenameMeshToREFormat,
 	WM_OT_RemoveZeroWeightVertexGroups,
@@ -1680,7 +1485,6 @@ class EXPORT_MT_re_mesh_editor(bpy.types.Menu):
         layout = self.layout
         
         layout.operator(ExportREMesh.bl_idname, text="RE Mesh (.mesh.x) (Model)",icon = "MESH_DATA")
-        layout.operator(ExportREMeshWithMDF.bl_idname, text="RE Mesh + MDF (.mesh.x / .mdf2.x)",icon = "NODE_MATERIAL")
         layout.operator(ExportREMDF.bl_idname, text="RE MDF (.mdf2.x) (Materials)",icon = "MATERIAL")
         layout.operator(ExportREFBXSkel.bl_idname, text="RE FBXSkel (.fbxskel.x) (Skeleton)",icon = "ARMATURE_DATA")
         layout.operator(ExportRESFur.bl_idname, text="RE SFur (.sfur.x) (Shell Fur)",icon = "CURVES_DATA")

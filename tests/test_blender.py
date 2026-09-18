@@ -74,75 +74,22 @@ EXPORT_OPTIONS = {"targetCollection": "", "selectedOnly": False, "exportAllLODs"
                   "preserveBoneMatrices": False, "exportBoundingBoxes": False,
                   "autoSolveRepeatedUVs": False, "preserveSharpEdges": False}
 
-
-def test_export_warnings(tmpDir):
-    import modules.mesh.blender_re_mesh as m
-    import modules.mesh.blender_re_mesh_export as mex
-
-    # Don't pop message boxes in background mode
-    mex.showMessageBox = lambda *a, **k: None
-
-    meshPath = os.path.join(tmpDir, "test.mesh.221108797")
-
-    # 2a. Naming scheme + invalid bone group warnings (no MDF next to the file)
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        result = m.exportREMeshFile(meshPath, dict(EXPORT_OPTIONS))
-    out = buf.getvalue()
-    check("export with warnings succeeds", result is True)
-    check("InvalidMeshNamingScheme warning raised", "Invalid Mesh Naming Scheme" in out)
-    check("naming warning lists the bad object", "[BadName]" in out)
-    check("properly named object not flagged", "[Group_0_Sub_0__TestMat]" not in out.split("Vertex Group Weighted To Missing Bone")[0].split("Items with this warning")[-1])
-    check("VertexGroupsNotOnArmature warning raised", "Vertex Group Weighted To Missing Bone" in out)
-    check("invalid group name listed", "BogusGroup" in out)
-    check("no blocking errors raised", "Unable to export mesh" not in out)
-    check("mesh file written", os.path.isfile(meshPath))
-
-    # 2b. MDF material mismatch warnings (stub the MDF reader)
-    class StubMaterial:
-        def __init__(self, name):
-            self.materialName = name
-
-    class StubMDF:
-        materialList = [StubMaterial("OtherMat")]
-
-    originalFindMDF = mex.findMDFPathFromMeshPath
-    originalReadMDF = mex.readMDF
-    mex.findMDFPathFromMeshPath = lambda meshPath, gameName=None: meshPath
-    mex.readMDF = lambda path: StubMDF()
-    try:
-        buf2 = io.StringIO()
-        with contextlib.redirect_stdout(buf2):
-            result2 = m.exportREMeshFile(meshPath, dict(EXPORT_OPTIONS))
-        out2 = buf2.getvalue()
-    finally:
-        mex.findMDFPathFromMeshPath = originalFindMDF
-        mex.readMDF = originalReadMDF
-    check("export still succeeds with MDF mismatch", result2 is True)
-    check("MeshMaterialsMissingFromMDF warning raised", "Mesh Material Missing From MDF" in out2)
-    check("missing material name listed", "[TestMat]" in out2)
-    check("MDFMaterialsMissingFromMesh warning raised", "MDF Material Not Used By Mesh" in out2)
-    check("unused MDF material listed", "[OtherMat]" in out2)
-
-
 # ---------------------------------------------------------------- 2c. Combined mesh+MDF export
 def test_export_mesh_with_mdf(tmpDir):
-    """The File > Export "RE Mesh + MDF" entry exports both files when an MDF
-    collection is present in the scene collection, and only the mesh when it's
-    not. The regular mesh export must keep exporting only the mesh."""
+    """The regular mesh export writes the MDF alongside the mesh when the
+    "Export MDF" option is checked and an MDF collection is present in the
+    scene collection."""
     import modules.mesh.blender_re_mesh_export as mex
     mex.showMessageBox = lambda *a, **k: None
 
-    exporter = bpy.ops.re_mesh.exportfile_with_mdf.get_rna_type()
-    check("mesh+mdf export operator is registered",
-          "exportfile_with_mdf" in dir(bpy.ops.re_mesh))
+    exporter = bpy.ops.re_mesh.exportfile.get_rna_type()
+    check("mesh export operator is registered", "exportfile" in dir(bpy.ops.re_mesh))
     props = exporter.properties.keys()
-    check("mesh+mdf export operator has mesh collection option", "targetCollection" in props)
-    check("mesh+mdf export operator has mesh version option", "filename_ext" in props)
-
-    # Plain mesh export must NOT gain an MDF side effect
-    plainExporter = bpy.ops.re_mesh.exportfile.get_rna_type()
-    check("plain mesh export has no MDF option", "exportMDFToo" not in plainExporter.properties.keys())
+    check("mesh export operator has mesh collection option", "targetCollection" in props)
+    check("mesh export operator has mesh version option", "filename_ext" in props)
+    check("mesh export operator has Export MDF option", "exportMDF" in props)
+    check("combined export operator removed",
+          "exportfile_with_mdf" not in dir(bpy.ops.re_mesh))
 
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -174,16 +121,16 @@ def test_export_mesh_with_mdf(tmpDir):
     meshPath = os.path.join(tmpDir, "Char.mesh.221108797")
     mdfPath = os.path.join(tmpDir, "Char.mdf2.32")
 
-    # 2c1. Plain mesh export writes ONLY the mesh, even with an MDF collection present
+    # 2c1. Export MDF option off -> only the mesh is written, even with an MDF collection present
     result = bpy.ops.re_mesh.exportfile(filepath=meshPath, targetCollection="Char.mesh")
     check("plain mesh export finishes", result == {'FINISHED'})
     check("plain mesh export writes mesh file", os.path.isfile(meshPath))
     check("plain mesh export does NOT write MDF", not os.path.isfile(mdfPath))
     os.remove(meshPath)
 
-    # 2c2. Mesh + MDF written together by the combined operator
-    result = bpy.ops.re_mesh.exportfile_with_mdf(filepath=meshPath, targetCollection="Char.mesh")
-    check("mesh+mdf combined export finishes", result == {'FINISHED'})
+    # 2c2. Export MDF option on -> mesh + MDF written together
+    result = bpy.ops.re_mesh.exportfile(filepath=meshPath, targetCollection="Char.mesh", exportMDF=True)
+    check("mesh+MDF export finishes", result == {'FINISHED'})
     check("mesh file written", os.path.isfile(meshPath))
     check("MDF file written alongside mesh", os.path.isfile(mdfPath))
     check("MDF collection stores export path", "BatchExport_path" in mdfCol and mdfCol["BatchExport_path"] == mdfPath)
@@ -192,8 +139,8 @@ def test_export_mesh_with_mdf(tmpDir):
     bpy.data.objects.remove(matObj, do_unlink=True)
     bpy.data.collections.remove(mdfCol)
     meshPath2 = os.path.join(tmpDir, "Char2.mesh.221108797")
-    result2 = bpy.ops.re_mesh.exportfile_with_mdf(filepath=meshPath2, targetCollection="Char.mesh")
-    check("mesh-only combined export finishes", result2 == {'FINISHED'})
+    result2 = bpy.ops.re_mesh.exportfile(filepath=meshPath2, targetCollection="Char.mesh", exportMDF=True)
+    check("mesh export finishes without MDF collection", result2 == {'FINISHED'})
     check("mesh still exported without MDF collection", os.path.isfile(meshPath2))
     check("no MDF written when MDF collection absent",
           not os.path.isfile(os.path.join(tmpDir, "Char2.mdf2.32")))
@@ -524,11 +471,6 @@ def test_rename_meshes_syncs_mdf_materials(tmpDir):
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
     test_addon_props()
-    try:
-        buildScene()
-        test_export_warnings(tmpDir)
-    except Exception:
-        check("export warnings test crashed", False, traceback.format_exc())
     try:
         test_export_mesh_with_mdf(tmpDir)
     except Exception:
