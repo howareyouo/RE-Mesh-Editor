@@ -781,7 +781,7 @@ class ExportREMesh(Operator, ExportHelper):
 	   default = False)
 	exportMDF : BoolProperty(
 	   name = "Export MDF",
-	   description = "Exports the MDF file for this mesh's collection after the mesh is exported, if an MDF collection exists in the scene collection",
+	   description = "Exports MDF file after the mesh is exported, if an MDF collection exists in the scene collection",
 	   default = False)
 	def invoke(self, context, event):
 		if context.scene.get("REMeshLastImportedMeshVersion",0) in meshFileVersionToGameNameDict:
