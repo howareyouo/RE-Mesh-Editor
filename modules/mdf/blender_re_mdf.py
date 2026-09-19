@@ -4,7 +4,7 @@ import bpy
 from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
 	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	isMDFCollection, isMeshCollection)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,ENABLE_EXPORT_WARNINGS
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
 from .mdf_value import boolPropertySet,colorPropertySet,classify_prop,getPropValue,setPropValue,getPropValueJSON
 from .ui_re_mdf_panels import tag_redraw
@@ -304,13 +304,14 @@ def MDFErrorCheck(collectionName):
 				if matName not in materialNameSet:
 					warningList.append("The material ("+matName+") on mesh " + obj.name + " does not exist in the MDF.")
 	else:
-		raiseWarning(f"Could not find mesh collection ({meshCollectionName}) to check materials against.")
+		if ENABLE_EXPORT_WARNINGS:
+			raiseWarning(f"Could not find mesh collection ({meshCollectionName}) to check materials against.")
 	if len(meshMaterialSet) != 0 and len(materialNameSet.difference(meshMaterialSet)) != 0:
 		materialString = ""
 		for materialName in materialNameSet.difference(meshMaterialSet):
 			materialString += materialName+"\n"
 		warningList.append(f"The following materials exist in the MDF ({collectionName}) but do not exist in the mesh ({meshCollectionName}):\n{materialString}")
-	if warningList != []:
+	if warningList != [] and ENABLE_EXPORT_WARNINGS:
 		warningList.append("If this mesh is supposed to be used with this MDF, the number of materials and name of materials in the MDF must match the mesh.\nThe material will appear as a checkerboard texture in game.")
 		for warning in warningList:
 			raiseWarning(warning)
@@ -318,7 +319,7 @@ def MDFErrorCheck(collectionName):
 	if errorList == []:
 		print("No errors found.")
 		#print(noesisMeshMaterialSet)
-		if warningList != []:
+		if warningList != [] and ENABLE_EXPORT_WARNINGS:
 			showMessageBox("Warnings occured during export. Check Window > Toggle System Console for details.",title = "MDF Conversion Warning", icon = "ERROR")
 		return True
 	else:

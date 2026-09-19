@@ -9,7 +9,7 @@ from mathutils import Vector
 from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
-from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, getREMeshMaterialName
+from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, getREMeshMaterialName, ENABLE_EXPORT_WARNINGS
 from ..blender_utils import showMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath
@@ -21,9 +21,6 @@ MIN_WEIGHT = 0.002
 MAX_VERTICES = 65536
 MAX_VERTICES_EXTENDED = 4294967295
 MAX_FACES = 4294967295
-
-# Set to True to re-enable the warnings printed after a mesh export.
-ENABLE_EXPORT_WARNINGS = False
 
 
 def checkObjForUVDoubling(obj):

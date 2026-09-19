@@ -250,8 +250,14 @@ def openFileWrite(filepath, buffering=-1):
 		return open(filepath, "wb", buffering=buffering)
 	except OSError as err:
 		raise Exception("Failed to open " + filepath + " for writing: " + str(err))
+
+
+# Set to True to re-enable the warnings printed after a mesh/MDF export.
+ENABLE_EXPORT_WARNINGS = False
+
 def raiseWarning(warning):
      print(textColors.WARNING + "WARNING: " + warning + textColors.ENDC)
+	 
 def getPaddedPos(currentPos,alignment):
 	return ((currentPos*-1)%alignment)+currentPos
 
@@ -312,6 +318,7 @@ IS_MAC = platform.system() == 'Darwin'
 # Addon install root (folder containing __init__.py) and shared Presets directory
 ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRESET_DIR = os.path.join(ADDON_ROOT, "Presets")
+
 def splitInt64(value):#Takes int64 and converts to 2 int32's
 	return struct.unpack("ii", value.to_bytes(8, "little", signed=False))
 
