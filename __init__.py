@@ -19,7 +19,7 @@ from bpy_extras.io_utils import ExportHelper,ImportHelper
 from bpy.props import StringProperty, BoolProperty,IntProperty, EnumProperty, CollectionProperty,PointerProperty
 from bpy.types import Operator, OperatorFileListElement,AddonPreferences
 from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder,parseFileVersion
-from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection, findMDFCollectionForMesh
+from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection, findMDFCollectionForMesh, resolveSourcePath
 from .modules.game_versions import mdfVersionDict
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
@@ -172,6 +172,12 @@ def setModDirectoryFromFilePath(filePath):
 			print(f"Set mod directory to {bpy.context.scene.re_mdf_toolpanel.modDirectory}")
 		except:
 			print("ERROR: Failed to set mod directory, exported file path probably does not follow the chunk naming scheme.")
+def applySourceDirectory(collection, sourcePathKey, filepath):
+	"""Point filepath at the folder this collection was imported from."""
+	sourcePath = resolveSourcePath(collection.get(sourcePathKey, "")) if collection != None else ""
+	if sourcePath != "":
+		return os.path.join(os.path.dirname(sourcePath), os.path.basename(filepath))
+	return filepath
 class WM_OT_OpenTextureCacheFolder(Operator):
 	bl_label = "Open Texture Cache Folder"
 	bl_description = "Opens the texture cache folder in File Explorer"
@@ -827,6 +833,7 @@ class ExportREMesh(Operator, ExportHelper):
 					self.filepath = prevCollection.split(".mesh")[0]+".mesh" + self.filename_ext
 
 			
+		self.filepath = applySourceDirectory(bpy.data.collections.get(self.targetCollection, None), "~MESHFILEPATH", self.filepath)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	def draw(self, context):
@@ -1017,6 +1024,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 				if self.targetCollection.endswith(".mdf2"):
 					self.filepath = self.targetCollection + self.filename_ext
 			self.filename_ext = "."+str(gameNameMDFVersionDict[bpy.context.scene.re_mdf_toolpanel.activeGame])
+		self.filepath = applySourceDirectory(bpy.data.collections.get(self.targetCollection, None), "~MDFFILEPATH", self.filepath)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	

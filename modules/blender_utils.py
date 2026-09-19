@@ -65,6 +65,18 @@ def setAssetPathFromFilePath(filePath, collection):
 	except:
 		print("Failed to set asset path from file path, file is likely not in a natives folder.")
 
+def resolveSourcePath(storedPath):
+	"""Normalise a source file path stored on a collection.
+
+	Returns "" when nothing was stored, or when the folder it points at no longer
+	exists, so callers can fall back to another default."""
+	if not storedPath:
+		return ""
+	sourcePath = os.path.abspath(bpy.path.abspath(str(storedPath)))
+	if not os.path.isdir(os.path.dirname(sourcePath)):
+		return ""
+	return sourcePath
+
 # ---------------------------------------------------------------- RE collection helpers
 # Mesh/MDF/SFur collections are identified by a "~TYPE" custom property (set on
 # import) and/or by their name suffix (.mesh / .mdf2 / .sfur). These helpers are the

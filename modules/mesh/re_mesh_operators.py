@@ -15,7 +15,7 @@ from bpy.props import (StringProperty,
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
 from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix
-from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh,
+from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh, resolveSourcePath,
                              isMDFCollection, isMeshCollection, iterMDFMaterialObjects)
 
 
@@ -335,8 +335,7 @@ def checkForChildRECollectionsRecursive(collection):
 	return False
 
 
-def determineExportPath(modDirectory, exportType, assetPath, scene):
-	filePath = ""
+def getFileVersionSuffix(exportType, scene):
 	fileVersion = ""
 	if exportType == "MESH":
 		if "REMeshLastExportedMeshVersion" in scene:
@@ -379,8 +378,29 @@ def determineExportPath(modDirectory, exportType, assetPath, scene):
 			fileVersion = "." + str(scene["REChainLastExportedCLSPVersion"])
 		elif "REChainLastImportedChain2Version" in scene:
 			fileVersion = "." + str(scene["REChainLastImportedCLSPVersion"])
-	filePath = os.path.join(modDirectory, assetPath + fileVersion)
-	return filePath
+	return fileVersion
+
+
+def determineExportPath(modDirectory, exportType, assetPath, scene):
+	return os.path.join(modDirectory, assetPath + getFileVersionSuffix(exportType, scene))
+
+
+# Collection property holding the file's import path, per export type.
+SOURCE_PATH_KEYS = {
+	"MESH": "~MESHFILEPATH",
+	"MDF": "~MDFFILEPATH",
+}
+
+
+def determineSourceExportPath(collection, exportType):
+	"""Export path beside the file this collection was imported from.
+
+	Used when there is no natives asset path to rebuild the mod layout from.
+	Returns "" when the collection has no import path of its own."""
+	sourceKey = SOURCE_PATH_KEYS.get(exportType, "")
+	if sourceKey == "":
+		return ""
+	return resolveSourcePath(collection.get(sourceKey, ""))
 
 
 def populateCollectionList(itemList, collection, recursionLevel, parentName):
@@ -441,10 +461,16 @@ def populateCollectionList(itemList, collection, recursionLevel, parentName):
 					if split != None:
 						assetPath = collection.get("~ASSETPATH", None)
 						if assetPath != None:
-							item.path = determineExportPath(split[0], item.exportType,
-							                                assetPath.replace("/", os.sep), bpy.context.scene)
+							item.path = determineExportPath(
+								split[0], item.exportType,
+								assetPath.replace("/", os.sep),
+								bpy.context.scene
+							)
 				except Exception as err:
 					print(f"Batch Export: Cannot auto determine path for {item.name}: {str(err)}")
+			if item.path == "":
+				# No mod directory layout to rebuild from, so default to the folder the file was imported from
+				item.path = determineSourceExportPath(collection, item.exportType)
 
 
 class WM_OT_REBatchExporter(Operator):
@@ -643,9 +669,11 @@ class WM_OT_REBatchExporter(Operator):
 						if split != None:
 							assetPath = armatureObj.get("~ASSETPATH", None)
 							if assetPath != None:
-								item.path = determineExportPath(split[0], item.exportType,
-								                                assetPath.replace("/", os.sep),
-								                                bpy.context.scene)
+								item.path = determineExportPath(
+									split[0], item.exportType, 
+									assetPath.replace("/", os.sep),
+									bpy.context.scene
+								)
 					except Exception as err:
 						print(f"Batch Export: Cannot auto determine path for {item.name}: {str(err)}")
 		if self.skipPrompt:

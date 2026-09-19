@@ -764,6 +764,7 @@ def importREMeshFile(filePath, options):
 		meshCollection["~TYPE"] = MESH_COLLECTION_TYPE
 		meshCollection["LODGroupNameHash"] = str(reMesh.fileHeader.lodGroupNameHash)
 		setAssetPathFromFilePath(filePath, meshCollection)
+		meshCollection["~MESHFILEPATH"] = os.path.abspath(filePath) #Store the source file path so operators can default to the folder this mesh came from
 		bpy.context.scene.re_mdf_toolpanel.meshCollection = meshCollection
 	else:
 		meshCollection = bpy.context.scene.collection
