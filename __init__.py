@@ -178,6 +178,76 @@ def applySourceDirectory(collection, sourcePathKey, filepath):
 	if sourcePath != "":
 		return os.path.join(os.path.dirname(sourcePath), os.path.basename(filepath))
 	return filepath
+
+
+def toggleConsole():
+	"""Toggle the system console, if the build has one and the user wants it."""
+	if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
+		try:
+			bpy.ops.wm.console_toggle()
+		except:
+			pass
+
+
+def remapLegacySceneVersion(scene, propertyName):
+	"""Map mesh versions that were superseded by a later build onto their
+	replacement, so a stale scene property still exports a valid file."""
+	versionMap = {
+		231011879: 240423143,  #DD2 version update fix
+		2102020001: 2101050001,  #Remap RE Verse to RE8
+		240820143: 241111606,  #Remap MH Wilds beta to full release
+		}
+	version = scene.get(propertyName, 0)
+	if version in versionMap:
+		scene[propertyName] = versionMap[version]
+
+
+def importFileList(self, importFunc, formatLabel, logLabel = None):
+	"""Multi-file import driver shared by the list based importers.
+	Reports the same way for every format; returns False when a file failed."""
+	multiFileImport = len(self.files) > 1
+	hasImportErrors = False
+	for index, file in enumerate(self.files):
+		filepath = os.path.join(self.directory,file.name)
+		if logLabel != None and multiFileImport:
+			print(f"Multi {logLabel} Import ({index+1}/{len(self.files)})")
+		if os.path.isfile(filepath):
+			if not importFunc(filepath):
+				hasImportErrors = True
+		else:
+			hasImportErrors = True
+			raiseWarning(f"Path does not exist, cannot import file. If you are importing multiple files at once, they must all be in the same directory.\nInvalid Path:{filepath}")
+
+	if hasImportErrors:
+		self.report({"INFO"},f"Failed to import RE {formatLabel}. Check the console for errors.")
+		return False
+	if not multiFileImport:
+		self.report({"INFO"},f"Imported RE {formatLabel} file.")
+	else:
+		self.report({"INFO"},f"Imported {str(len(self.files))} RE {formatLabel} files.")
+	return True
+
+
+def _drawInvalidCollection(layout, message):
+	row = layout.row()
+	row.alert=True
+	row.label(icon = "ERROR",text=message)
+
+
+def drawCollectionWarning(layout, self, attributeName, validator, invalidMessage):
+	"""Red warning shared by the export operators when the picked collection
+	doesn't exist or isn't the right kind."""
+	collectionName = getattr(self, attributeName)
+	if collectionName in bpy.data.collections:
+		if not validator(bpy.data.collections[collectionName]):
+			_drawInvalidCollection(layout, invalidMessage)
+	elif collectionName == "":
+		_drawInvalidCollection(layout, invalidMessage)
+	else:
+		row = layout.row()
+		row.label(icon="ERROR",text="Chosen collection doesn't exist.")
+		row.alert=True
+
 class WM_OT_OpenTextureCacheFolder(Operator):
 	bl_label = "Open Texture Cache Folder"
 	bl_description = "Opens the texture cache folder in File Explorer"
@@ -634,11 +704,7 @@ class ImportREMesh(Operator, ImportHelper):
 		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"mergeSameMaterialSubmeshes":self.mergeSameMaterialSubmeshes,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
 		printEditorHeader(bl_info)
 		
-		if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try: 
-				bpy.ops.wm.console_toggle()
-			except:
-				pass
+		toggleConsole()
 		
 		multiFileImport = len(self.files) > 1
 		hasImportErrors = False
@@ -668,11 +734,7 @@ class ImportREMesh(Operator, ImportHelper):
 				raiseWarning(f"Path does not exist, cannot import file. If you are importing multiple files at once, they must all be in the same directory.\nInvalid Path:{filepath}")
 			
 		if not hasImportErrors:
-			if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-				try:
-					bpy.ops.wm.console_toggle()
-				except:
-					pass
+			toggleConsole()
 				
 			if not multiFileImport:
 				self.report({"INFO"},"Imported RE Mesh file.")
@@ -790,27 +852,9 @@ class ExportREMesh(Operator, ExportHelper):
 	   description = "Exports MDF file after the mesh is exported, if an MDF collection exists in the scene collection",
 	   default = False)
 	def invoke(self, context, event):
-		if context.scene.get("REMeshLastImportedMeshVersion",0) in meshFileVersionToGameNameDict:
-			if context.scene["REMeshLastImportedMeshVersion"] == 231011879:
-				#DD2 version update fix
-				context.scene["REMeshLastImportedMeshVersion"] = 240423143
-			elif context.scene["REMeshLastImportedMeshVersion"] == 2102020001:
-				#Remap RE Verse to RE8
-				context.scene["REMeshLastImportedMeshVersion"] = 2101050001
-			elif context.scene["REMeshLastImportedMeshVersion"] == 240820143:
-				#Remap MH Wilds beta to full release
-				context.scene["REMeshLastImportedMeshVersion"] = 241111606
+		remapLegacySceneVersion(context.scene, "REMeshLastImportedMeshVersion")
 		
-		if context.scene.get("REMeshLastExportedMeshVersion",0) in meshFileVersionToGameNameDict:
-			if context.scene["REMeshLastExportedMeshVersion"] == 231011879:
-				#DD2 version update fix
-				context.scene["REMeshLastExportedMeshVersion"] = 240423143
-			elif context.scene["REMeshLastExportedMeshVersion"] == 2102020001:
-				#Remap RE Verse to RE8
-				context.scene["REMeshLastExportedMeshVersion"] = 2101050001
-			elif context.scene["REMeshLastExportedMeshVersion"] == 240820143:
-				#Remap MH Wilds beta to full release
-				context.scene["REMeshLastExportedMeshVersion"] = 241111606
+		remapLegacySceneVersion(context.scene, "REMeshLastExportedMeshVersion")
 		
 		if self.targetCollection == "":
 			
@@ -843,21 +887,7 @@ class ExportREMesh(Operator, ExportHelper):
 		layout.label(text = "Mesh Collection:")
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_01")
 		
-		if self.targetCollection in bpy.data.collections:
-			collection = bpy.data.collections[self.targetCollection]
-			if not isMeshCollection(collection):
-				row = layout.row()
-				row.alert=True
-				row.label(icon = "ERROR",text="Collection is not a mesh collection.")
-		elif self.targetCollection == "":
-			row = layout.row()
-			row.alert=True
-			row.label(icon = "ERROR",text="Collection is not a mesh collection.")
-			
-		else:
-			row = layout.row()
-			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
-			row.alert=True
+		drawCollectionWarning(layout, self, "targetCollection", isMeshCollection, "Collection is not a mesh collection.")
 		layout.prop(self, "selectedOnly")
 		layout.label(text = "Advanced Options")
 		layout.prop(self, "exportAllLODs")
@@ -884,11 +914,7 @@ class ExportREMesh(Operator, ExportHelper):
 			return{"CANCELLED"}
 		printEditorHeader(bl_info)
 		
-		if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try:
-				bpy.ops.wm.console_toggle()
-			except:
-				pass
+		toggleConsole()
 		success = exportREMeshFile(self.filepath,options)
 		if success:
 			self.report({"INFO"},"Exported RE Mesh successfully.")
@@ -929,11 +955,7 @@ class ExportREMesh(Operator, ExportHelper):
 		if bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
 			setModDirectoryFromFilePath(self.filepath)
 
-		if not bpy.app.background and bpy.context.preferences.addons[__name__].preferences.showConsole:
-			try:
-				bpy.ops.wm.console_toggle()
-			except:
-				pass
+		toggleConsole()
 		return {"FINISHED"}
 
 class ImportREMDF(bpy.types.Operator, ImportHelper):
@@ -955,36 +977,14 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
 
 	def execute(self, context):
 		printEditorHeader(bl_info)
-		multiFileImport = len(self.files) > 1
-		hasImportErrors = False
-		
-		for index, file in enumerate(self.files):
-			filepath = os.path.join(self.directory,file.name)
-			if multiFileImport:
-				print(f"Multi MDF Import ({index+1}/{len(self.files)})")
-			if os.path.isfile(filepath):
-				success = importMDFFile(filepath)
-				if not success: hasImportErrors = True
-			else:
-				hasImportErrors = True
-				raiseWarning(f"Path does not exist, cannot import file. If you are importing multiple files at once, they must all be in the same directory.\nInvalid Path:{filepath}")
-			
-			
-		if not hasImportErrors:
-			if not multiFileImport:
-				self.report({"INFO"},"Imported RE MDF file.")
-			else:
-				self.report({"INFO"},f"Imported {str(len(self.files))} RE MDF files.")
+		if importFileList(self, importMDFFile, "MDF", "MDF"):
 			return {"FINISHED"}
-		else:
-			self.report({"INFO"},"Failed to import RE MDF. Check the console for errors.")
-			return {"CANCELLED"}
+		return {"CANCELLED"}
 	def invoke(self, context, event):
 		if self.directory:
 			return self.execute(context)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
-supportedMDFVersions = set([23,19,21,32,31,40,45,49,51])	
 
 def update_targetMDFCollection(self,context):
 	_syncFileBrowserFilename(self, "targetCollection", ".mdf2")
@@ -1034,21 +1034,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 		layout.prop(self,"filename_ext")
 		layout.label(text = "MDF Collection:")
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_05")
-		if self.targetCollection in bpy.data.collections:
-			collection = bpy.data.collections[self.targetCollection]
-			if not isMDFCollection(collection):
-				row = layout.row()
-				row.alert=True
-				row.label(icon = "ERROR",text="Collection is not a MDF collection.")
-		elif self.targetCollection == "":
-			row = layout.row()
-			row.alert=True
-			row.label(icon = "ERROR",text="Collection is not a MDF collection.")
-			
-		else:
-			row = layout.row()
-			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
-			row.alert=True
+		drawCollectionWarning(layout, self, "targetCollection", isMDFCollection, "Collection is not a MDF collection.")
 	def execute(self, context):
 		printEditorHeader(bl_info)
 		success = exportMDFFile(self.filepath,self.targetCollection)
@@ -1194,34 +1180,14 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
 
 	def execute(self, context):
 		printEditorHeader(bl_info)
-		multiFileImport = len(self.files) > 1
-		hasImportErrors = False
-		
-		for index, file in enumerate(self.files):
-			filepath = os.path.join(self.directory,file.name)
-			if os.path.isfile(filepath):
-				success = importSFurFile(filepath)
-				if not success: hasImportErrors = True
-			else:
-				hasImportErrors = True
-				raiseWarning(f"Path does not exist, cannot import file. If you are importing multiple files at once, they must all be in the same directory.\nInvalid Path:{filepath}")
-			
-			
-		if not hasImportErrors:
-			if not multiFileImport:
-				self.report({"INFO"},"Imported RE SFur file.")
-			else:
-				self.report({"INFO"},f"Imported {str(len(self.files))} RE SFur files.")
+		if importFileList(self, importSFurFile, "SFur"):
 			return {"FINISHED"}
-		else:
-			self.report({"INFO"},"Failed to import RE SFur. Check the console for errors.")
-			return {"CANCELLED"}
+		return {"CANCELLED"}
 	def invoke(self, context, event):
 		if self.directory:
 			return self.execute(context)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
-supportedMDFVersions = set([4,5])	
 
 def update_targetSFurCollection(self,context):
 	_syncFileBrowserFilename(self, "targetCollection", ".sfur")
@@ -1262,21 +1228,7 @@ class ExportRESFur(bpy.types.Operator, ExportHelper):
 		layout.prop(self,"filename_ext")
 		layout.label(text = "SFur Collection:")
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_08")
-		if self.targetCollection in bpy.data.collections:
-			collection = bpy.data.collections[self.targetCollection]
-			if not isSFurCollection(collection):
-				row = layout.row()
-				row.alert=True
-				row.label(icon = "ERROR",text="Collection is not a SFUR collection.")
-		elif self.targetCollection == "":
-			row = layout.row()
-			row.alert=True
-			row.label(icon = "ERROR",text="Collection is not a SFUR collection.")
-			
-		else:
-			row = layout.row()
-			row.label(icon="ERROR",text="Chosen collection doesn't exist.")
-			row.alert=True
+		drawCollectionWarning(layout, self, "targetCollection", isSFurCollection, "Collection is not a SFUR collection.")
 	def execute(self, context):
 		printEditorHeader(bl_info)
 		success = exportSFurFile(self.filepath,self.targetCollection)

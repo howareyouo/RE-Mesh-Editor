@@ -1,6 +1,6 @@
 import bpy
 
-from bpy.types import (Panel, Menu, Operator, PropertyGroup)
+from bpy.types import Panel
 from ..blender_utils import tag_redraw
 
 

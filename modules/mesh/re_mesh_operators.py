@@ -8,8 +8,6 @@ from bpy.types import Operator
 from bpy.props import (StringProperty,
                        BoolProperty,
                        IntProperty,
-                       FloatProperty,
-                       FloatVectorProperty,
                        EnumProperty,
                        )
 from .blender_re_mesh import solveRepeatedUVs
@@ -623,11 +621,12 @@ class WM_OT_REBatchExporter(Operator):
 		# currentX = event.mouse_region_X
 		# currentY = event.mouse_region_Y
 
+		# Build the parent map in a single pass: every collection starts as a root
+		# (None parent), then any collection that is a child of another has its
+		# parent recorded. Equivalent to the previous two separate traversals.
 		parentDict = {None: None}
 		for collection in bpy.data.collections:
-			parentDict[collection] = None
-
-		for collection in bpy.data.collections:
+			parentDict.setdefault(collection, None)
 			for child in collection.children:
 				parentDict[child] = collection
 		collectionRoots = set()

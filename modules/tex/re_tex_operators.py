@@ -12,7 +12,7 @@ from .blender_re_tex import convertTexDDSList
 from .re_tex_propertyGroups import PNGConversionEntryPropertyGroup
 from ..mdf.file_re_mdf import getMDFVersionToGameName
 from .re_tex_utils import DDSToTex,ImageListToDDS,getStreamingTexturePath
-from ..gen_functions import openFolder
+
 import shutil
 #from .re_tex_utils import
 
@@ -248,8 +248,6 @@ class WM_OT_ConvertFolderToTex(Operator):
 					createStreamingTex = self.createStreamingTex,
 					)
 				return {"FINISHED"}
-				if bpy.context.scene.re_mdf_toolpanel.openConvertedFolder:
-					openFolder(convertedDir)
 			else:
 				showErrorMessageBox("No image files in provided directory")
 		else:

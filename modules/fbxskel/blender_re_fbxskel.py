@@ -1,7 +1,7 @@
 import os
 import bpy
 from mathutils import Vector,Quaternion,Matrix
-from ..blender_utils import showMessageBox, setAssetPathFromFilePath, rotate90Matrix, rotateNeg90Matrix
+from ..blender_utils import setAssetPathFromFilePath, rotate90Matrix, rotateNeg90Matrix
 from ..gen_functions import textColors,raiseWarning,parseFileVersion
 from .file_re_fbxskel import readFBXSkel,writeFBXSkel,FBXSkelFile,BoneEntry
 
@@ -26,7 +26,6 @@ def importFBXSkelFile(filePath):
 	bpy.context.scene.collection.objects.link(armatureObj)
 	bpy.context.view_layer.objects.active = armatureObj
 	bpy.ops.object.mode_set(mode='EDIT')
-	boneIndexDict = {}
 	boneNameIndexDict = {index: bone.boneName for index, bone in enumerate(fbxSkelFile.boneEntryList)}
 	boneParentList = []
 	

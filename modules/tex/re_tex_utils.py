@@ -12,10 +12,17 @@ from .enums.dds_bpps import ddsBpps
 from . import tex_math as tmath
 from . import format_ops
 import os
+import numpy as np
 
-VERSION_MHWILDS_BETA = 240701001
-VERSION_MHWILDS = 241106027
+# Reuse a single GDeflate instance for compression (stateless, safe to share);
+# loading the wrapper DLL once avoids reloading it per tex file export.
+_gdeflateCompressor = None
 
+def _getGDeflateCompressor():
+    global _gdeflateCompressor
+    if _gdeflateCompressor is None:
+        _gdeflateCompressor = GDeflate()
+    return _gdeflateCompressor
 
 def TexToDDS(tex, imageIndex):
     """ Generates a DDS file from the 'imageIndex'th image in the tex file"""
@@ -120,17 +127,30 @@ def makeTexHeader(texVersion, ddsHeader, imageCount, mipStart=0, mipEnd=None):
 
 
 def padding(image, ddsSl, capSl, linecount):
-    result = b''
-    for ix in range(linecount):
-        imgData = image[ix*ddsSl:(ix+1)*ddsSl]
-        pad = b'\x00'*(capSl-ddsSl)
-        result += imgData + pad
-    return result
+    # Each scanline contributes ddsSl data bytes followed by (capSl - ddsSl)
+    # zero-padding bytes. Extract the data rows as a 2D view and concatenate the
+    # padding column in one vectorized step (equivalent to the per-line loop).
+    # Fall back to the loop if the data is shorter than the nominal mip size,
+    # which the per-line slicing tolerated.
+    if ddsSl <= 0 or len(image) != linecount * ddsSl:
+        result = b''
+        for ix in range(linecount):
+            imgData = image[ix*ddsSl:(ix+1)*ddsSl]
+            pad = b'\x00'*(capSl-ddsSl)
+            result += imgData + pad
+        return result
+    arr = np.frombuffer(image, dtype=np.uint8).reshape(linecount, ddsSl)
+    if capSl > ddsSl:
+        pad = np.zeros((linecount, capSl - ddsSl), dtype=np.uint8)
+        out = np.concatenate((arr, pad), axis=1)
+    else:
+        out = arr
+    return out.tobytes()
 
 
 def packageTextures(ddsHeader, ddsList, compress, formatData, mipStart=0, mipEnd=None):
     """Pads and compresses textures aas needed, stores information relative to their size for header generation"""
-    compressor = GDeflate()
+    compressor = _getGDeflateCompressor()
     if mipEnd == None:
         mipEnd = ddsHeader.dwMipMapCount
 
@@ -279,10 +299,14 @@ def getStreamingTexturePath(texPath):
 
 
 def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOutPath=None):
-
+    # The first file's header is read at most once and shared by the streaming
+    # mip count and the array base header. It is read lazily so the common
+    # single-file, non-streaming path stays free of the extra file access.
+    firstHeader = None
     streamingMipCount = 0
     if streamingFlag and streamingOutPath != None:
-        streamingMipCount = getStreamingMipCount(getDDSHeader(ddsPathList[0]))
+        firstHeader = getDDSHeader(ddsPathList[0])
+        streamingMipCount = getStreamingMipCount(firstHeader)
 
     if len(ddsPathList) == 1:
         ddsFile = DDSFile()
@@ -293,7 +317,7 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
             texFile = getTexFileFromDDS([ddsFile.dds], texVersion)
             texFile.write(outPath)
     else:  # Array texture
-        baseHeader = getDDSHeader(ddsPathList[0])
+        baseHeader = firstHeader if firstHeader != None else getDDSHeader(ddsPathList[0])
         # Preparse dds files to make sure they have the same height,width,format and mip count as the first
         valid = True
         fixDDSMipList = []  # Force mip counts to match first dds in array

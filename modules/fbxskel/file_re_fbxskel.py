@@ -1,7 +1,7 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getPaddingAmount,parseFileVersion,read_unicode_string,write_unicode_string,StringTableBuilder
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,parseFileVersion,read_unicode_string,write_unicode_string,StringTableBuilder
 from ..hashing.mmh3.pymmh3 import hashUTF16
 from ..binary_struct import BinaryStruct,u32,u64,i16,f32x3,f32x4,skip
 

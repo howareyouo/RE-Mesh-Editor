@@ -3,8 +3,6 @@
 import numpy as np
 import ctypes
 import struct
-from io import BytesIO
-from itertools import chain
 from ..gen_functions import *
 
 # Mesh version numbers do not always increase for newer versions of the file format
@@ -791,23 +789,3 @@ class REMeshMPLY():
 		pass  # TODO
 
 
-class sizeData:
-	def __init__(self, version):
-		pass  # TODO
-# self.MESH_HEADER_SIZE = 128
-# if version >= VERSION_SF6:
-# self.MESH_HEADER_SIZE = 168
-
-
-def ParsedREMeshToREMeshMPLY(parsedMesh, meshVersion):
-	print(f"Mesh Version:{meshVersion}")
-	version = meshFileVersionToNewVersionDict.get(meshVersion, getNearestRemapVersion(meshVersion))
-	print(f"Remapped Version:{version}")
-	sd = sizeData(version)
-	currentOffset = 0
-	currentVertexIndex = 0
-	currentFaceIndex = 0
-
-	# TODO
-
-	return reMeshMPLY

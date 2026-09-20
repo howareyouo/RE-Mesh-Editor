@@ -3,10 +3,10 @@ import bpy
 
 from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
 	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
-	isMDFCollection, isMeshCollection)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,splitInt64,concatInt,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,ENABLE_EXPORT_WARNINGS
-from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry,MDFFlags,MDFFlagsB
-from .mdf_value import boolPropertySet,colorPropertySet,classify_prop,getPropValue,setPropValue,getPropValueJSON
+	)
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,ENABLE_EXPORT_WARNINGS
+from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
+from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
 from .ui_re_mdf_panels import tag_redraw
 
 MDFGameNameConflictDict = set(["RE2","RE2RT","DD2"])
@@ -82,41 +82,8 @@ def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 	return realGameName
 	
 
-excludedPropertyNames = set(["~TYPE","_RNA_UI","_vs","s_curve"])
-matShaderTypeEnum = {
-	"Standard" : 0x0,
-	"Decal" : 0x1,
-	"DecalWithMetallic" : 0x2,
-	"DecalNRMR" : 0x3,
-	"Transparent" : 0x4,
-	"Distortion" : 0x5,
-	"PrimitiveMesh" : 0x6,
-	"PrimitiveSolidMesh" : 0x7,
-	"Water" : 0x8,
-	"SpeedTree" : 0x9,
-	"GUI" : 0xA,
-	"GUIMesh" : 0xB,
-	"GUIMeshTransparent" : 0xC,
-	"ExpensiveTransparent" : 0xD,
-	"Forward" : 0xE,
-	"RenderTarget" : 0xF,
-	"PostProcess" : 0x10,
-	"PrimitiveMaterial" : 0x11,
-	"PrimitiveSolidMaterial" : 0x12,
-	"SpineMaterial" : 0x13,
-	"Max" : 0x14,
-}
-matShaderTypeEnum.update({v: k for k, v in matShaderTypeEnum.items()})
 
 
-def findHeaderObj():
-	if bpy.data.collections.get("MDFData",None) != None:
-		objList = bpy.data.collections["MDFData"].all_objects
-		headerList = [obj for obj in objList if obj.get("~TYPE",None) == "RE_MDF_HEADER"]
-		if len(headerList) >= 1:
-			return headerList[0]
-		else:
-			return None
 def createMDFCollection(collectionName,parentCollection = None):
 	collection = createRECollection(
 		collectionName, parentCollection,
@@ -135,15 +102,6 @@ def addPropsToPropList(obj,matPropertyList):
 		newListItem.data_type = classify_prop(prop.propName, prop.paramCount)
 		setPropValue(newListItem, newListItem.data_type, prop.propValue)
 
-def getTextureBindings(matTextureList):
-	RNADict = {"~TYPE":{"description":"For internal use. Do not change"},"~KEY_ORDER":{"description":"For internal use. Do not change"}}
-	customPropList = [("~TYPE","RE_MDF_TEXTUREBINDINGS"),("_RNA_UI",RNADict)]
-	keyOrderList = []
-	for texture in matTextureList:
-		keyOrderList.append(texture.textureType)
-		customPropList.append((str(texture.textureType),str(texture.texturePath)))
-	customPropList.append(("~KEY_ORDER",keyOrderList))
-	return customPropList
 
 def addTextureBindingsToBindingList(obj,matTextureList):
 	for texture in matTextureList:
@@ -215,13 +173,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 		
 		getMDFFlags(materialObj,material.flags,material.flagsB)
 		if gameName == "SF6":
-			for prop in material.propertyList:
-				if "CustomizeRoughness" in prop.propName or "CustomizeMetal" in prop.propName:#Fix for imported SF6 materials, this shouldn't matter in game since it gets overriden by the cmd files
-					if prop.propValue[0] == 0.0:
-						prop.propValue = [1.0]
-				elif "CustomizeColor"  in prop.propName:
-					if prop.propValue == [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]:
-						prop.propValue = [1.0,1.0,1.0,1.0]
+			flipSF6CustomizeValues(material.propertyList, toGame=False)
 		addPropsToPropList(materialObj,material.propertyList)
 		addTextureBindingsToBindingList(materialObj, material.textureList)
 		if material.mmtrsData != None:
@@ -280,12 +232,6 @@ def MDFErrorCheck(collectionName):
 	else:
 		errorList.append("MDF objects must be grouped in a collection.")
 		objList = []
-	headerCount = 0
-	if bpy.context.active_object != None and bpy.context.active_object.get("~TYPE",None) == "RE_MDF_HEADER":
-		findHeader = False
-		headerCount = 1
-	else:
-		findHeader = True
 	for obj in objList:
 		
 		if obj.get("~TYPE",None) == MDF_MATERIAL_TYPE:
@@ -432,14 +378,8 @@ def buildMDF(mdfCollectionName,mdfVersion = None):
 					materialEntry.gpbfBufferNameList.append(nameEntry)
 					materialEntry.gpbfBufferPathList.append(pathEntry)
 			if mdfVersion == 31:#SF6
-			#Set altered customize values back to original values since some files do use them
-				for prop in materialEntry.propertyList:
-					if "CustomizeRoughness" in prop.propName or "CustomizeMetal" in prop.propName:
-						if prop.propValue[0] == 1.0:
-							prop.propValue = [0.0]
-					elif "CustomizeColor"  in prop.propName:
-						if prop.propValue == [1.0,1.0,1.0,1.0]:
-							prop.propValue = [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]
+				#Set altered customize values back to original values since some files do use them
+				flipSF6CustomizeValues(materialEntry.propertyList, toGame=True)
 			newMDFFile.materialList.append(materialEntry)
 		return newMDFFile
 	else:

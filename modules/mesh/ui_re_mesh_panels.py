@@ -1,6 +1,6 @@
 import bpy
 
-from bpy.types import (Panel, Menu, Operator, PropertyGroup)
+from bpy.types import Panel
 from ..blender_utils import tag_redraw
 
 
@@ -19,8 +19,6 @@ class OBJECT_PT_MeshObjectModePanel(Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        re_mdf_toolpanel = scene.re_mdf_toolpanel
         layout.operator("re_mesh.create_mesh_collection", icon="COLLECTION_NEW")
         layout.operator("re_mesh.rename_meshes", icon="MOD_LINEART")
         layout.operator("re_mesh.delete_loose", icon="SNAP_VERTEX")
@@ -42,8 +40,6 @@ class OBJECT_PT_MeshArmatureToolsPanel(Panel):
 
     def draw(self, context):
         layout = self.layout
-        obj = context.active_object
-        re_mdf_toolpanel = context.scene.re_mdf_toolpanel
         layout.operator("re_fbxskel.link_armature_bones")
         layout.operator("re_fbxskel.clear_bone_linkages")
 
@@ -62,7 +58,6 @@ class OBJECT_PT_REAssetExtensionPanel(Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
         if hasattr(bpy.types, "OBJECT_PT_re_pak_panel"):
             try:
                 layout.operator("re_asset.create_pak_patch")

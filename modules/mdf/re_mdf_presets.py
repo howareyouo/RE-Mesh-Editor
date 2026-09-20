@@ -112,7 +112,6 @@ def readPresetJSON(filepath,targetCollection = None):
 		while(checkNameUsage(subName,checkSubString=True,objList = mdfCollection.all_objects)):
 			currentIndex +=1
 			subName = "Material " + str(currentIndex).zfill(2)
-		RNADict = {"~TYPE":{"description":"For internal use. Do not change"}}
 		name = subName + " ("+materialJSONDict["Material Header"]["Material Name"]+")"
 		materialObj = createEmpty(name,[("~TYPE","RE_MDF_MATERIAL")],None,mdfCollection)
 		

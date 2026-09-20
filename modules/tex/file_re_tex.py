@@ -21,8 +21,17 @@ GDEFLATE_VERSIONS = set([
 	251111100,#VERSION_MHS3
 	])
 
-VERSION_MHWILDS_BETA = 240701001
-VERSION_MHWILDS = 241106027
+# Reuse a single GDeflate instance across all mip decompressions. The class is
+# stateless (each decompress call allocates its own ctypes buffers), so sharing
+# it is safe; loading the wrapper DLL once avoids reloading it per mip.
+_gdeflateDecompressor = None
+
+def _getGDeflateDecompressor():
+    global _gdeflateDecompressor
+    if _gdeflateDecompressor is None:
+        _gdeflateDecompressor = GDeflate()
+    return _gdeflateDecompressor
+
 
 
 def getTexVersionFromGameName(gameName):
@@ -155,29 +164,20 @@ class MipData():
 
         Raises
         ------
-        BufferError 
+        BufferError
             If texture is read past expected bounds
         """
-        currentOffset = 0
-        seekAmount = scanlineLength - dataLength
-        #print(f"seekAmount: {seekAmount}")
-        #print(f"endSize: {endSize}")
-        #tempFile = open(r"D:\Modding\Monster Hunter Wilds\texDataTest\tempData"+str(currentImageDataHeaderOffset),"wb")
-        # tempFile.write(mipData.getvalue())
-        # tempFile.close()
-        #print(scanlineLength,dataLength,endSize)
-        while currentOffset != endSize:
-            #print("S",currentOffset,endSize)
-            #print(f"current block offset {file.tell()}")
-            target.extend(source.read(dataLength))
-            source.seek(seekAmount, 1)
-            currentOffset += scanlineLength
-            #print("E",currentOffset,endSize)
-            if currentOffset > endSize:
-                raise BufferError("Texture Data Read Past Bounds")
-            #print(f"end block offset {file.tell()}")
-        #print(f"end mip read offset {file.tell()}")
+        # Each scanline holds `dataLength` valid bytes followed by
+        # `scanlineLength - dataLength` bytes of padding. Extract the valid
+        # bytes per scanline in one pass instead of a per-line read/seek loop.
+        numReads = (endSize + scanlineLength - 1) // scanlineLength
+        data = source.getvalue()
+        target.extend(b"".join(
+            data[i * scanlineLength:i * scanlineLength + dataLength]
+            for i in range(numReads)))
         source.close()
+        if numReads * scanlineLength > endSize:
+            raise BufferError("Texture Data Read Past Bounds")
         return target
 
     def calculateLineBytelength(self, formatData, width):
@@ -224,7 +224,7 @@ class MipData():
         # out if there is a flag somewhere else.
         if len(rawImageData) >= 2 and rawImageData[0] == 0x04 and rawImageData[1] == 0xFB:
             #print("Decompressing MH Wilds texture with GDeflate")
-            decompressor = GDeflate()
+            decompressor = _getGDeflateDecompressor()
             mipData = BytesIO(decompressor.decompress(
                 rawImageData, num_workers=4))
 

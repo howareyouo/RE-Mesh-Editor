@@ -1,10 +1,8 @@
 import os
 import bpy
 import glob
-from mathutils import Vector,Quaternion,Matrix
-from math import radians
-from ..blender_utils import showMessageBox,createRECollection,setAssetPathFromFilePath,checkNameUsage
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,parseFileVersion
+from ..blender_utils import createRECollection,setAssetPathFromFilePath,checkNameUsage
+from ..gen_functions import textColors,parseFileVersion
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
 def createSFurCollection(collectionName,parentCollection = None):

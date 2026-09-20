@@ -425,69 +425,6 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 	return lodList
 
 
-def debug_Generate010StreamingTemplate(templateLODList):
-	# Yes this is driving me insane to the point to where I'm generating an 010 template to check if the buffers are being read correctly
-	print("//Auto generated streaming mesh template")
-	print("""
-typedef struct
-{
-    float x;
-    float y;
-    float z;
-}Position<bgcolor=0x0000FF>;
-
-typedef struct
-{
-    ubyte normal[4];
-    ubyte tangent[4];
-}NorTan<bgcolor=0x00FF00>;
-
-typedef struct
-{
-    hfloat u;
-    hfloat v;
-}UV<bgcolor=0xFF0000>;
-
-typedef struct
-{
-    hfloat u;
-    hfloat v;
-}UV2<bgcolor=0xCC0000>;
-typedef struct
-{
-    uint64 w0:10;;
-    uint64 w1:10;
-    uint64 w2:10;
-    uint64 pad0:2;
-    uint64 w3:10;
-    uint64 w4:10;
-    uint64 w5:10;
-    uint64 pad1:2;
-	ubyte indices[8];
-}Weight<bgcolor=0x00FFFF>;
-
-typedef struct
-{
-    ubyte r;
-    ubyte g;
-    ubyte b;
-    ubyte a;
-}Color<bgcolor=0xFFFF00>;
-
-	""")
-	for index, elementList in enumerate(templateLODList):
-		print("struct")
-		print("{")
-		for element in elementList:
-			print("\tFSeek(" + str(element["start"]) + ");\n\t struct\n\t{")
-			print("\t\t" + element["type"] + " entry[" + str(
-				(element["end"] - element["start"]) // element["stride"]) + "];")
-			print("\t}element;")
-		print("}LOD" + str(index) + ";")
-
-	print("//EOF")
-
-
 class ParsedREMesh:
 	def __init__(self):
 		self.isMPLY = False

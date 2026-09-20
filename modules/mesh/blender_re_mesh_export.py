@@ -172,7 +172,7 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 	maxWeightsPerVertex, maxWeightsPerVertexExtended, _, padWithLastWeightIndex, extendedWeights = profile
 	errs = []  # (code, name) collected locally, merged on main thread
 	bbox_gi = []   # raw group index for every weighted-bone assignment (for bone bbox)
-	bbox_xyz = []  # flat x,y,z positions, parallel to bbox_gi
+	bbox_vi = []   # owning unique-vert index per entry, for the position lookup
 	hasExtraWeightOverflow = False
 	used_names = set()  # unprefixed vertex-group names actually referenced (drives weightedBones/remap build)
 
@@ -249,9 +249,8 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 		shapekey_set = shapeKeyGroupIndices
 		min_w = MIN_WEIGHT
 		secondary = hasSecondaryWeight
-		# Only the unique verts are actually processed, so materialize their positions
-		# (instead of converting the whole positions array to a list of python floats).
-		pos_unique = vert_positions[unique_verts].tolist()
+		# Only the unique verts are actually processed; their positions are read
+		# directly from the float32 vert_positions array when building the bone bbox.
 		# Resolve UV-rebuild remap ONCE outside the loop: when UV solve split
 		# vertices, weights live on the ORIGINAL verts (new verts have empty
 		# deform data); otherwise vertex index is the original index.
@@ -297,10 +296,9 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 				parsedSubMesh.weightIndicesList[pos_idx, :main_n] = prim_idx[:main_n]
 				if main_n < 8:
 					parsedSubMesh.weightIndicesList[pos_idx, main_n:] = padding_idx
-				px, py, pz = pos_unique[pos_idx]
 				for gi in prim_idx[:main_n]:
 					bbox_gi.append(gi)
-					bbox_xyz.extend((px, py, pz))
+					bbox_vi.append(pos_idx)
 			if secondary and sec:
 				sec.sort(key=lambda t: t[1], reverse=True)
 				sec_w = [w for _, w in sec]
@@ -311,18 +309,20 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 				sec_n = min(n_sec, 8)
 				parsedSubMesh.secondaryWeightList[pos_idx, :sec_n] = sec_w[:sec_n]
 				parsedSubMesh.secondaryWeightIndicesList[pos_idx, :sec_n] = sec_idx[:sec_n]
-				px, py, pz = pos_unique[pos_idx]
 				for gi in sec_idx[:sec_n]:
 					bbox_gi.append(gi)
-					bbox_xyz.extend((px, py, pz))
+					bbox_vi.append(pos_idx)
 		if invalidBoneGroupSet:
 			for groupName in sorted(invalidBoneGroupSet):
 				errs.append(("WARN_VertexGroupsNotOnArmature", f"{rawName} [{groupName}]"))
 	if len(unique_verts) < len(evaluatedSubMeshData.vertices):
 		errs.append(("LooseVerticesOnSubMesh", rawName))
 	if bbox_gi:
+		# Byte-identical to the old list-extend + np.asarray(float32) path: each
+		# entry's xyz is the exact float32 value already stored in vert_positions
+		# (no float64 round-trip), and group indices map 1:1 in the same order.
 		bbox = (np.asarray(bbox_gi, dtype=np.int32),
-		        np.asarray(bbox_xyz, dtype=np.float32).reshape(-1, 3))
+		        vert_positions[unique_verts][np.asarray(bbox_vi, dtype=np.int32)].reshape(-1, 3))
 	else:
 		bbox = (np.zeros(0, dtype=np.int32), np.zeros((0, 3), dtype=np.float32))
 	return parsedSubMesh, errs, bbox, hasExtraWeightOverflow, used_names, vgNameList

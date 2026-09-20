@@ -38,14 +38,6 @@ maskAlphaMMTRSet = set([
 	#"character_default.mmtr",#DMC5
 	"record_fur.mmtr",#RE2
 	])
-props_MetallicOverrideSet = set([
-	"Metallic_Param",
-	"Metallic",
-	])
-props_RoughnessOverrideSet = set([
-	"Roughness_Param",
-	"Roughness",
-	])
 #Material Load Levels
 albedoTypeSet = set([
 	"ALBD",
@@ -129,12 +121,6 @@ normalVertexColorTypeSet = set([
 	"NormalRoughnessMap_G",
 	"NormalRoughnessMap_R",
 	])
-NRMRTypes = set([
-	"NormalReflactionMap",
-	"NormalRoughnessMap",
-	#"NormalRoughnessMap_R",
-	"NormalRoughnessMapArray",
-	])
 NRRTTypes = set([
 	"NormalRoughnessCavityMap",
 	#"NormalRoughnessCavityMapBase",
@@ -213,7 +199,7 @@ from ..gen_functions import raiseWarning,getBit,wildCardFileSearch
 from ..game_versions import mdfVersionDict, texVersionDict
 from .file_re_mdf import readMDF,getMDFVersionToGameName
 from ..tex.blender_re_tex import loadTex
-from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,getMHWildsDetailMapNodeGroup
+from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
 from ..ddsconv.directx.texconv import Texconv, unload_texconv
 DEBUG_MODE = False
 def debugprint(string):
@@ -518,7 +504,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							textureNodeInfoList.append(("NRM",textureType,imageList,outputPath))
 						else:
 							textureNodeInfoList.append(("NRMR",textureType,imageList,outputPath))
-						detectedNormal = True
 					elif textureType in alphaTypeSet:
 						textureNodeInfoList.append(("ALP",textureType,imageList,outputPath))
 						hasAlpha = True
@@ -745,32 +730,19 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 					links.new(vertexColorNode.outputs["Color"],vertexColorChannelSepNode.inputs["Color"])
 					if matInfo["albedoNodeLayerGroup"] != None:
-						if "BaseDielectricMap_R" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["BaseDielectricMap_R"]
-							matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Red"],mixType = "MIX")
-							matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Red"],mixType = "MIX")
-						if "BaseDielectricMap_G" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["BaseDielectricMap_G"]
-							matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Green"],mixType = "MIX")
-							matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Green"],mixType = "MIX")
-						if "BaseDielectricMap_B" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["BaseDielectricMap_B"]
-							matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Blue"],mixType = "MIX")
-							matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Blue"],mixType = "MIX")
+						for suffix,channel in (("R","Red"),("G","Green"),("B","Blue")):
+							texName = "BaseDielectricMap_" + suffix
+							if texName in matInfo["textureNodeDict"]:
+								node = matInfo["textureNodeDict"][texName]
+								matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs[channel],mixType = "MIX")
+								matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs[channel],mixType = "MIX")
 					if matInfo["normalNodeLayerGroup"] != None:
-						if "NormalRoughnessMap_R" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["NormalRoughnessMap_R"]
-							matInfo["normalNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Red"],mixType = "MIX")
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Red"],mixType = "MIX")
-						if "NormalRoughnessMap_G" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["NormalRoughnessMap_G"]
-							matInfo["normalNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Green"],mixType = "MIX")
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Green"],mixType = "MIX")
-						
-						if "NormalRoughnessMap_B" in matInfo["textureNodeDict"]:
-							node = matInfo["textureNodeDict"]["NormalRoughnessMap_B"]
-							matInfo["normalNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs["Blue"],mixType = "MIX")
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs["Blue"],mixType = "MIX")
+						for suffix,channel in (("R","Red"),("G","Green"),("B","Blue")):
+							texName = "NormalRoughnessMap_" + suffix
+							if texName in matInfo["textureNodeDict"]:
+								node = matInfo["textureNodeDict"][texName]
+								matInfo["normalNodeLayerGroup"].addMixLayer(node.outputs["Color"],vertexColorChannelSepNode.outputs[channel],mixType = "MIX")
+								matInfo["roughnessNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],vertexColorChannelSepNode.outputs[channel],mixType = "MIX")
 				
 				if "LayerMaskOcclusionMap" in matInfo["textureNodeDict"]:
 					LYMONode = matInfo["textureNodeDict"]["LayerMaskOcclusionMap"]
@@ -782,13 +754,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					layerMaskUVMappingGroupNode =  getDualUVMappingNodeGroup(nodeTree)
 					layerMaskUVMappingGroupNode.location = LYMONode.location + Vector((-300,0))
 					
-					try:
-						layerMaskUVMappingGroupNode.inputs["Tiling"].default_value = (1.0,1.0,1.0)
-					except:
-						try:
-							layerMaskUVMappingGroupNode.inputs["Tiling"].default_value = 1.0
-						except:
-							pass
+					setDualUVTilingDefault(layerMaskUVMappingGroupNode)
 					nodeTree.links.new(UVMap1Node.outputs["UV"],layerMaskUVMappingGroupNode.inputs["UV1"])
 					nodeTree.links.new(UVMap2Node.outputs["UV"],layerMaskUVMappingGroupNode.inputs["UV2"])
 					if "LayerMask_Use_SecondaryUV" in matInfo["mPropDict"]:
@@ -807,72 +773,44 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					#UV_Tiling2 wired via addLayerUVMapping above
 						
 					
-					if "BaseDielectricMapBase" in matInfo["textureNodeDict"]:
-						matInfo["isDielectric"] = True
-						
-						node = matInfo["textureNodeDict"]["BaseDielectricMapBase"]
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],LYMOSepNode.outputs["Blue"],mixType = "MIX")
-						matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],LYMOSepNode.outputs["Blue"],mixType = "MIX")
+					baseDielectricEntries = (
+						("BaseDielectricMapBase",LYMOSepNode.outputs["Blue"],None),
+						("BaseDielectricMap1",LYMOSepNode.outputs["Red"],layer1UVMappingGroupNode),
+						("BaseDielectricMap2",LYMOSepNode.outputs["Green"],layer1UVMappingGroupNode),
+					)
+					for texName,channelSocket,uvNode in baseDielectricEntries:
+						if texName in matInfo["textureNodeDict"]:
+							if texName == "BaseDielectricMapBase":
+								matInfo["isDielectric"] = True
+							node = matInfo["textureNodeDict"][texName]
+							matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],channelSocket,mixType = "MIX")
+							matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],channelSocket,mixType = "MIX")
+							if uvNode != None:
+								links.new(uvNode.outputs["Vector"],node.inputs["Vector"])
 					
-					if "BaseDielectricMap1" in matInfo["textureNodeDict"]:
-						node = matInfo["textureNodeDict"]["BaseDielectricMap1"]
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],LYMOSepNode.outputs["Red"],mixType = "MIX")
-						matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],LYMOSepNode.outputs["Red"],mixType = "MIX")
-						if layer1UVMappingGroupNode != None:
-							links.new(layer1UVMappingGroupNode.outputs["Vector"],node.inputs["Vector"])
-						
-					if "BaseDielectricMap2" in matInfo["textureNodeDict"]:
-						node = matInfo["textureNodeDict"]["BaseDielectricMap2"]
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],LYMOSepNode.outputs["Green"],mixType = "MIX")
-						matInfo["metallicNodeLayerGroup"].addMixLayer(node.outputs["Alpha"],LYMOSepNode.outputs["Green"],mixType = "MIX")
-						if layer1UVMappingGroupNode != None:
-							links.new(layer1UVMappingGroupNode.outputs["Vector"],node.inputs["Vector"])
-					
-					
-					if "NormalRoughnessCavityMapBase" in matInfo["textureNodeDict"]:
-						node = matInfo["textureNodeDict"]["NormalRoughnessCavityMapBase"]
-						nodeGroupNode = getBentNormalNodeGroup(nodeTree)
-						nodeGroupNode.location = node.location + Vector((300,0))
-						nodeTree.links.new(node.outputs["Color"],nodeGroupNode.inputs["Color"])
-						nodeTree.links.new(node.outputs["Alpha"],nodeGroupNode.inputs["Alpha"])
-						matInfo["normalNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Color"],LYMOSepNode.outputs["Blue"],mixType = "MIX")
-						matInfo["roughnessNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Roughness"],LYMOSepNode.outputs["Blue"],mixType = "MIX")
-						matInfo["cavityNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["BlueChannel"],LYMOSepNode.outputs["Blue"],mixType = "MIX")
-						
-					if "NormalRoughnessCavityMap1" in matInfo["textureNodeDict"]:
-						node = matInfo["textureNodeDict"]["NormalRoughnessCavityMap1"]
-						nodeGroupNode = getBentNormalNodeGroup(nodeTree)
-						nodeGroupNode.location = node.location + Vector((300,0))
-						nodeTree.links.new(node.outputs["Color"],nodeGroupNode.inputs["Color"])
-						nodeTree.links.new(node.outputs["Alpha"],nodeGroupNode.inputs["Alpha"])
-						matInfo["normalNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Color"],LYMOSepNode.outputs["Red"],mixType = "MIX")
-						matInfo["roughnessNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Roughness"],LYMOSepNode.outputs["Red"],mixType = "MIX")
-						matInfo["cavityNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["BlueChannel"],LYMOSepNode.outputs["Red"],mixType = "MIX")
-						if layer1UVMappingGroupNode != None:
-							links.new(layer1UVMappingGroupNode.outputs["Vector"],node.inputs["Vector"])
-					if "NormalRoughnessCavityMap2" in matInfo["textureNodeDict"]:
-						node = matInfo["textureNodeDict"]["NormalRoughnessCavityMap2"]
-						nodeGroupNode = getBentNormalNodeGroup(nodeTree)
-						nodeGroupNode.location = node.location + Vector((300,0))
-						nodeTree.links.new(node.outputs["Color"],nodeGroupNode.inputs["Color"])
-						nodeTree.links.new(node.outputs["Alpha"],nodeGroupNode.inputs["Alpha"])
-						matInfo["normalNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Color"],LYMOSepNode.outputs["Green"],mixType = "MIX")
-						matInfo["roughnessNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Roughness"],LYMOSepNode.outputs["Green"],mixType = "MIX")
-						matInfo["cavityNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["BlueChannel"],LYMOSepNode.outputs["Green"],mixType = "MIX")
-						if layer2UVMappingGroupNode != None:
-							links.new(layer2UVMappingGroupNode.outputs["Vector"],node.inputs["Vector"])
+					normalRoughnessEntries = (
+						("NormalRoughnessCavityMapBase",LYMOSepNode.outputs["Blue"],None),
+						("NormalRoughnessCavityMap1",LYMOSepNode.outputs["Red"],layer1UVMappingGroupNode),
+						("NormalRoughnessCavityMap2",LYMOSepNode.outputs["Green"],layer2UVMappingGroupNode),
+					)
+					for texName,channelSocket,uvNode in normalRoughnessEntries:
+						if texName in matInfo["textureNodeDict"]:
+							node = matInfo["textureNodeDict"][texName]
+							nodeGroupNode = getBentNormalNodeGroup(nodeTree)
+							nodeGroupNode.location = node.location + Vector((300,0))
+							nodeTree.links.new(node.outputs["Color"],nodeGroupNode.inputs["Color"])
+							nodeTree.links.new(node.outputs["Alpha"],nodeGroupNode.inputs["Alpha"])
+							matInfo["normalNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Color"],channelSocket,mixType = "MIX")
+							matInfo["roughnessNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["Roughness"],channelSocket,mixType = "MIX")
+							matInfo["cavityNodeLayerGroup"].addMixLayer(nodeGroupNode.outputs["BlueChannel"],channelSocket,mixType = "MIX")
+							if uvNode != None:
+								links.new(uvNode.outputs["Vector"],node.inputs["Vector"])
 				if "DirtWearMap" in matInfo["textureNodeDict"]:
 					DirtWearNode = matInfo["textureNodeDict"]["DirtWearMap"]
 					
 					dirtMapUVMappingGroupNode = getDualUVMappingNodeGroup(nodeTree)
 					dirtMapUVMappingGroupNode.location = DirtWearNode.location + Vector((-300,0))
-					try:
-						dirtMapUVMappingGroupNode.inputs["Tiling"].default_value = (1.0,1.0,1.0)
-					except:
-						try:
-							dirtMapUVMappingGroupNode.inputs["Tiling"].default_value = 1.0
-						except:
-							pass
+					setDualUVTilingDefault(dirtMapUVMappingGroupNode)
 					nodeTree.links.new(UVMap1Node.outputs["UV"],dirtMapUVMappingGroupNode.inputs["UV1"])
 					nodeTree.links.new(UVMap2Node.outputs["UV"],dirtMapUVMappingGroupNode.inputs["UV2"])
 					if "DirtMap_Use_SecondaryUV" in matInfo["mPropDict"]:
@@ -927,21 +865,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					
 					
 					#The color channels are BGR for some reason
-					if "DirtColor1" in matInfo["mPropDict"]:
-						node = addPropertyNode(matInfo["mPropDict"]["DirtColor1"], matInfo["currentPropPos"], nodeTree)
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],DirtWearSepNode.outputs["Blue"],mixType = "MULTIPLY")#TODO Mix probably isn't the right operation, but others didn't look quite right either, fix
-						if dirtRoughnessNode != None:
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(dirtRoughnessNode.outputs["Value"],DirtWearSepNode.outputs["Red"],mixType = "MULTIPLY")
-					if "DirtColor2" in matInfo["mPropDict"]:
-						node = addPropertyNode(matInfo["mPropDict"]["DirtColor2"], matInfo["currentPropPos"], nodeTree)
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],DirtWearSepNode.outputs["Green"],mixType = "MULTIPLY")
-						if dirtRoughnessNode != None:
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(dirtRoughnessNode.outputs["Value"],DirtWearSepNode.outputs["Green"],mixType = "MULTIPLY")
-					if "DirtColor3" in matInfo["mPropDict"]:
-						node = addPropertyNode(matInfo["mPropDict"]["DirtColor3"], matInfo["currentPropPos"], nodeTree)
-						matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],DirtWearSepNode.outputs["Red"],mixType = "MULTIPLY")
-						if dirtRoughnessNode != None:
-							matInfo["roughnessNodeLayerGroup"].addMixLayer(dirtRoughnessNode.outputs["Value"],DirtWearSepNode.outputs["Blue"],mixType = "MULTIPLY")
+					dirtColorEntries = (
+						("DirtColor1",DirtWearSepNode.outputs["Blue"],DirtWearSepNode.outputs["Red"]),
+						("DirtColor2",DirtWearSepNode.outputs["Green"],DirtWearSepNode.outputs["Green"]),
+						("DirtColor3",DirtWearSepNode.outputs["Red"],DirtWearSepNode.outputs["Blue"]),
+					)
+					for propName,albSocket,roughSocket in dirtColorEntries:
+						if propName in matInfo["mPropDict"]:
+							node = addPropertyNode(matInfo["mPropDict"][propName],matInfo["currentPropPos"],nodeTree)
+							#TODO Mix probably isn't the right operation, but others didn't look quite right either, fix
+							matInfo["albedoNodeLayerGroup"].addMixLayer(node.outputs["Color"],albSocket,mixType = "MULTIPLY")
+							if dirtRoughnessNode != None:
+								matInfo["roughnessNodeLayerGroup"].addMixLayer(dirtRoughnessNode.outputs["Value"],roughSocket,mixType = "MULTIPLY")
 					
 				if matInfo["gameName"] == "RE9":
 					if "ch_hair" in matInfo["mmtrName"]:
@@ -1565,73 +1500,6 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
 				
-				#Only enabled for hair and MHR wing materials atm since it doesn't look right on much else
-				if IMPORT_TRANSLUCENT and matInfo["translucentSocket"] != None and ("Translucency" in matInfo["mPropDict"] or "Translucency_Param" in matInfo["mPropDict"]) and ("wing" in matInfo["mmtrName"] or "hair" in matInfo["mmtrName"]) and matInfo["gameName"] != "DMC5":
-					
-					gammaNode = nodes.new("ShaderNodeGamma")#Needs a gamma change for the mixed shader nodes to look right
-					gammaNode.location = currentPos
-					gammaNode.inputs["Gamma"].default_value = 0.65
-					if matInfo["albedoNodeLayerGroup"].currentOutSocket != None:
-						links.new(matInfo["albedoNodeLayerGroup"].currentOutSocket,gammaNode.inputs["Color"])
-					 
-					
-					currentPos[0] += 300
-					
-					translucentNode = nodes.new("ShaderNodeBsdfTranslucent")
-					translucentNode.location = currentPos
-					links.new(gammaNode.outputs["Color"],translucentNode.inputs["Color"])
-					if normalNode != None: 
-						links.new(normalNode.outputs["Normal"],translucentNode.inputs["Normal"])
-					currentPos[0] += 300
-					
-					translucentParam = None
-					baseTranslucentParam = None
-					if "Translucency" in matInfo["mPropDict"]:
-						translucentParam = addPropertyNode(matInfo["mPropDict"]["Translucency"], matInfo["currentPropPos"], nodeTree)
-						if "BaseTranslucency" in matInfo["mPropDict"]:
-							baseTranslucentParam = addPropertyNode(matInfo["mPropDict"]["BaseTranslucency"], matInfo["currentPropPos"], nodeTree)
-					elif "Translucency_Param" in matInfo["mPropDict"]:
-						translucentParam = addPropertyNode(matInfo["mPropDict"]["Translucency_Param"], matInfo["currentPropPos"], nodeTree)
-					
-					
-					if translucentParam != None:
-						translucentMultNode = nodes.new("ShaderNodeMath")
-						translucentMultNode.location = currentPos
-						translucentMultNode.operation = "MULTIPLY"
-						
-						currentPos[0] += 300
-						if baseTranslucentParam != None:
-							baseTranslucentMultNode = nodes.new("ShaderNodeMath")
-							baseTranslucentMultNode.location = currentPos
-							baseTranslucentMultNode.operation = "MULTIPLY"
-							currentPos[0] += 300
-							
-							links.new(baseTranslucentParam.outputs["Value"],baseTranslucentMultNode.inputs[0])
-							links.new(translucentParam.outputs["Value"],baseTranslucentMultNode.inputs[1])
-							links.new(matInfo["translucentSocket"],translucentMultNode.inputs[0])
-							links.new(baseTranslucentMultNode.outputs["Value"],translucentMultNode.inputs[1])
-						else:
-							links.new(matInfo["translucentSocket"],translucentMultNode.inputs[0])
-							links.new(translucentParam.outputs["Value"],translucentMultNode.inputs[1])
-					multNode = nodes.new("ShaderNodeMath")#Apply alpha to translucent factor
-					multNode.location = currentPos
-					multNode.operation = "MULTIPLY"
-					if translucentParam == None:
-						links.new(matInfo["translucentSocket"],multNode.inputs[0])
-					else:
-						links.new(translucentMultNode.outputs["Value"],multNode.inputs[0])
-					multNode.inputs[1].default_value = 1.0
-					if alphaClippingNode != None:
-						links.new(alphaClippingNode.outputs["Value"],multNode.inputs[1])
-					currentPos[0] += 300
-					mixShader = nodes.new("ShaderNodeMixShader")
-					mixShader.location = currentPos
-					links.new(matInfo["currentShaderOutput"],mixShader.inputs[1])
-					links.new(translucentNode.outputs["BSDF"],mixShader.inputs[2])
-					links.new(multNode.outputs["Value"],mixShader.inputs["Fac"])
-					
-					matInfo["currentShaderOutput"] = mixShader.outputs["Shader"]
-					currentPos[0] += 300
 					
 				if matInfo["disableShadowCast"]:
 					#Blender 4.2 made it such a pain to disable shadow casting on a material

@@ -3,7 +3,6 @@ import bpy
 
 from bpy.types import Operator
 
-from ..blender_utils import showMessageBox
 from .re_fbxskel_propertyGroups import ToggleStringPropertyGroup
 EXTRACT_WINDOW_SIZE = 400
 SPLIT_FACTOR = .45

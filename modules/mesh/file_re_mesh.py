@@ -27,7 +27,6 @@ MESH_IO_BUFFER_SIZE = 1024 * 1024
 
 import numpy as np
 import struct
-import ctypes
 import time
 from io import BytesIO
 from ..gen_functions import *
@@ -37,49 +36,6 @@ from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 # shared with re_mesh_parse.py and file_re_mesh_mply.py).
 from .mesh_versions import *  # noqa: F401,F403 -- re-exported for blender_re_mesh
 
-c_uint64 = ctypes.c_uint64
-
-
-class CompressedSixWeightIndices_bits(ctypes.LittleEndianStructure):
-	_fields_ = [
-		("w0", c_uint64, 10),
-		("w1", c_uint64, 10),
-		("w2", c_uint64, 10),
-		("pad0", c_uint64, 2),
-		("w3", c_uint64, 10),
-		("w4", c_uint64, 10),
-		("w5", c_uint64, 10),
-		("pad1", c_uint64, 2),
-
-	]
-
-
-class CompressedSixWeightIndices(ctypes.Union):
-	_anonymous_ = ("weights",)
-	_fields_ = [
-		("weights", CompressedSixWeightIndices_bits),
-		("asUInt64", c_uint64)
-	]
-
-
-c_uint32 = ctypes.c_uint32
-
-
-class CompressedBlendShapeVertexInt_bits(ctypes.LittleEndianStructure):
-	_fields_ = [
-		("x", c_uint32, 11),
-		("y", c_uint32, 10),
-		("z", c_uint32, 11),
-
-	]
-
-
-class CompressedBlendShapeVertexInt(ctypes.Union):
-	_anonymous_ = ("pos",)
-	_fields_ = [
-		("pos", CompressedBlendShapeVertexInt_bits),
-		("asUInt32", c_uint32)
-	]
 
 
 class Vec3():
@@ -377,15 +333,6 @@ class ShadowHeader():
 		self.lodGroupList = []
 
 		# Commented out because there's no reason to read it, shadow meshes can only use main mesh lods
-		"""
-		startPos = file.tell()
-		for offset in self.lodGroupOffsetList:
-			file.seek(offset)
-			entry = LODGroupHeader()
-			entry.read(file)
-			self.lodGroupList.append(entry)
-		file.seek(startPos)
-		"""
 		file.seek(getPaddedPos(file.tell(), 16))
 
 	def write(self, file, version):
@@ -402,15 +349,6 @@ class ShadowHeader():
 		file.seek(getPaddedPos(file.tell(), 16))
 
 		# Shadow meshes can't have unique lods, the game will crash
-		"""
-		#Halfway through writing the exporter I realised lod group offsets can be shared, this is a workaround so that the lod group doesn't get written again if it shouldn't be
-		currentPos = file.tell()
-		#print(file.tell())
-		for index,entry in enumerate(self.lodGroupList):
-			if self.lodGroupOffsetList[index] >= currentPos:#If less than current pos, it's a reused offset, do not write
-				#print("wrote shadow lod structure")
-				entry.write(file)
-		"""
 
 
 # WILDS
@@ -856,88 +794,6 @@ class FileHeader():
 				self.streamingInfoOffset, self.sf6unkn4))
 
 
-class IndexNormalRecalc():
-	def __init__(self):
-		self.index = 0
-		self.left = 0
-		self.right = 0
-
-	def read(self, file):
-		raw = file.read(4)
-		self.index, self.left, self.right = struct.unpack_from('<HBB', raw)
-
-	def write(self, file):
-		file.write(struct.pack('<HBB', self.index, self.left, self.right))
-
-
-class NormalRecalc():
-	def __init__(self):
-		self.blockCount = 0
-		self.dataOffset = 0
-		self.nextOffset = 0
-		self.null = 0
-		self.vertexOffset = 0
-		self.faceOffset = 0
-		# padding align 16
-		self.vertexDataList = []
-		# padding align 16
-		self.faceDataList = []
-
-	def read(self, file, vertexCount, faceCount):
-		self.blockCount = read_uint(file)
-		self.dataOffset = read_uint64(file)
-		self.nextOffset = read_short(file)
-		self.null = read_short(file)
-		self.vertexOffset = read_uint(file)
-		self.faceOffset = read_uint64(file)
-		file.seek(getPaddedPos(file.tell(), 16))
-		# Batch read vertex data: each IndexNormalRecalc is 4 bytes (ushort+ubyte+ubyte)
-		if vertexCount > 0:
-			raw = file.read(vertexCount * 4)
-			vdata = np.frombuffer(raw, dtype=[('index', '<u2'), ('left', 'u1'), ('right', 'u1')])
-			self.vertexDataList = []
-			for i in range(vertexCount):
-				entry = IndexNormalRecalc()
-				entry.index = int(vdata[i]['index'])
-				entry.left = int(vdata[i]['left'])
-				entry.right = int(vdata[i]['right'])
-				self.vertexDataList.append(entry)
-		file.seek(getPaddedPos(file.tell(), 16))
-		# Batch read face data
-		if faceCount > 0:
-			raw = file.read(faceCount * 4)
-			fdata = np.frombuffer(raw, dtype=[('index', '<u2'), ('left', 'u1'), ('right', 'u1')])
-			self.faceDataList = []
-			for i in range(faceCount):
-				entry = IndexNormalRecalc()
-				entry.index = int(fdata[i]['index'])
-				entry.left = int(fdata[i]['left'])
-				entry.right = int(fdata[i]['right'])
-				self.faceDataList.append(entry)
-
-	def write(self, file):
-		write_uint(file, self.blockCount)
-		write_uint64(file, self.dataOffset)
-		write_short(file, self.nextOffset)
-		write_short(file, self.null)
-		write_uint(file, self.vertexOffset)
-		write_uint64(file, self.faceOffset)
-		file.seek(getPaddedPos(file.tell(), 16))
-		# Batch write vertex data
-		if self.vertexDataList:
-			vdata = np.empty(len(self.vertexDataList), dtype=[('index', '<u2'), ('left', 'u1'), ('right', 'u1')])
-			for i, entry in enumerate(self.vertexDataList):
-				vdata[i] = (entry.index, entry.left, entry.right)
-			file.write(vdata.tobytes())
-		file.seek(getPaddedPos(file.tell(), 16))
-		# Batch write face data
-		if self.faceDataList:
-			fdata = np.empty(len(self.faceDataList), dtype=[('index', '<u2'), ('left', 'u1'), ('right', 'u1')])
-			for i, entry in enumerate(self.faceDataList):
-				fdata[i] = (entry.index, entry.left, entry.right)
-			file.write(fdata.tobytes())
-
-
 class BlendSubMesh():
 	def __init__(self):
 		self.subMeshVertexStartIndex = 0
@@ -948,8 +804,6 @@ class BlendSubMesh():
 	def read(self, file):
 		self.subMeshVertexStartIndex, self.vertOffset, self.vertCount, self.paramUnkn3 = struct.unpack_from('<4I', file.read(16))
 
-	def write(self, file):
-		file.write(struct.pack('<4I', self.subMeshVertexStartIndex, self.vertOffset, self.vertCount, self.paramUnkn3))
 
 
 class BlendTarget():
@@ -990,16 +844,6 @@ class BlendTarget():
 
 			file.seek(currentPos)
 
-	def write(self, file, version):  # TODO FIX WRITE
-		write_uint64(file, self.count)
-		write_uint64(file, self.mainOffset)
-		write_uint64(file, self.zero)
-		write_uint64(file, self.hash)
-		for entry in self.blendShapeOffsetList:
-			write_uint64(file, entry)
-
-		for entry in self.blendShapeList:  # TODO FIX WRITE
-			entry.write(file)
 
 
 class BlendShapeData():
@@ -1045,19 +889,6 @@ class BlendShapeData():
 		else:
 			self.blendSSList = []
 
-	def write(self, file):  # TODO FIX WRITE
-		# Batch write header: ushort×2 + uint×2 + uint64×4 = 44 bytes
-		file.write(struct.pack('<HHIII', self.targetCount, self.typing, self.unknFlag,
-			self.padding1, self.padding2))
-		file.write(struct.pack('<QQQQ', self.dataOffset, self.aabbOffset,
-			self.blendSOffset, self.blendSSOffset))
-		file.write(struct.pack('<II', self.vertOffset, self.vertCount))
-		file.write(struct.pack('<HH', self.visconTarget, self.blendShapeCount))
-		self.aabb.write(file)
-		# Batch write blendS + blendSSList
-		file.write(struct.pack(f'<{len(self.blendS)}i', *self.blendS))
-		if self.blendSSList:
-			file.write(struct.pack(f'<{len(self.blendSSList)}i', *self.blendSSList))
 
 
 class BlendShapeHeader():
@@ -1093,16 +924,6 @@ class BlendShapeHeader():
 			self.blendShapeList.append(entry)
 		file.seek(currentPos)
 
-	def write(self, file, version):
-		write_uint64(file, self.count)
-		write_uint64(file, self.mainOffset)
-		write_uint64(file, self.zero)
-		write_uint64(file, self.hash)
-		if self.blendShapeOffsetList:
-			file.write(struct.pack(f'<{len(self.blendShapeOffsetList)}Q', *self.blendShapeOffsetList))
-
-		for entry in self.blendShapeList:  # TODO FIX WRITE
-			entry.write(file, version)
 
 
 class BoneAABBGroup():
@@ -1353,12 +1174,6 @@ class REMesh():
 			self.skeletonHeader = Skeleton()
 			self.skeletonHeader.read(file)
 		# TODO - Normal recalc is changed or offset is different in mhwilds
-		"""
-		if self.fileHeader.normalRecalcOffset:
-			file.seek(self.fileHeader.normalRecalcOffset)
-			self.normalRecalcHeader = NormalRecalc()
-			self.normalRecalcHeader.read(file,sum([i.vertexCount for i in self.lodHeader.lodGroupList[0].meshGroupList]),sum([i.faceCount for i in self.lodHeader.lodGroupList[0].meshGroupList]))
-		"""
 		if self.fileHeader.blendShapesOffset and IMPORT_BLEND_SHAPES:
 			file.seek(self.fileHeader.blendShapesOffset)
 			self.blendShapeHeader = BlendShapeHeader()
@@ -1822,80 +1637,6 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		# currentOffset = LOD Group 0 offset
 		currentOffset = getPaddedPos(reMesh.shadowHeader.offsetOffset + 8 * reMesh.shadowHeader.lodGroupCount, 16)
 	# It turns out shadow meshes can only use existing lods from the main mesh so this was pointless
-	"""
-	if parsedMesh.shadowMeshLODList != []:
-		reMesh.fileHeader.shadowMeshGroupOffset = currentOffset
-		reMesh.shadowHeader = ShadowHeader()
-		reMesh.shadowHeader.skinWeightCount = 18
-		reMesh.shadowHeader.lodGroupCount = len(parsedMesh.shadowMeshLODList)
-		reMesh.shadowHeader.materialCount = len(parsedMesh.materialNameList)
-		for viscon in parsedMesh.shadowMeshLODList[0].visconGroupList:
-			reMesh.shadowHeader.totalMeshCount += len(viscon.subMeshList)
-		if parsedMesh.bufferHasUV2:
-			reMesh.shadowHeader.uvCount = 2
-		else:
-			reMesh.shadowHeader.uvCount = 1
-		reMesh.shadowHeader.offsetOffset = reMesh.fileHeader.shadowMeshGroupOffset+sd.LOD_HEADER_OFFSET_LIST_OFFSET
-		
-		#currentOffset = LOD Group 0 offset
-		currentOffset = getPaddedPos(reMesh.shadowHeader.offsetOffset + 8*reMesh.shadowHeader.lodGroupCount,16)
-		
-		for lod in parsedMesh.shadowMeshLODList:
-			reMesh.shadowHeader.lodGroupOffsetList.append(currentOffset)
-			lodGroupHeader = LODGroupHeader()
-			lodGroupHeader.count = len(lod.visconGroupList)
-			lodGroupHeader.distance = lod.lodDistance
-			currentOffset += sd.LOD_GROUP_HEADER_OFFSET_LIST_OFFSET
-			lodGroupHeader.offsetOffset = currentOffset
-			#Viscon 0 Offset
-			currentOffset = lodGroupHeader.offsetOffset + 8*lodGroupHeader.count + getPaddingAmount(lodGroupHeader.offsetOffset+(8*lodGroupHeader.count),16)
-			
-			for viscon in lod.visconGroupList:
-				lodGroupHeader.meshGroupOffsetList.append(currentOffset)
-				#print(f"viscon {viscon.visconGroupNum} offset: {str(currentOffset)}")
-				meshGroup = MeshGroup()
-				meshGroup.visconGroupID = viscon.visconGroupNum
-				meshGroup.meshCount = len(viscon.subMeshList)
-				for parsedSubMesh in viscon.subMeshList:
-					subMesh = MaterialSubdivision()
-					parsedSubMeshToSubMeshDataDict[parsedSubMesh] = subMesh
-					subMesh.materialIndex = parsedSubMesh.materialIndex
-					subMesh.faceCount = len(parsedSubMesh.faceList) * 3
-					paddedFaceCount = getPaddedPos(subMesh.faceCount, 2)
-					meshGroup.faceCount += paddedFaceCount
-					
-					vertCount = len(parsedSubMesh.vertexPosList)
-					meshGroup.vertexCount += vertCount
-					if not parsedSubMesh.isReusedMesh:
-						subMesh.faceStartIndex = currentFaceIndex
-						subMesh.vertexStartIndex = currentVertexIndex
-						currentVertexIndex += vertCount
-						currentFaceIndex += paddedFaceCount
-						#TODO Add vertices and faces to buffers
-						WriteToVertexPosBuffer(vertexPosBuffer,parsedSubMesh.vertexPosList)
-						WriteToNorTanBuffer(norTanBuffer, parsedSubMesh.normalList,parsedSubMesh.vertexPosList,parsedSubMesh.uvList,parsedSubMesh.faceList)
-						WriteToUVBuffer(UVBuffer,parsedSubMesh.uvList)
-						if parsedSubMesh.uv2List != []:
-							WriteToUVBuffer(UV2Buffer,parsedSubMesh.uv2List)
-						if parsedSubMesh.weightIndicesList != [] and parsedSubMesh.weightList != []:
-							WriteToWeightBuffer(weightBuffer,parsedSubMesh.weightList,parsedSubMesh.weightIndicesList)
-						if parsedSubMesh.colorList != []:
-							WriteToColorBuffer(colorBuffer,parsedSubMesh.colorList)
-						
-						WriteToFaceBuffer(faceBuffer,parsedSubMesh.faceList)
-					else:
-						linkedMeshData = parsedSubMeshToSubMeshDataDict[parsedSubMesh.linkedSubMesh]
-						subMesh.faceStartIndex = linkedMeshData.faceStartIndex
-						subMesh.vertexStartIndex = linkedMeshData.vertexStartIndex
-						#TODO Get linked mesh offset for reused meshes
-						#Make dict of offset key to tuple of vertexstartindex and facestartindex
-						#meshOffsetDict[parsedSubMesh.linkedMesh][0]
-					meshGroup.vertexInfoList.append(subMesh)
-				currentOffset += sd.MESH_GROUP_SIZE + meshGroup.meshCount*sd.MATERIAL_SUBDIVISION_SIZE
-				
-				lodGroupHeader.meshGroupList.append(meshGroup)
-			reMesh.shadowHeader.lodGroupList.append(lodGroupHeader)	
-	"""
 	# Skeleton / AABB
 	if parsedMesh.skeleton != None:
 		reMesh.fileHeader.skeletonOffset = currentOffset

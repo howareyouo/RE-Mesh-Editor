@@ -68,13 +68,8 @@ def read_int(file_object):
 	return _struct_int.unpack(file_object.read(4))[0]
 def read_uint64(file_object):
 	return _struct_uint64.unpack(file_object.read(8))[0]
-def read_int64(file_object):
-	return _struct_int64.unpack(file_object.read(8))[0]
 def read_float(file_object):
 	return _struct_float.unpack(file_object.read(4))[0]
-#read null terminated string from file
-def read_string(file_object):
-     return ''.join(iter(lambda: file_object.read(1).decode('utf-8'), '\x00'))
 def read_unicode_string(file_object):#Reads unicode string from file into utf-8 string
 	byteString = b''
 	wchar = file_object.read(2)
@@ -318,12 +313,6 @@ IS_MAC = platform.system() == 'Darwin'
 # Addon install root (folder containing __init__.py) and shared Presets directory
 ADDON_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRESET_DIR = os.path.join(ADDON_ROOT, "Presets")
-
-def splitInt64(value):#Takes int64 and converts to 2 int32's
-	return struct.unpack("ii", value.to_bytes(8, "little", signed=False))
-
-def concatInt(a, b):#Combines two int values into a int64
-	return (a << 32) | b
 
 def slugify(value, allow_unicode=False):
     """

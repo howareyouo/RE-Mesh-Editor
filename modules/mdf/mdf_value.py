@@ -81,3 +81,29 @@ def setPropValue(propertyEntry, dataType, value):
 	else:  # FLOAT
 		v = value[0] if isinstance(value, (list, tuple)) else value
 		propertyEntry.float_value = float(v)
+
+
+def flipSF6CustomizeValues(propList, toGame):
+	"""Normalize SF6 Customize* property values between the game encoding and
+	the Blender-friendly encoding used while editing.
+
+	toGame=False (import): roughness/metal 0.0 -> 1.0, color
+	[0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0] -> [1.0,1.0,1.0,1.0].
+	toGame=True (export): the inverse, restoring the original game values.
+	Shared by blender_re_mdf (import + export) and blender_nodes_re_mdf (import).
+	"""
+	for prop in propList:
+		if "CustomizeRoughness" in prop.propName or "CustomizeMetal" in prop.propName:
+			if toGame:
+				if prop.propValue[0] == 1.0:
+					prop.propValue = [0.0]
+			else:
+				if prop.propValue[0] == 0.0:
+					prop.propValue = [1.0]
+		elif "CustomizeColor"  in prop.propName:
+			if toGame:
+				if prop.propValue == [1.0,1.0,1.0,1.0]:
+					prop.propValue = [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]
+			else:
+				if prop.propValue == [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]:
+					prop.propValue = [1.0,1.0,1.0,1.0]

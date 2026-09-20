@@ -1,10 +1,6 @@
 import bpy
 
-from bpy.types import (Panel,
-					   Menu,
-					   Operator,
-					   PropertyGroup,
-					   )
+from bpy.types import Panel
 
 
 class OBJECT_PT_TexConversionPanel(Panel):

@@ -3,11 +3,9 @@ import bpy
 import os
 
 from bpy.types import Operator
-from ..gen_functions import raiseWarning
 
 from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection,checkNameUsage
 from .ui_re_sfur_panels import tag_redraw
-from ..gen_functions import PRESET_DIR
 
 class WM_OT_NewSFurHeader(Operator):
 	bl_label = "Create SFur Collection"

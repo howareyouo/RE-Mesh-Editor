@@ -4,42 +4,6 @@ Created on Fri Mar  7 16:59:10 2025
 
 @author: Asterisk
 """
-"""
-import re
-
-def decomposeRGBFormat(rgb):
-    channels = []
-    bitlen = 0
-    for g in rgb.groups()[:-1]:
-        if g:
-            c,s = RGBChannel.match(str(g)).groups()            
-            channels.append((c,int(s)))
-            bitlen += int(s)
-    return bitlen,channels
-
-AstcRegex = re.compile("(ASTC)([0-9]+)X([0-9]+)(.*)")
-BCRegex = re.compile("(BC[0-9]+H?)(.*)")
-RGBRegex = re.compile("([RGBAX][0-9]+)?"*5+"(.*)")
-RGBChannel = re.compile("([RGBAX])([0-9]+)")
-def scanlineMinima(formatString):
-    '''X Pixel Count, Y Pixel Count, Bitcount, Bytecount'''
-    astc = AstcRegex.match(formatString)
-    if astc:
-        return 128//8
-    bc = BCRegex.match(formatString)
-    if bc:
-        return 256
-    rgb = RGBRegex.match(formatString)
-    if rgb:
-        bitlen,channels = decomposeRGBFormat(rgb)
-        if bitlen > 32:
-            return 256
-        if len(channels) < 3:
-            return 256
-        else:
-            return 32
-"""
-
 formatScanlineMinima = {'A8UNORM': 256,
  'ASTC10X10TYPELESS': 16,
  'ASTC10X10UNORM': 16,
