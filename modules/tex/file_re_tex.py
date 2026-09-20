@@ -153,7 +153,7 @@ class MipData():
         ----------
         source : BytesIO
             Raw untrimmed texture data
-        target : BytesIO
+        target : bytearray
             Buffer to write the trimmed texture data to
         scanlineLength : int
             Length in bytes of scanline as specified by the file
@@ -168,13 +168,25 @@ class MipData():
             If texture is read past expected bounds
         """
         # Each scanline holds `dataLength` valid bytes followed by
-        # `scanlineLength - dataLength` bytes of padding. Extract the valid
-        # bytes per scanline in one pass instead of a per-line read/seek loop.
+        # `scanlineLength - dataLength` bytes of padding. Extraction starts
+        # from the CURRENT buffer position -- same contract as the old
+        # sequential read/seek loop -- so this stays correct even if the
+        # caller has already seeked the buffer.
+        if scanlineLength <= 0:
+            raise BufferError("Invalid scanline length in texture data")
+        start = source.tell()
         numReads = (endSize + scanlineLength - 1) // scanlineLength
-        data = source.getvalue()
-        target.extend(b"".join(
-            data[i * scanlineLength:i * scanlineLength + dataLength]
-            for i in range(numReads)))
+        # The buffer view must be released before closing the BytesIO, otherwise
+        # close() raises BufferError("Existing exports of data: object cannot be
+        # re-sized"). Wrap it in try/finally so the view is always released,
+        # even if the extraction below raises.
+        try:
+            buf = source.getbuffer()  # zero-copy view; getvalue() would copy the whole mip
+            target.extend(b"".join(
+                buf[start + i * scanlineLength:start + i * scanlineLength + dataLength]
+                for i in range(numReads)))
+        finally:
+            del buf
         source.close()
         if numReads * scanlineLength > endSize:
             raise BufferError("Texture Data Read Past Bounds")
