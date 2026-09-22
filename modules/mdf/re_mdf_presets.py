@@ -4,7 +4,7 @@ import os
 import re
 import bpy
 
-from ..gen_functions import textColors,raiseWarning,PRESET_DIR
+from ..gen_functions import textColors,raiseWarning,PRESET_DIR,formatREMaterialObjectName
 from ..blender_utils import showErrorMessageBox,createEmpty
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
@@ -112,7 +112,7 @@ def readPresetJSON(filepath,targetCollection = None):
 		while(checkNameUsage(subName,checkSubString=True,objList = mdfCollection.all_objects)):
 			currentIndex +=1
 			subName = "Material " + str(currentIndex).zfill(2)
-		name = subName + " ("+materialJSONDict["Material Header"]["Material Name"]+")"
+		name = formatREMaterialObjectName("Material", currentIndex, materialJSONDict["Material Header"]["Material Name"])
 		materialObj = createEmpty(name,[("~TYPE","RE_MDF_MATERIAL")],None,mdfCollection)
 		
 		if "MDFVersion" in materialJSONDict:

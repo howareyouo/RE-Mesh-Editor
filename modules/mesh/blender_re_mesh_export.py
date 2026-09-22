@@ -9,8 +9,9 @@ from mathutils import Vector
 from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
-from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, getREMeshMaterialName, ENABLE_EXPORT_WARNINGS
-from ..blender_utils import showMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix
+from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, parseREMeshObjectMaterialName, resolveREMeshMaterialName, stripBlenderUserSuffix, ENABLE_EXPORT_WARNINGS
+from ..blender_utils import (showMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix,
+                             iterMeshLODCollections, iterCollectionMeshObjects)
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath
 from .blender_re_mesh_utils import triangulateMesh, bounding_sphere_ritter, getCollection, _game_settings, _resolve_symmetry_bone_index
@@ -481,45 +482,42 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 		sharpEdgeSplitList = []
 		uvRemapDict = dict()  # CLN name -> new-vertex->original-vertex mapping (data-layer UV solve)
 		clonedMeshCollection = getCollection("clonedMeshes")
-		for obj in lod.objects:
-			if options["selectedOnly"]:
-				selected = obj in bpy.context.selected_objects
+		# iterCollectionMeshObjects is the shared definition of "the export contains
+		# this object" (getMeshMaterialNames uses it too), so the materials collected
+		# here can never drift from the exclude-unused filter.
+		for obj in iterCollectionMeshObjects(lod, options["selectedOnly"]):
+			subMeshCount += 1
+			cloneObj = obj.copy()
+			# Get copy of sub mesh with modifiers applied
+			# Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
+			cloneObj.name = "CLN_" + obj.name
+			cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
+			clonedMeshCollection.objects.link(cloneObj)
+
+			print(f"Created temporary clone of {obj.name}: {cloneObj.name}")
+			cloneMeshNameDict[obj.name] = cloneObj.name
+			deleteCopiedMeshList.append(cloneObj)
+			if options["autoSolveRepeatedUVs"]:
+				hasUVDoubling = checkObjForUVDoubling(cloneObj)
+				if hasUVDoubling:
+					doubledUVList.append(cloneObj)
+
+			if options["preserveSharpEdges"]:
+				use_smooth = np.zeros(len(cloneObj.data.polygons), dtype=bool)
+				cloneObj.data.polygons.foreach_get("use_smooth", use_smooth)
+				if not np.all(use_smooth):
+					sharpEdgeSplitList.append(cloneObj)
+
+			groupID = parseREMeshGroupID(obj.name)
+			# Warn when the name doesn't follow the RE naming scheme since the viscon
+			# group and material name both fall back to defaults then
+			if "Group_" not in obj.name or ("__" not in obj.name and not options["useBlenderMaterialName"]):
+				addErrorToDict(warningDict, "InvalidMeshNamingScheme", obj.name)
+
+			if not visconDict.get(groupID):
+				visconDict[groupID] = [obj]
 			else:
-				selected = True
-
-			if obj.type == "MESH" and not obj.get("MeshExportExclude") and selected:
-				subMeshCount += 1
-				cloneObj = obj.copy()
-				# Get copy of sub mesh with modifiers applied
-				# Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
-				cloneObj.name = "CLN_" + obj.name
-				cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
-				clonedMeshCollection.objects.link(cloneObj)
-
-				print(f"Created temporary clone of {obj.name}: {cloneObj.name}")
-				cloneMeshNameDict[obj.name] = cloneObj.name
-				deleteCopiedMeshList.append(cloneObj)
-				if options["autoSolveRepeatedUVs"]:
-					hasUVDoubling = checkObjForUVDoubling(cloneObj)
-					if hasUVDoubling:
-						doubledUVList.append(cloneObj)
-
-				if options["preserveSharpEdges"]:
-					use_smooth = np.zeros(len(cloneObj.data.polygons), dtype=bool)
-					cloneObj.data.polygons.foreach_get("use_smooth", use_smooth)
-					if not np.all(use_smooth):
-						sharpEdgeSplitList.append(cloneObj)
-
-				groupID = parseREMeshGroupID(obj.name)
-				# Warn when the name doesn't follow the RE naming scheme since the viscon
-				# group and material name both fall back to defaults then
-				if "Group_" not in obj.name or ("__" not in obj.name and not options["useBlenderMaterialName"]):
-					addErrorToDict(warningDict, "InvalidMeshNamingScheme", obj.name)
-
-				if not visconDict.get(groupID):
-					visconDict[groupID] = [obj]
-				else:
-					visconDict[groupID].append(obj)
+				visconDict[groupID].append(obj)
 
 		if doubledUVList != []:
 			uvSolveStart = time.time()
@@ -562,11 +560,32 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 			visconGroup = VisconGroup()
 			visconGroup.visconGroupNum = visconGroupID
 			subMeshTasks = []  # heavy (read-only) extraction tasks, run in a thread pool after prep
-			# Sort by material name (case-insensitive, matching the Rename
-			# Meshes operator) so the submesh order is always derived from
-			# the material, not the stale Sub_N suffix in the object name.
+			# Resolve each submesh's exported material name ONCE, from the same evaluated
+			# clone the exporter writes (not the original object's mesh), so the submesh
+			# sort below derives from the exact names written into the file and can never
+			# diverge from them. Resolution also reports missing materials, so it must run
+			# exactly once per submesh, before sorting.
+			visconSubMeshes = visconDict[visconGroupID]
+			exportedMaterialNames = {}
+			for obj in visconSubMeshes:
+				cloneMeshData = bpy.data.objects[cloneMeshNameDict[obj.name]].data
+				cloneMaterialName = stripBlenderUserSuffix(
+					cloneMeshData.materials[0].name).strip() if len(cloneMeshData.materials) > 0 else ""
+				objectMaterialName = parseREMeshObjectMaterialName(obj.name)
+				exportedMaterialNames[obj.name] = resolveREMeshMaterialName(
+					obj.name, cloneMaterialName, options["useBlenderMaterialName"], fallback="NO_ASSIGNED_MATERIAL")
+				if options["useBlenderMaterialName"]:  # Material name from slot: error only if neither source is set
+					if cloneMaterialName == "" and objectMaterialName == "":
+						addErrorToDict(errorDict, "NoMaterialOnSubMesh", obj.name)
+				elif objectMaterialName == "":  # No usable "__" suffix: fall back to slot, or report a missing material
+					if cloneMaterialName != "":
+						print(f"Couldn't split material name on {obj.name}, using blender material name instead")
+					else:
+						addErrorToDict(errorDict, "NoMaterialOnSubMesh", obj.name)
+			# Sort by material name (case-insensitive, matching the Rename Meshes operator)
+			# so the submesh order is derived from the material, not the stale Sub_N suffix.
 			for submeshIndex, rawsubmesh in enumerate(
-					sorted(visconDict[visconGroupID], key=lambda obj: getREMeshMaterialName(obj).lower())):
+					sorted(visconSubMeshes, key=lambda obj: exportedMaterialNames[obj.name].lower())):
 				print(f"    Sub Mesh {str(submeshIndex)}:{rawsubmesh.name}")
 				evaluatedSubMeshData = bpy.data.objects[cloneMeshNameDict[rawsubmesh.name]].data
 				# Weight data is read from the CLONE mesh (evaluatedSubMeshData), whose vertex-group
@@ -584,26 +603,9 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 					addErrorToDict(errorDict, "NoFacesOnSubMesh", rawsubmesh.name)
 				parsedSubMesh = SubMesh()
 				parsedSubMesh.subMeshIndex = submeshIndex
-				materialName = "NO_ASSIGNED_MATERIAL"
-				if options["useBlenderMaterialName"]:  # Material name from object material
-					if len(evaluatedSubMeshData.materials) > 0:
-						materialName = evaluatedSubMeshData.materials[0].name.split(".")[0]
-					else:
-						try:  # Get material from mesh name if it isn't found
-							materialName = rawsubmesh.name.split("__", 1)[1].split(".")[0]
-						except:
-							addErrorToDict(errorDict, "NoMaterialOnSubMesh", rawsubmesh.name)
-
-				else:  # Material name from object name
-					try:  # Get material from mesh name if it isn't found
-						materialName = rawsubmesh.name.split("__", 1)[1].split(".")[0]
-					except:  # Fall back to blender material name if object material name is missing
-						print(
-							f"Couldn't split material name on {rawsubmesh.name}, using blender material name instead")
-						if len(evaluatedSubMeshData.materials) > 0:
-							materialName = evaluatedSubMeshData.materials[0].name.split(".")[0]
-						else:
-							addErrorToDict(errorDict, "NoMaterialOnSubMesh", rawsubmesh.name)
+				# Exported material name, resolved once in the pre-pass above from the
+				# evaluated clone and the object name (see resolveREMeshMaterialName).
+				materialName = exportedMaterialNames[rawsubmesh.name]
 				if materialName not in addedMaterialsSet:
 					addedMaterialsSet.add(materialName)
 					materialIndexDict[materialName] = len(parsedMesh.materialNameList)
@@ -1028,12 +1030,14 @@ def exportREMeshFile(filePath, options):
 		print(f"Target collection: {targetCollection.name}")
 		bpy.context.scene["REMeshLastExportedCollection"] = targetCollection.name
 
-	meshLODCollectionList = []
+	# Shared with getMeshMaterialNames (iterMeshLODCollections), so the exclude-unused
+	# material filter always sees exactly the LODs this export writes.
+	meshLODCollectionList = iterMeshLODCollections(targetCollection, options["exportAllLODs"])
 	boundingBoxCollection = None
 	for childCollection in targetCollection.children:
 		if "Main Mesh LOD" in childCollection.name:
-			meshLODCollectionList.append(childCollection)
-		elif childCollection.get("~TYPE") == "RE_MESH_BOUNDING_BOX_COLLECTION":
+			continue
+		if childCollection.get("~TYPE") == "RE_MESH_BOUNDING_BOX_COLLECTION":
 			boundingBoxCollection = childCollection
 
 	# Find armature and parse it
@@ -1055,12 +1059,6 @@ def exportREMeshFile(filePath, options):
 
 	importedBoneBoundingBoxes = _export_read_bounding_boxes(
 		boundingBoxCollection, armatureObj, parsedMesh, options["exportBoundingBoxes"])
-
-	if meshLODCollectionList == []:
-		meshLODCollectionList = [targetCollection]
-	meshLODCollectionList.sort(key=lambda col: col.name)
-	if not options["exportAllLODs"]:
-		meshLODCollectionList = [meshLODCollectionList[0]]
 
 	dg = bpy.context.evaluated_depsgraph_get()
 	deleteCopiedMeshList = []

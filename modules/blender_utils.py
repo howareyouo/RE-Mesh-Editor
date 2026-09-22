@@ -3,7 +3,8 @@ import bpy
 from math import radians
 from mathutils import Matrix
 
-from .gen_functions import textColors, splitNativesPath, raiseWarning
+from .gen_functions import (textColors, splitNativesPath, raiseWarning, getREMeshMaterialName,
+                            parseMDFObjectNameMaterialName)
 import os
 from collections import OrderedDict
 from itertools import repeat
@@ -114,10 +115,92 @@ def iterMDFMaterialObjects(collection):
 		if obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
 			yield obj
 
+def getMDFMaterialName(materialObj):
+	"""Resolve the material name of an RE_MDF_MATERIAL object.
+
+	The "Material NN (name)" object name wins over the materialName property, the
+	way the MDF writer resolves it (see syncMDFMaterialNameFromObject), so a rename
+	made in the outliner is honoured even before the property is synced."""
+	if "Material" in materialObj.name:
+		objectMaterialName = parseMDFObjectNameMaterialName(materialObj.name)
+		if objectMaterialName != None:
+			return objectMaterialName
+	return materialObj.re_mdf_material.materialName
+
 def getMDFMaterialNames(mdfCollection):
 	"""Return the set of material names held by an MDF collection, read live from the
-	scene (so it reflects any renames made after import)."""
-	return set(obj.re_mdf_material.materialName for obj in iterMDFMaterialObjects(mdfCollection))
+	scene (so it reflects any renames made after import). Uses the same
+	object-name-wins resolution as the MDF writer, so it agrees with the exported file."""
+	return set(getMDFMaterialName(obj) for obj in iterMDFMaterialObjects(mdfCollection))
+
+def iterMeshLODCollections(meshCollection, exportAllLODs = True):
+	"""Return the collections the mesh exporter processes, in export order.
+
+	Mirrors exportREMeshFile: the "Main Mesh LOD" child collections sorted by name,
+	falling back to the mesh collection itself, truncated to LOD 0 when exportAllLODs
+	is off. Kept here so the exporter and the exclude-unused material filter always
+	agree on which meshes are exported. Empty for a None collection."""
+	if meshCollection == None:
+		return []
+	lodCollectionList = []
+	for childCollection in meshCollection.children:
+		if "Main Mesh LOD" in childCollection.name:
+			lodCollectionList.append(childCollection)
+	if lodCollectionList == []:
+		lodCollectionList = [meshCollection]
+	lodCollectionList.sort(key = lambda collection: collection.name)
+	if not exportAllLODs:
+		lodCollectionList = lodCollectionList[:1]
+	return lodCollectionList
+
+def iterCollectionMeshObjects(collection, selectedOnly = False):
+	"""Yield the mesh objects the exporter writes from one collection.
+
+	Skips non-mesh objects, objects flagged with MeshExportExclude and, when
+	selectedOnly is set, unselected ones. Only the collection's own objects are
+	considered (no recursion), matching the exporter's per-LOD loop."""
+	selectedObjectList = bpy.context.selected_objects if selectedOnly else None
+	for obj in collection.objects:
+		if obj.type != "MESH" or obj.get("MeshExportExclude"):
+			continue
+		if selectedOnly and obj not in selectedObjectList:
+			continue
+		yield obj
+
+def iterExportableMeshObjects(meshCollection, selectedOnly = False, exportAllLODs = True):
+	"""Yield the mesh objects the mesh exporter writes, in export order.
+
+	Single definition of "the export contains this object": the LOD collections the
+	exporter iterates (see iterMeshLODCollections), filtered by iterCollectionMeshObjects."""
+	for lodCollection in iterMeshLODCollections(meshCollection, exportAllLODs):
+		for obj in iterCollectionMeshObjects(lodCollection, selectedOnly):
+			yield obj
+
+def getMeshMaterialNames(meshCollection, useBlenderMaterialName = False, selectedOnly = False, exportAllLODs = True):
+	"""Return the set of material names used by the meshes that will be exported.
+
+	Walks the same objects as exportREMeshFile (see iterExportableMeshObjects) and
+	shares getREMeshMaterialName with it, so the result matches the materials in the
+	exported file: the name after "__" in the object name, or the object's first
+	Blender material when useBlenderMaterialName is set (each falling back to the
+	other)."""
+	meshMaterialNameSet = set()
+	for obj in iterExportableMeshObjects(meshCollection, selectedOnly, exportAllLODs):
+		materialName = getREMeshMaterialName(obj, useBlenderMaterialName = useBlenderMaterialName, fallback = "")
+		if materialName != "":
+			meshMaterialNameSet.add(materialName)
+	return meshMaterialNameSet
+
+def normalizeMaterialNameFilter(onlyMaterialNames):
+	"""Normalise a material-name filter so an empty set means the same as no filter.
+
+	The mesh-exclude-unused filter may legitimately be empty (the mesh uses no exportable
+	materials). An empty set must behave identically to None - "export every material" -
+	wherever it is consumed, otherwise the MDF checks and the per-material filter disagree.
+	Returns a fresh set, or None when empty."""
+	if onlyMaterialNames:
+		return set(onlyMaterialNames)
+	return None
 
 def findMDFCollectionForMesh(meshCollection):
 	"""Find the MDF collection associated with a mesh collection.

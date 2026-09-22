@@ -5,7 +5,7 @@ import json
 
 from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
-from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
+from ..gen_functions import raiseWarning,openFolder,PRESET_DIR,parseREMeshObjectMaterialName,stripBlenderUserSuffix
 from ..blender_utils import showErrorMessageBox,createEmpty
 from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF,fixTexPath,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
@@ -100,9 +100,9 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 						if len(obj.data.uv_layers) > 1:
 							obj.data.uv_layers[1].name = "UVMap1"
 					if "__" in obj.name:
-						materialName = obj.name.split("__",1)[1].split(".")[0]
+						materialName = parseREMeshObjectMaterialName(obj.name)
 						for material in obj.data.materials:
-							if material.name.split(".")[0] == materialName:
+							if stripBlenderUserSuffix(material.name) == materialName:
 								meshMaterialDict[materialName] = material
 							#removedMaterialSet.add(material)
 					obj.data.materials.clear()

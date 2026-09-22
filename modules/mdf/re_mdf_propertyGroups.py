@@ -16,6 +16,7 @@ from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
 from ..blender_utils import isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName
+from ..gen_functions import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
 
 
 
@@ -72,7 +73,7 @@ def linkBlenderMaterial(materialObj,materialName):
 	matchCount = 0
 	materialKey = None
 	for mat in bpy.data.materials.keys():
-		if materialName == mat.split(".",1)[0]:
+		if materialName == stripBlenderUserSuffix(mat):
 			materialKey = mat
 			matchCount += 1
 	if matchCount == 1:
@@ -92,13 +93,12 @@ def linkBlenderMaterial(materialObj,materialName):
 				meshObj = None#Mesh object with mdf material assigned to it
 				for obj in meshCollection.all_objects:
 					if obj.type == "MESH":
-						if materialName in obj.name and "__" in obj.name:
-							if materialName == obj.name.split("__",1)[1].split(".")[0]:
-								meshObj = obj
-								break
+						if materialName == parseREMeshObjectMaterialName(obj.name):
+							meshObj = obj
+							break
 				if meshObj != None:
 					for material in meshObj.data.materials:
-						if material.name.split(".")[0] == materialName:
+						if stripBlenderUserSuffix(material.name) == materialName:
 							materialObj.re_mdf_material.linkedMaterial = material
 							#print(f"Linked {materialObj.name} to {material} (Slow)")
 							break						
@@ -175,7 +175,7 @@ def update_materialName(self, context):
 			if len(split) == 2:
 				parentObj.name = f"{split[0]}({self.materialName})"
 			else:
-				parentObj.name =f"Material 00 ({self.materialName})"
+				parentObj.name = formatREMaterialObjectName("Material", 0, self.materialName)
 	except:
 		pass
 

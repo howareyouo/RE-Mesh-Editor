@@ -2,7 +2,7 @@ import os
 import bpy
 import glob
 from ..blender_utils import createRECollection,setAssetPathFromFilePath,checkNameUsage
-from ..gen_functions import textColors,parseFileVersion
+from ..gen_functions import textColors,parseFileVersion,parseMDFObjectNameMaterialName,formatREMaterialObjectName
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
 def createSFurCollection(collectionName,parentCollection = None):
@@ -42,13 +42,13 @@ def reindexEntries(sFurCollection):
 		for obj in sorted(sFurCollection.all_objects,key = lambda item: item.name):
 			
 			if obj.get("~TYPE",None) == "RE_SFUR_ENTRY":
-				#Change the material name in the mdf material settings to the one in the object name
-				#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
-				if "Shell Fur" in obj.name and "(" in obj.name:
-					objMaterialName = obj.name.rsplit("(",1)[1].split(")")[0]
-					if objMaterialName != obj.re_sfur_data.materialName:
+				#Change the material name in the sfur entry settings to the one in the object name
+				#This allows for the user to set the material name by either method of renaming the object or setting it in the entry settings
+				if "Shell Fur" in obj.name:
+					objMaterialName = parseMDFObjectNameMaterialName(obj.name)
+					if objMaterialName != None and objMaterialName != obj.re_sfur_data.materialName:
 						obj.re_sfur_data.materialName = objMaterialName
-				obj.name = "Shell Fur "+str(currentIndex).zfill(2)+ " ("+obj.re_sfur_data.materialName+")"
+				obj.name = formatREMaterialObjectName("Shell Fur", currentIndex, obj.re_sfur_data.materialName)
 				currentIndex += 1
 
 def findSFurPathFromMeshPath(meshPath,gameName = None):
@@ -119,7 +119,7 @@ def importSFurFile(filePath,parentCollection = None):
 	sFurCollection = createSFurCollection(fileName,parentCollection)
 	
 	for index, entry in enumerate(sFurFile.furEntryList):
-		name = "Shell Fur "+str(index).zfill(2)+ " ("+entry.materialName+")"
+		name = formatREMaterialObjectName("Shell Fur", index, entry.materialName)
 		furObj = createCurveEmpty(name,[("~TYPE","RE_SFUR_ENTRY")],None,sFurCollection)
 
 		for propName,entryField,entryToProp,_ in SFUR_FIELD_MAPPING:

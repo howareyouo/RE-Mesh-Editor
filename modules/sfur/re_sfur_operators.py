@@ -5,6 +5,7 @@ import os
 from bpy.types import Operator
 
 from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection,checkNameUsage
+from ..gen_functions import formatREMaterialObjectName
 from .ui_re_sfur_panels import tag_redraw
 
 class WM_OT_NewSFurHeader(Operator):
@@ -68,7 +69,7 @@ class WM_OT_AddFurEntry(Operator):
 				
 			if materialName == None:
 				materialName = "ShellFurMat"+str(currentIndex).zfill(2)
-			name = subName + " ("+materialName+")"
+			name = formatREMaterialObjectName("Shell Fur", currentIndex, materialName)
 			furObj = createCurveEmpty(name,[("~TYPE","RE_SFUR_ENTRY")],None,sFurCollection)
 			furObj.re_sfur_data.materialName = materialName
 			self.report({"INFO"},"Added shell fur entry.")

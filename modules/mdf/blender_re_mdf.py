@@ -2,9 +2,11 @@ import os
 import bpy
 
 from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
-	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
+	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, iterExportableMeshObjects, getMDFMaterialName,
+	normalizeMaterialNameFilter,
+	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,ENABLE_EXPORT_WARNINGS
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,getREMeshMaterialName,formatREMaterialObjectName,ENABLE_EXPORT_WARNINGS
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
 from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
 from .ui_re_mdf_panels import tag_redraw
@@ -156,7 +158,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 	mdfCollection["~MDFFILEPATH"] = filePath #Store the source file path so operators can locate the MDF folder
 	#MATERIALS IMPORT
 	for index, material in enumerate(mdfFile.materialList):
-		name = "Material "+str(index).zfill(2)+ " ("+material.materialName+")"
+		name = formatREMaterialObjectName("Material", index, material.materialName)
 		materialObj = createEmpty(name,[("~TYPE",MDF_MATERIAL_TYPE)],None,mdfCollection)
 		#gameName = getMDFVersionToGameName(mdfVersion)
 		if gameName != -1:
@@ -189,6 +191,17 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 
 #MDF EXPORT
 
+def syncMDFMaterialNameFromObject(obj):
+	"""Adopt a "Material NN (name)" outliner rename into the materialName property.
+
+	The mesh exporter names materials from the mesh object name, while the MDF
+	writer (and the exclude-unused filter) use this property, so renaming an MDF
+	material object in the outliner without touching the property makes the two
+	sides diverge and the material goes missing in game. The parenthesised name
+	wins, matching the convention documented in reindexMaterials."""
+	objectMaterialName = getMDFMaterialName(obj)
+	if objectMaterialName != obj.re_mdf_material.materialName:
+		obj.re_mdf_material.materialName = objectMaterialName
 def reindexMaterials(mdfCollection, stripSuffix = True):
 
 	if mdfCollection != None:
@@ -208,13 +221,10 @@ def reindexMaterials(mdfCollection, stripSuffix = True):
 		for currentIndex, obj in enumerate(materialObjs):
 			#Change the material name in the mdf material settings to the one in the object name
 			#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
-			if "Material" in obj.name and "(" in obj.name:
-				objMaterialName = obj.name.rsplit("(",1)[1].split(")")[0]
-				if objMaterialName != obj.re_mdf_material.materialName:
-					obj.re_mdf_material.materialName = objMaterialName
+			syncMDFMaterialNameFromObject(obj)
 			obj.re_mdf_material.materialName = normalizeMaterialName(obj.re_mdf_material.materialName)
-			obj.name = "Material "+str(currentIndex).zfill(2)+ " ("+obj.re_mdf_material.materialName+")"
-def MDFErrorCheck(collectionName):
+			obj.name = formatREMaterialObjectName("Material", currentIndex, obj.re_mdf_material.materialName)
+def MDFErrorCheck(collectionName, onlyMaterialNames = None, useBlenderMaterialName = False, exportAllLODs = True):
 	print("\nChecking for problems with MDF structure...")
 	
 	#Check that there is mdf data collection
@@ -240,21 +250,38 @@ def MDFErrorCheck(collectionName):
 			else:
 				errorList.append("Duplicate material name on " + obj.name+". Set the material name in the custom properties of the material object to a different name.")
 	
+	# OnlyMaterialNames: the export is limited to the materials the mesh uses, the other
+	# MDF materials are dropped from the file, so they must not be reported as unused.
+	# Matching is case-insensitive, like the mesh exporter's material comparison.
+	if onlyMaterialNames != None:
+		keepNameSet = set(materialName.lower() for materialName in onlyMaterialNames)
+		materialNameSet = set(materialName for materialName in materialNameSet if materialName.lower() in keepNameSet)
+	# All mesh/MDF name comparisons below are case-insensitive (see comment above), so
+	# a mesh named "__Siwa" matches an MDF material "siwa" instead of warning twice.
+	materialNameSetLower = set(materialName.lower() for materialName in materialNameSet)
+	
 	meshCollectionName = getMeshCollectionNameFromMDFName(collectionName)
 	meshCollection = bpy.data.collections.get(meshCollectionName,None)
 	if meshCollection != None:
-		for obj in meshCollection.all_objects:
-			if obj.type == "MESH" and not "MeshExportExclude" in obj and "__" in obj.name:
-				matName = obj.name.split("__",1)[1].split(".")[0]
-				meshMaterialSet.add(matName)
-				if matName not in materialNameSet:
-					warningList.append("The material ("+matName+") on mesh " + obj.name + " does not exist in the MDF.")
+		# Same objects and same name resolution as the mesh exporter
+		# (iterExportableMeshObjects + getREMeshMaterialName), so these warnings agree with
+		# the material names actually written to the mesh file. A standalone MDF export has
+		# no export options and uses the defaults.
+		for obj in iterExportableMeshObjects(meshCollection, exportAllLODs = exportAllLODs):
+			matName = getREMeshMaterialName(obj, useBlenderMaterialName = useBlenderMaterialName, fallback = "")
+			if matName == "":
+				continue
+			meshMaterialSet.add(matName)
+			if matName.lower() not in materialNameSetLower:
+				warningList.append("The material ("+matName+") on mesh " + obj.name + " does not exist in the MDF.")
 	else:
 		if ENABLE_EXPORT_WARNINGS:
 			raiseWarning(f"Could not find mesh collection ({meshCollectionName}) to check materials against.")
-	if len(meshMaterialSet) != 0 and len(materialNameSet.difference(meshMaterialSet)) != 0:
+	meshMaterialSetLower = set(materialName.lower() for materialName in meshMaterialSet)
+	unusedMaterialNames = [materialName for materialName in materialNameSet if materialName.lower() not in meshMaterialSetLower]
+	if len(meshMaterialSet) != 0 and unusedMaterialNames != []:
 		materialString = ""
-		for materialName in materialNameSet.difference(meshMaterialSet):
+		for materialName in unusedMaterialNames:
 			materialString += materialName+"\n"
 		warningList.append(f"The following materials exist in the MDF ({collectionName}) but do not exist in the mesh ({meshCollectionName}):\n{materialString}")
 	if warningList != [] and ENABLE_EXPORT_WARNINGS:
@@ -285,19 +312,60 @@ def fixTexPath(path):#Fix potential path problems
 			if splitPath != None:
 				path = splitPath[1]#Fix including the chunk root path in the tex path
 	return path
-def buildMDF(mdfCollectionName,mdfVersion = None):
+def filterMDFMaterials(materialObjList, onlyMaterialNames):
+	"""Keep only the material objects whose name is used by the mesh, so materials that
+	exist in the MDF collection but not in the mesh collection are left out of the file.
+	Names are compared case-insensitively, like the mesh exporter's material check.
+	onlyMaterialNames is a non-empty set: an empty set is normalised to "no filter" in
+	buildMDF (normalizeMaterialNameFilter) before this is called."""
+	keepNameSet = set(materialName.lower() for materialName in onlyMaterialNames)
+	keptList = []
+	for materialObj in materialObjList:
+		materialName = materialObj.re_mdf_material.materialName
+		if materialName.lower() in keepNameSet:
+			keptList.append(materialObj)
+		else:
+			print(f"Excluding MDF material that is not used by the mesh: {materialName}")
+	return keptList
+def buildMDF(mdfCollectionName,mdfVersion = None,onlyMaterialNames = None,useBlenderMaterialName = False,exportAllLODs = True):
 	mdfCollection = bpy.data.collections.get(mdfCollectionName)
+	# An empty material filter (the mesh uses no exportable materials) is normalised to
+	# "no filter" here, so MDFErrorCheck and filterMDFMaterials share ONE rule and can
+	# never disagree about an empty set (one used to filter to nothing, the other to
+	# export everything). Warn so the fallback - exporting every material - is not silent.
+	if onlyMaterialNames is not None and len(onlyMaterialNames) == 0:
+		raiseWarning("No materials found in the mesh collection, exporting every material in the MDF instead.")
+	onlyMaterialNames = normalizeMaterialNameFilter(onlyMaterialNames)
 	if mdfVersion == None:
 		
 		mdfVersion = getMDFVersionToGameName(bpy.context.scene.re_mdf_toolpanel.activeGame)
 		reindexMaterials(mdfCollection, stripSuffix = False)
 	if mdfCollection != None:
-		valid = MDFErrorCheck(mdfCollectionName)
+		#Export paths always pass an explicit version, so reindexMaterials above never
+		#runs during a mesh+MDF export. Sync the "Material NN (name)" object names into
+		#the property first: the mesh file names materials from the mesh object name, so
+		#a renamed MDF object must not be written (or filtered) under its stale property.
+		for materialObj in iterMDFMaterialObjects(mdfCollection):
+			syncMDFMaterialNameFromObject(materialObj)
+		valid = MDFErrorCheck(mdfCollectionName,onlyMaterialNames,useBlenderMaterialName,exportAllLODs)
 	else:
 		showErrorMessageBox("MDF collection is not set, cannot export")
 		valid = False
 	if valid:
-		materialObjList = sorted(iterMDFMaterialObjects(mdfCollection),key = lambda item: item.re_mdf_material.materialName)
+		# Case-insensitive name sort keeps the MDF's own material list deterministic for
+		# MDF-side tooling. It does NOT need to match the mesh file's material list order:
+		# the mesh binds each submesh to its OWN material list by index (self-consistent),
+		# and mesh<->MDF material binding is by NAME (MDFErrorCheck compares names, the
+		# import path matches by name, and the engine resolves mesh material names into the
+		# MDF's list by name). Multi-group meshes therefore write a group-major mesh list
+		# and a globally-sorted MDF list without breaking in-game materials.
+		materialObjList = sorted(iterMDFMaterialObjects(mdfCollection),key = lambda item: item.re_mdf_material.materialName.lower())
+		if onlyMaterialNames != None:
+			materialObjList = filterMDFMaterials(materialObjList,onlyMaterialNames)
+			if materialObjList == []:
+				# An MDF without materials would only show up as a checkerboard in game, so refuse to write one
+				raiseWarning("None of the materials in the MDF collection are used by the mesh, MDF export cancelled.")
+				return None
 		newMDFFile = MDFFile()
 		newMDFFile.fileVersion = mdfVersion
 		newMDFFile.Header.version = 1
@@ -384,11 +452,11 @@ def buildMDF(mdfCollectionName,mdfVersion = None):
 		return newMDFFile
 	else:
 		return None
-def exportMDFFile(filepath,mdfCollectionName = ""):
+def exportMDFFile(filepath,mdfCollectionName = "",onlyMaterialNames = None,useBlenderMaterialName = False,exportAllLODs = True):
 	mdfVersion = parseFileVersion(filepath, None)
 	if mdfVersion is None:
 		print("Unable to parse MDF version number in file path.")
-	mdfFile = buildMDF(mdfCollectionName,mdfVersion)
+	mdfFile = buildMDF(mdfCollectionName,mdfVersion,onlyMaterialNames,useBlenderMaterialName,exportAllLODs)
 	if mdfFile != None:
 		writeMDF(mdfFile,filepath)
 		return True

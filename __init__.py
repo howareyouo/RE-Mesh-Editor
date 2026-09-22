@@ -19,7 +19,7 @@ from bpy_extras.io_utils import ExportHelper,ImportHelper
 from bpy.props import StringProperty, BoolProperty,IntProperty, EnumProperty, CollectionProperty,PointerProperty
 from bpy.types import Operator, OperatorFileListElement,AddonPreferences
 from .modules.gen_functions import textColors,raiseWarning,getFolderSize,formatByteSize,splitNativesPath,openFolder,parseFileVersion
-from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection, findMDFCollectionForMesh, resolveSourcePath
+from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection, findMDFCollectionForMesh, getMeshMaterialNames, resolveSourcePath
 from .modules.game_versions import mdfVersionDict
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
@@ -851,6 +851,10 @@ class ExportREMesh(Operator, ExportHelper):
 	   name = "Export MDF",
 	   description = "Exports MDF file after the mesh is exported, if an MDF collection exists in the scene collection",
 	   default = False)
+	exportMDFExcludeUnused : BoolProperty(
+	   name = "Exclude Unused Materials",
+	   description = "When exporting the MDF, exclude the materials that do not exist in the mesh collection. Only applies with \"Export MDF\"",
+	   default = False)
 	def invoke(self, context, event):
 		remapLegacySceneVersion(context.scene, "REMeshLastImportedMeshVersion")
 		
@@ -905,6 +909,9 @@ class ExportREMesh(Operator, ExportHelper):
 		layout.prop(self, "preserveBoneMatrices")
 		layout.prop(self, "exportBoundingBoxes")
 		layout.prop(self, "exportMDF")
+		mdfRow = layout.row()
+		mdfRow.enabled = self.exportMDF
+		mdfRow.prop(self, "exportMDFExcludeUnused")
 
 	def execute(self, context):
 		options = {"targetCollection":self.targetCollection,"selectedOnly":self.selectedOnly,"exportAllLODs":self.exportAllLODs,"exportBlendShapes":self.exportBlendShapes,"rotate90":self.rotate90,"useBlenderMaterialName":self.useBlenderMaterialName,"preserveBoneMatrices":self.preserveBoneMatrices,"exportBoundingBoxes":self.exportBoundingBoxes,"autoSolveRepeatedUVs":self.autoSolveRepeatedUVs,"preserveSharpEdges":self.preserveSharpEdges}
@@ -915,6 +922,10 @@ class ExportREMesh(Operator, ExportHelper):
 		printEditorHeader(bl_info)
 		
 		toggleConsole()
+		# Resolve the materials used by the mesh before exporting it, since the exporter changes the selection while it runs
+		onlyMaterialNames = None
+		if self.exportMDF and self.exportMDFExcludeUnused:
+			onlyMaterialNames = getMeshMaterialNames(bpy.data.collections.get(self.targetCollection, None), useBlenderMaterialName=self.useBlenderMaterialName, selectedOnly=self.selectedOnly, exportAllLODs=self.exportAllLODs)
 		success = exportREMeshFile(self.filepath,options)
 		if success:
 			self.report({"INFO"},"Exported RE Mesh successfully.")
@@ -945,7 +956,7 @@ class ExportREMesh(Operator, ExportHelper):
 					mdfFileName = mdfCollection.name.rsplit(".mdf2", 1)[0] + ".mdf2" + mdfVersionExtension
 					mdfPath = os.path.join(os.path.dirname(self.filepath), mdfFileName)
 					print(f"Exporting MDF: {mdfPath}")
-					mdfSuccess = exportMDFFile(mdfPath, mdfCollection.name)
+					mdfSuccess = exportMDFFile(mdfPath, mdfCollection.name, onlyMaterialNames, useBlenderMaterialName=self.useBlenderMaterialName, exportAllLODs=self.exportAllLODs)
 					if mdfSuccess:
 						self.report({"INFO"},"Exported RE MDF successfully.")
 						bpy.data.collections[mdfCollection.name]["BatchExport_path"] = mdfPath

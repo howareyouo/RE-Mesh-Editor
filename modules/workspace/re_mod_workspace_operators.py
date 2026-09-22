@@ -7,7 +7,7 @@ import json
 import platform
 from bpy.types import Operator
 from zlib import crc32
-from ..gen_functions import slugify,openFolder,raiseWarning,PRESET_DIR
+from ..gen_functions import slugify,openFolder,raiseWarning,PRESET_DIR,formatREMeshObjectName
 popup_regions = set()
 
 from ..mesh.blender_re_mesh import joinObjects,getCollection
@@ -863,7 +863,7 @@ class WM_OT_ConvertToREEngine(Operator):
 				obj = bpy.data.objects[objName]
 				if obj.data.materials[0].name not in materialSubMeshIndexDict:
 					materialSubMeshIndexDict[obj.data.materials[0].name] = 0
-				obj.name = f"Group_0_Sub_{materialSubMeshIndexDict[obj.data.materials[0].name]}__"+materialInfoDict[obj.data.materials[0].name]["materialName"]
+				obj.name = formatREMeshObjectName(0, materialSubMeshIndexDict[obj.data.materials[0].name], materialInfoDict[obj.data.materials[0].name]["materialName"])
 				materialSubMeshIndexDict[obj.data.materials[0].name] += 1
 			reindexMaterials(mdfCollection, stripSuffix = False)
 			

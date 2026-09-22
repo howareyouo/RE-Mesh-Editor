@@ -450,24 +450,82 @@ def parseREMeshGroupID(name):
 		return 0
 
 
-def getREMeshMaterialName(obj, fallback="NO_MATERIAL"):
-	"""Get the RE material name for a Blender mesh object.
+def stripBlenderUserSuffix(name):
+	"""Remove Blender's auto-appended usersuffix ("Body.001" -> "Body").
 
-	Priority: first assigned material slot (stripped at first '.'),
-	then the __material suffix parsed from the object name.
-	Returns `fallback` when neither is available.
-	"""
-	if obj.data and len(obj.data.materials) > 0:
-		return obj.data.materials[0].name.split(".", 1)[0].strip()
-	try:
-		return obj.name.split("__", 1)[1].split(".")[0].strip()
-	except (IndexError, ValueError):
-		return fallback
+	Only a trailing ".NNN" that Blender adds to duplicated data-blocks is removed, so
+	legitimately dotted names like "Char.v2" or "Shirts_Mat.v001" are preserved. This is
+	the same rule parseMDFObjectNameMaterialName applies to MDF material objects."""
+	return re.sub(r"\.\d{3}$", "", name)
+
+
+def parseREMeshObjectMaterialName(objectName):
+	"""Extract the RE material name from the "__" suffix of a mesh object name.
+
+	"LOD_0_Group_0_Sub_0__Shirts_Mat.001" -> "Shirts_Mat" (material names never
+	contain "__"). Returns "" when the name has no "__" material suffix."""
+	if "__" not in objectName:
+		return ""
+	return stripBlenderUserSuffix(objectName.split("__", 1)[1]).strip()
+
+
+def resolveREMeshMaterialName(objectName, blenderMaterialName, useBlenderMaterialName = False, fallback = "NO_MATERIAL"):
+	"""Resolve the RE material name from a mesh object name and a material-slot name.
+
+	Single, pure source for the mesh exporter's name-priority rules, split out of
+	getREMeshMaterialName so the exporter can resolve a name from an object name plus an
+	EXTERNAL slot name (e.g. the depsgraph-evaluated clone), instead of always reading the
+	original object's mesh. By default the "__" suffix of the object name wins, or the
+	material slot when useBlenderMaterialName is set; each source falls back to the other
+	when empty. Returns `fallback` when neither is available."""
+	objectMaterialName = parseREMeshObjectMaterialName(objectName)
+	if useBlenderMaterialName:
+		materialName = blenderMaterialName or objectMaterialName
+	else:
+		materialName = objectMaterialName or blenderMaterialName
+	return materialName if materialName != "" else fallback
+
+
+def getREMeshMaterialName(obj, useBlenderMaterialName = False, fallback = "NO_MATERIAL"):
+	"""Get the RE material name for a Blender mesh object (see resolveREMeshMaterialName)."""
+	blenderMaterialName = ""
+	if obj.data is not None and len(obj.data.materials) > 0:
+		blenderMaterialName = stripBlenderUserSuffix(obj.data.materials[0].name).strip()
+	return resolveREMeshMaterialName(obj.name, blenderMaterialName, useBlenderMaterialName, fallback)
+
+
+def formatREMeshObjectName(groupID, subIndex, materialName, lodPrefix = ""):
+	"""Build an RE mesh object name: "[LOD_N_]Group_<G>_Sub_<S>__<materialName>"."""
+	return f"{lodPrefix}Group_{groupID}_Sub_{subIndex}__{materialName}"
+
+
+def formatREMaterialObjectName(base, index, materialName):
+	"""Build the indexed material entry object name used by MDF/SFur collections.
+
+	Example: formatREMaterialObjectName("Material", 7, "Body") -> "Material 07 (Body)".
+	The parenthesised part is parsed back by parseMDFObjectNameMaterialName."""
+	return f"{base} {str(index).zfill(2)} ({materialName})"
 
 
 def stripREMatSuffix(name):
 	"""Remove a trailing "_Mat" material suffix (case-insensitive)."""
 	return re.sub(r"_mat$", "", name, flags=re.IGNORECASE)
+
+
+def parseMDFObjectNameMaterialName(objectName):
+	"""Extract the material name from an RE indexed material object name.
+
+	MDF material objects follow the naming convention "Material NN (name)"
+	(SFur entries use "Shell Fur NN (name)"), where the material name is the
+	text between the FIRST "(" and the LAST ")", so names that themselves
+	contain parentheses (e.g. "material 00 (Body)") round-trip correctly.
+	A trailing Blender usersuffix (.001) from duplicated objects is ignored.
+	Returns None when the name doesn't follow the convention or the
+	parenthesised part is empty."""
+	match = re.match(r"^[^(]*\((.*)\)(?:\.\d{3})?$", objectName)
+	if match == None or match.group(1) == "":
+		return None
+	return match.group(1)
 
 
 def capitalizeREMaterialName(name):

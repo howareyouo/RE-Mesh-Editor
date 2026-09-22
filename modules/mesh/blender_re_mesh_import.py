@@ -7,7 +7,7 @@ from math import sqrt
 from mathutils import Vector, Matrix
 from .file_re_mesh import readREMesh, meshFileVersionToGameNameDict
 from .re_mesh_parse import ParsedREMesh
-from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion
+from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion, formatREMeshObjectName
 from ..blender_utils import getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix, MESH_COLLECTION_TYPE
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
@@ -573,8 +573,9 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 					lodCollection.objects.link(meshOffsetDict[subMesh.meshVertexOffset])
 				else:
 					materialName = parsedMesh.materialNameList[subMesh.materialIndex]
+					meshName = formatREMeshObjectName(visconGroup.visconGroupNum, subMesh.subMeshIndex, materialName, lodPrefix = LODNum)
 					meshObj = importMesh(
-						meshName=f"{LODNum}Group_{str(visconGroup.visconGroupNum)}_Sub_{str(subMesh.subMeshIndex)}__{materialName}",
+						meshName=meshName,
 						vertexList=subMesh.vertexPosList,
 						faceList=subMesh.faceList,
 						vertexNormalList=subMesh.normalList,
@@ -605,7 +606,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 						if importBoundingBoxes:
 							importBoundingBox(
 								subMesh.boundingBox,
-							    f"BBOX: {LODNum}Group_{str(visconGroup.visconGroupNum)}_Sub_{str(subMesh.subMeshIndex)}__{materialName}",
+								f"BBOX: {meshName}",
 							    meshCollection, rotate90=rotate90
 							)
 					if mergeGroups:

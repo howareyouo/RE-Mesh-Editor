@@ -12,7 +12,7 @@ from bpy.props import (StringProperty,
                        )
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
-from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix
+from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix, formatREMeshObjectName
 from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh, resolveSourcePath,
                              isMDFCollection, isMeshCollection, iterMDFMaterialObjects)
 
@@ -136,7 +136,9 @@ class WM_OT_RenameMeshToREFormat(Operator):
 				groupID = parseREMeshGroupID(selectedObj.name)
 				# Raw material name (as stored in the MDF) so the MDF materials
 				# can be matched later, before the RE-suffix stripping.
-				rawMaterialName = getREMeshMaterialName(selectedObj)
+				# Prefer the material slot name here (this operator renames arbitrary
+				# models whose object name may not carry the "__" marker yet).
+				rawMaterialName = getREMeshMaterialName(selectedObj, useBlenderMaterialName = True)
 				materialName = stripREMatSuffix(rawMaterialName)
 				if groupID not in groupDict:
 					groupDict[groupID] = []
@@ -154,7 +156,7 @@ class WM_OT_RenameMeshToREFormat(Operator):
 			objList.sort(key=lambda x: x[1].lower())
 			for subIndex, (obj, materialName, rawMaterialName) in enumerate(objList):
 				newMatName = capitalizeREMaterialName(materialName)
-				obj.name = f"Group_{str(groupID)}_Sub_{str(subIndex)}__{newMatName}"
+				obj.name = formatREMeshObjectName(groupID, subIndex, newMatName)
 				renameMap[rawMaterialName.lower()] = newMatName
 
 		# Keep the MDF material names in sync: the RE engine requires the mesh
