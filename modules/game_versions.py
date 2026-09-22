@@ -147,3 +147,13 @@ texVersionDict = {
     45: ".241106027",
     51: ".250813143",
 }
+
+
+# Mesh file extension -> sfur file extension, used to locate the .sfur file
+# next to a .mesh. Kept here so every version table has one home.
+sfurVersionDict = {
+    ".221108797": ".4",  # RE4
+    ".240423143": ".5",  # DD2NEW
+    ".241111606": ".5",  # MHWILDS
+    ".250925211": ".5",  # RE9
+}

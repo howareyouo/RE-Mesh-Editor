@@ -2,6 +2,7 @@ import os
 import bpy
 import glob
 from ..blender_utils import createRECollection,setAssetPathFromFilePath,checkNameUsage
+from ..game_versions import sfurVersionDict
 from ..gen_functions import textColors,parseFileVersion,parseMDFObjectNameMaterialName,formatREMaterialObjectName
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
@@ -55,15 +56,9 @@ def findSFurPathFromMeshPath(meshPath,gameName = None):
 	split = meshPath.split(".mesh")
 	fileRoot = glob.escape(split[0])
 	meshVersion = split[1]
-	sFurVersionDict = {
-		".221108797":".4",#RE4
-		".240423143":".5",#DD2NEW
-		".241111606":".5",#MHWILDS
-		".250925211":".5",#RE9
-		}
-	sFurVersion = sFurVersionDict.get(meshVersion,None)
+	sFurVersion = sfurVersionDict.get(meshVersion,None)
 	sFurPath = None
-	if meshVersion in sFurVersionDict:
+	if meshVersion in sfurVersionDict:
 		sFurPath = f"{fileRoot}.sfur{sFurVersion}"
 	if sFurPath != None and not os.path.isfile(sFurPath):
 		#RE4, check directory above current one

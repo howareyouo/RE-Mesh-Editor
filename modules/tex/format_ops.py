@@ -5,6 +5,7 @@ Created on Fri Mar  7 18:43:54 2025
 @author: Asterisk
 """
 import re
+import functools
 from .enums.legacy_mappings import legacyMapping
 from .enums import dxgi_format_enum as dxgienum
 from .enums import scanline_minima as scMin
@@ -89,7 +90,10 @@ def _packetSizeData(formatString):
         bytelen = (bitlen + 7)//8
         return 1,1,bitlen,bytelen,channels,rgb.groups()[-1]
 
+@functools.lru_cache(maxsize=256)
 def packetSizeData(formatString):
+    #FormatData is immutable after construction and the set of distinct format
+    #strings is small (<150), so every header parse after the first is a dict hit
     return FormatData(formatString)
 
 def scanlineMinima(formatString):

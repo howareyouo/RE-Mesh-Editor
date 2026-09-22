@@ -1,7 +1,8 @@
 #Author: NSA Cloud
 import os
+import struct
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,getStringTableOffset,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_unicode_string,write_uint,write_int,write_uint64,write_float,write_unicode_string
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_unicode_string,write_uint,write_int,write_uint64,write_float,write_unicode_string
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
 from ..binary_struct import BinaryStruct,u32,u16,u64,i32,skip
@@ -127,8 +128,8 @@ class Property(BinaryStruct):
 		file.seek(self.propNameOffset)
 		self.propName = read_unicode_string(file)
 		file.seek(self.matPropertyDataOffset+self.propDataOffset)
-		for i in range(0,self.paramCount):
-			self.propValue.append(read_float(file))
+		#Batch-unpack the float block instead of one read+unpack per value
+		self.propValue = list(struct.unpack(f'<{self.paramCount}f', file.read(self.paramCount*4)))
 		file.seek(currentPos)
 		debugprint(self)
 	def __str__(self):
@@ -367,7 +368,7 @@ class MDFFile():
 		self.sizeData = None
 		self.Header = MDFHeader()
 		self.materialList = []
-		self.stringList = []#Used during writing
+		self._stringTable = None#Built by recalculateHashesAndOffsets during writing
 	def read(self,file,version):
 		self.Header.read(file)
 		debugprint(self.Header)
@@ -441,42 +442,25 @@ class MDFFile():
 		stringTableStartOffset = propertyEntryStartOffset + propertyEntriesSize + gpbfEntriesSize
 		
 		#Get string offsets
-		currentStringOffset = stringTableStartOffset
+		#Vanilla layout: entries reference the FIRST occurrence of a shared string,
+		#but duplicates are still serialized and occupy table space.
+		#StringTableBuilder.add_shared_alloc captures that exactly; material names
+		#always get a fresh slot (add_always).
+		stringTable = StringTableBuilder(write_duplicates=True)
 		#Get all material names and mmtr paths first
-		mmtrPathOffsetDict = {}
 		for material in self.materialList:
-			material.matNameOffset = currentStringOffset
-			self.stringList.append(material.materialName)
-			currentStringOffset += len(material.materialName)*2+2
-			
-			material.mmtrPathOffset = getStringTableOffset(mmtrPathOffsetDict,material.mmtrPath,currentStringOffset)
-			#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-			self.stringList.append(material.mmtrPath)
-			currentStringOffset += len(material.mmtrPath)*2+2
+			material.matNameOffset = stringTableStartOffset + stringTable.add_always(material.materialName)
+			material.mmtrPathOffset = stringTableStartOffset + stringTable.add_shared_alloc(material.mmtrPath)
 		#Get texture types and paths next
-		textureOffsetDict = {}#Property names have to share offsets or the game will crash
-		
 		for material in self.materialList:
 			for texture in material.textureList:
-				texture.textureTypeOffset = getStringTableOffset(textureOffsetDict,texture.textureType,currentStringOffset)
-				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-				self.stringList.append(texture.textureType)
-				currentStringOffset += len(texture.textureType)*2+2
-				
-				texture.texturePathOffset = getStringTableOffset(textureOffsetDict,texture.texturePath,currentStringOffset)
-				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-				self.stringList.append(texture.texturePath)
-				currentStringOffset += len(texture.texturePath)*2+2
+				texture.textureTypeOffset = stringTableStartOffset + stringTable.add_shared_alloc(texture.textureType)
+				texture.texturePathOffset = stringTableStartOffset + stringTable.add_shared_alloc(texture.texturePath)
 		#Lastly get property names
-		propNameOffsetDict = {}#Property names have to share offsets or the game will crash
 		for material in self.materialList:
 			for prop in material.propertyList:
-				prop.propNameOffset = getStringTableOffset(propNameOffsetDict,prop.propName,currentStringOffset)
-				#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-				self.stringList.append(prop.propName)
-				currentStringOffset += len(prop.propName)*2+2
+				prop.propNameOffset = stringTableStartOffset + stringTable.add_shared_alloc(prop.propName)
 		if gpbfEntriesSize != 0:
-			gpbfNameOffsetDict = {}
 			for material in self.materialList:
 				material.GPBFBufferNameCount = len(material.gpbfBufferNameList)
 				material.GPBFBufferPathCount = material.GPBFBufferNameCount
@@ -485,23 +469,17 @@ class MDFFile():
 				for index, entry in enumerate(material.gpbfBufferNameList):
 					entry.nameUTF16Hash = hashUTF16(entry.name)
 					entry.nameUTF8Hash = hashUTF8(entry.name)
-					entry.nameOffset = getStringTableOffset(gpbfNameOffsetDict,entry.name,currentStringOffset)
-					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-					self.stringList.append(entry.name)
-					currentStringOffset += len(entry.name)*2+2
+					entry.nameOffset = stringTableStartOffset + stringTable.add_shared_alloc(entry.name)
 					
 					pathEntry = material.gpbfBufferPathList[index]
 					
-					pathEntry.nameOffset = getStringTableOffset(gpbfNameOffsetDict,pathEntry.name,currentStringOffset)
-					#Serialize strings even if they'll be unused duplicates, this is the way the vanilla files are
-					self.stringList.append(pathEntry.name)
-					currentStringOffset += len(pathEntry.name)*2+2
+					pathEntry.nameOffset = stringTableStartOffset + stringTable.add_shared_alloc(pathEntry.name)
 
-					
+		self._stringTable = stringTable
 		#stringTableSize = list(stringOffsetDict.items())[-1][1] + len(list(stringOffsetDict.items())[-1][0])*2 +2
 		#stringTableSize = stringTableSize + getPaddingAmount(stringTableStartOffset+stringTableSize, 16)
 		
-		propDataStartOffset = currentStringOffset# + getPaddingAmount(currentStringOffset, 16)
+		propDataStartOffset = stringTableStartOffset + stringTable.size# + getPaddingAmount(currentStringOffset, 16)
 		#Not padded
 
 		#Loop through materials again now that the offsets have been gathered
@@ -558,18 +536,15 @@ class MDFFile():
 		for string in sorted(list(stringOffsetDict.items()),key = lambda item: item[1]):
 			write_unicode_string(file, string[0])
 		"""
-		for string in self.stringList:
-			write_unicode_string(file, string)
-		#Clear string list after writing
-		self.stringList = []
+		self._stringTable.write(file)
 		#Loop over materials one last time to write property values
 		
 		print("Writing Property Values")
 		for material in self.materialList:
 			for prop in material.propertyList:
 				file.seek(material.propDataOffset + prop.propDataOffset)
-				for value in list(prop.propValue):
-					write_float(file,value)
+				#Batch-pack the float block instead of one pack+write per value
+				file.write(struct.pack(f'<{len(prop.propValue)}f', *prop.propValue))
 				file.write(b'\x00'*prop.padding)
 					
 		

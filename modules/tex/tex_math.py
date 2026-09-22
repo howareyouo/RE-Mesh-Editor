@@ -71,7 +71,7 @@ def bitCount(int32):
     sum : Int
         Number of Bits set
     """
-    return sum(((int32 >> i) & 1 for i in range(32)))
+    return bin(int32).count("1")
 
 def dotDivide(num,denom):
     """ Component-wise Vector pair division

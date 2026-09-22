@@ -353,9 +353,10 @@ def getMHWildsSkinMappingNodeGroup(nodeTree):
 	
 
 def addPropertyNode(prop,currentPos,node_tree):
-	if prop.propName in node_tree.nodes:
-		propNode = node_tree.nodes[prop.propName]
-	else:
+	#nodes.get() does a single C-level lookup; "in" + indexing scanned the
+	#collection twice, and this runs for every property of every material
+	propNode = node_tree.nodes.get(prop.propName)
+	if propNode is None:
 		if is_color_prop(prop.propName, prop.paramCount):
 			#RGBA Color
 			nodeGroup = getColorNodeGroup(node_tree)
@@ -703,12 +704,8 @@ def newNRRTNode (nodeTree,textureType,matInfo):
 	elif textureType == "NormalRoughnessOcclusionMap":
 		
 		if occlusionUV2Node != None:
-			UVMap1Node = None
-			UVMap2Node = None
-			if "UVMap1Node" in nodeTree.nodes:
-				UVMap1Node = nodeTree.nodes["UVMap1Node"]
-			if "UVMap2Node" in nodeTree.nodes:
-				UVMap2Node = nodeTree.nodes["UVMap2Node"]
+			UVMap1Node = nodeTree.nodes.get("UVMap1Node")
+			UVMap2Node = nodeTree.nodes.get("UVMap2Node")
 			if UVMap1Node != None and UVMap2Node != None:
 				
 				
@@ -843,12 +840,8 @@ def newCMMNode (nodeTree,textureType,matInfo):
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
 	
 	if "UseSecondaryUV_ColorLayer_MaskMap" in matInfo["mPropDict"]:
-		UVMap1Node = None
-		UVMap2Node = None
-		if "UVMap1Node" in nodeTree.nodes:
-			UVMap1Node = nodeTree.nodes["UVMap1Node"]
-		if "UVMap2Node" in nodeTree.nodes:
-			UVMap2Node = nodeTree.nodes["UVMap2Node"]
+		UVMap1Node = nodeTree.nodes.get("UVMap1Node")
+		UVMap2Node = nodeTree.nodes.get("UVMap2Node")
 		if UVMap1Node != None and UVMap2Node != None:
 			useSecondaryUVNode = addPropertyNode(matInfo["mPropDict"]["UseSecondaryUV_ColorLayer_MaskMap"], matInfo["currentPropPos"], nodeTree)
 			

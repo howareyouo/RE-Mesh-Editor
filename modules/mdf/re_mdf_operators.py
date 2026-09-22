@@ -372,7 +372,14 @@ class WM_OT_ClearUnusedTextures(Operator):
 		return (mdfDir,unusedList)
 
 	def execute(self, context):
-		mdfDir, unusedList = self.getUnusedTextures()
+		#Reuse the scan from invoke when present (the confirm dialog means the
+		#data can't change between the two calls); falls back to scanning directly
+		cached = getattr(self, "_unusedScan", None)
+		if cached is not None:
+			mdfDir, unusedList = cached
+			self._unusedScan = None
+		else:
+			mdfDir, unusedList = self.getUnusedTextures()
 		if unusedList == None:
 			self.report({"ERROR"},"The MDF file path was not found on the collection or the folder no longer exists. Re-import the MDF to enable this feature.")
 			return {'CANCELLED'}
@@ -416,6 +423,7 @@ class WM_OT_ClearUnusedTextures(Operator):
 		if len(unusedList) == 0:
 			self.report({"INFO"},"No unused textures found.")
 			return {'CANCELLED'}
+		self._unusedScan = (mdfDir, unusedList)  # execute() reuses this
 		self.unusedCount = len(unusedList)
 		otherMDFCount = 0
 		for fname in os.listdir(mdfDir):

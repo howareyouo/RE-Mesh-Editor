@@ -13,6 +13,12 @@ from itertools import repeat
 rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
 rotateNeg90Matrix = Matrix.Rotation(radians(-90.0), 4, 'X')
 
+def getAddonPreferences():
+	"""Return this addon's preferences. Uses the actual loaded module name so the
+	addon keeps working when its folder is renamed (previously callers scanned
+	every installed addon with a substring match on "RE-Mesh-Editor")."""
+	return bpy.context.preferences.addons[__package__.split(".")[0]].preferences
+
 def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 
 	def draw(self, context):
@@ -256,9 +262,9 @@ def checkNameUsage(baseName, checkSubString=True, objList=None):
 	if objList is None:
 		objList = bpy.data.objects
 	if checkSubString:
-		return any(baseName in name for name in [obj.name for obj in objList])
+		return any(baseName in obj.name for obj in objList)  #Generator: no full name list materialized
 	else:
-		return baseName in [obj.name for obj in objList]
+		return any(obj.name == baseName for obj in objList)
 
 def tag_redraw(context, space_type="PROPERTIES", region_type="WINDOW"):
 	for window in context.window_manager.windows:
@@ -267,14 +273,6 @@ def tag_redraw(context, space_type="PROPERTIES", region_type="WINDOW"):
 				for region in area.regions:
 					if region.type == region_type:
 						region.tag_redraw()
-
-def operator_exists(idname):
-	from bpy.ops import op_as_string
-	try:
-		op_as_string(idname)
-		return True
-	except:
-		return False
 	
 #--------------------------------
 #Node arrange by JuhaW
@@ -309,7 +307,7 @@ def nodes_arrange(nodelist, level, ntree):
 	for node in nodelist:
 		parents.append(node.parent)
 		node.parent = None
-		ntree.nodes.update()
+	ntree.nodes.update()
 
 	widthmax = max([x.dimensions.x for x in nodelist])
 	xpos = values.x_last - (widthmax + values.margin_x) if level != 0 else 0
@@ -370,13 +368,15 @@ def nodes_iterate(ntree, arrange=True):
 
 	#remove duplicate nodes in all levels, last wins
 	top = level
-	for row1 in range(top, 1, -1):
-		for col1 in a[row1]:
-			for row2 in range(row1-1, 0, -1):
-				for col2 in a[row2]:
-					if col1 == col2:
-						a[row2].remove(col2)
-						break
+	seen = set()
+	for row in range(top, 0, -1):
+		kept = []
+		for node in a[row]:
+			if node in seen:
+				continue
+			seen.add(node)
+			kept.append(node)
+		a[row] = kept
 
 	if not arrange:
 		nodelist = [j for i in a for j in i]

@@ -3,7 +3,9 @@
 import numpy as np
 import ctypes
 import struct
-from ..gen_functions import *
+from ..gen_functions import (getPaddedPos, raiseWarning, read_float, read_null_terminated_names,
+                             read_ubyte, read_uint, read_uint64, read_unicode_string, read_ushort,
+                             write_uint, write_uint64)
 
 # Mesh version numbers do not always increase for newer versions of the file format
 # Therefore mesh versions have been remapped to new values to allow for conditional import and export changes depending on the mesh version
@@ -747,27 +749,14 @@ class REMeshMPLY():
 			raw_offsets = file.read(self.fileHeader.stringCount * 8)
 			self.rawNameOffsetList = list(struct.unpack(f'<{self.fileHeader.stringCount}Q', raw_offsets))
 
-			# Batch read: load the string region in one shot, then split by null
-			# terminators (avoids per-string seek + byte-by-byte read_string calls).
-			# The region is bounded by the next section offset when known; later reads
-			# always re-seek explicitly, so reading to EOF is safe otherwise.
-			if self.rawNameOffsetList:
-				first_offset = self.rawNameOffsetList[0]
-				next_offsets = [o for o in (self.fileHeader.streamingChunkOffset,
-				                            self.fileHeader.gpuMeshletOffset) if o and o > first_offset]
-				file.seek(first_offset)
-				if next_offsets:
-					string_region = file.read(min(next_offsets) - first_offset)
-				else:
-					string_region = file.read()
-				for name_offset in self.rawNameOffsetList:
-					rel_offset = name_offset - first_offset
-					if rel_offset < 0 or rel_offset >= len(string_region):
-						continue
-					end = string_region.find(b'\x00', rel_offset)
-					if end == -1:
-						end = len(string_region)
-					self.rawNameList.append(string_region[rel_offset:end].decode('utf-8'))
+			# Batch read: load the string region in one shot and split by null
+			# terminators (shared helper, previously a drifted copy of the RE
+			# parser's logic). The region is bounded by the next section offset
+			# when known; later reads always re-seek explicitly, so reading to
+			# EOF is safe otherwise.
+			self.rawNameList = read_null_terminated_names(
+				file, self.rawNameOffsetList,
+				(self.fileHeader.streamingChunkOffset, self.fileHeader.gpuMeshletOffset))
 		if self.fileHeader.streamingChunkOffset:
 			file.seek(self.fileHeader.streamingChunkOffset)
 			self.streamingInfoHeader = StreamingInfo()

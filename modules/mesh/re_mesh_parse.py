@@ -466,7 +466,6 @@ class ParsedREMesh:
 
 			for remapIndex in reMesh.skeletonHeader.boneRemapList:
 				self.skeleton.weightedBones.append(reMesh.rawNameList[reMesh.boneNameRemapList[remapIndex]])
-
 			# I hope this doesn't cause weird issues somewhere, the root bone isn't counted in the remap table but it is used by some meshes and that causes issues
 			# EX F:\RE2RT_EXTRACT\re_chunk_000\natives\STM\ObjectRoot\SetModel\sm4x_Gimmick\sm42\sm42_253_Switch01A\sm42_253_Switch01A_00md.mesh.2109108288
 			# Check if the root bone is weighted and add it to the weighted bone list
@@ -474,6 +473,8 @@ class ParsedREMesh:
 			# Update: turns out this was right but the root bone is supposed to be the last bone in the list, not the first
 			if reMesh.boneBoundingBoxHeader != None and reMesh.skeletonHeader.remapCount != reMesh.boneBoundingBoxHeader.count:
 				self.skeleton.weightedBones.append(reMesh.rawNameList[reMesh.boneNameRemapList[0]])
+			#Set lookup instead of a linear list scan per bone (O(n*m) -> O(n))
+			weightedBoneSet = set(self.skeleton.weightedBones)
 			weightedBoneIndex = 0
 			for i in range(reMesh.skeletonHeader.boneCount):
 				# print(i)
@@ -489,7 +490,7 @@ class ParsedREMesh:
 				bone.localMatrix = reMesh.skeletonHeader.localMatList[i]
 				bone.inverseMatrix = reMesh.skeletonHeader.inverseMatList[i]
 
-				if bone.boneName in self.skeleton.weightedBones:
+				if bone.boneName in weightedBoneSet:
 					try:
 						bone.boundingBox = reMesh.boneBoundingBoxHeader.bboxList[weightedBoneIndex]
 						weightedBoneIndex += 1

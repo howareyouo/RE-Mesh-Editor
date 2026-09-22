@@ -44,6 +44,10 @@ UNCANONICAL_FOURCC = [
     b"AS:5"
 ]
 
+# Valid DXGI format values as a set - previously a ~130 item list comprehension
+# was rebuilt on every get_dxgi()/is_supported() call (1-2x per DDS header read)
+_VALID_DXGI_VALUES = frozenset(fmt.value for fmt in DXGI_FORMAT)
+
 
 class DDSPixelFormat(c.LittleEndianStructure):
     _pack_ = 1
@@ -234,7 +238,7 @@ class DX10Header(c.LittleEndianStructure):
     ]
 
     def get_dxgi(self):
-        if self.dxgi_format not in [fmt.value for fmt in DXGI_FORMAT]:
+        if self.dxgi_format not in _VALID_DXGI_VALUES:
             raise RuntimeError(f"Unsupported DXGI format detected. ({self.dxgi_format})")
         if "ASTC" in DXGI_FORMAT(self.dxgi_format).name:
             raise RuntimeError(f"ASTC textures are not supported. ({self.dxgi_format})")
@@ -400,7 +404,7 @@ class DDSHeader(c.LittleEndianStructure):
         return self.fourCC not in UNCANONICAL_FOURCC
 
     def is_supported(self):
-        if self.dxgi_format not in [fmt.value for fmt in DXGI_FORMAT]:
+        if self.dxgi_format not in _VALID_DXGI_VALUES:
             return False
         if "ASTC" in DXGI_FORMAT(self.dxgi_format).name:
             return False

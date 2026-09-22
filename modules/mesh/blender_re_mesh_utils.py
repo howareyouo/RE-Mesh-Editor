@@ -47,7 +47,12 @@ def _resolve_symmetry_bone_index(boneName: str, boneIndexDict: dict, allBoneName
 
 
 def triangulateMesh(mesh):
-	if all(len(poly.vertices) == 3 for poly in mesh.polygons):
+	#Bulk-read loop counts instead of a per-polygon Python generator (same pattern as _gatherSubMesh)
+	if len(mesh.polygons) == 0:
+		return
+	loop_total = np.zeros(len(mesh.polygons), dtype=np.int32)
+	mesh.polygons.foreach_get("loop_total", loop_total)
+	if np.all(loop_total == 3):
 		return
 	bm = bmesh.new()
 	bm.from_mesh(mesh)

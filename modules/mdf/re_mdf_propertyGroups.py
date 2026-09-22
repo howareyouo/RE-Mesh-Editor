@@ -67,41 +67,63 @@ def filterSFurCollection(self, collection):
 
 flags = MDFFlags()#Bitflag struct
 flagsB = MDFFlagsB()#Bitflag struct
+def _stripBlenderSuffix(name):
+	#Fast equivalent of stripBlenderUserSuffix (trailing ".NNN" only)
+	if len(name) > 4 and name[-4] == "." and name[-3:].isdigit():
+		return name[:-4]
+	return name
+
+
+_materialNameIndex = {}
+_materialNameIndexSize = -1
+
+
+def _getMaterialNameIndex():
+	#Returns {strippedName: [material names]}, rebuilt only when material count changes
+	global _materialNameIndex, _materialNameIndexSize
+	size = len(bpy.data.materials)
+	if size != _materialNameIndexSize:
+		_materialNameIndexSize = size
+		index = {}
+		for mat in bpy.data.materials:
+			index.setdefault(_stripBlenderSuffix(mat.name), []).append(mat.name)
+		_materialNameIndex = index
+	return _materialNameIndex
+
+
 def linkBlenderMaterial(materialObj,materialName):
-	
+
 	#Check if material name is used more than once, link it if it's only used once
-	matchCount = 0
-	materialKey = None
-	for mat in bpy.data.materials.keys():
-		if materialName == stripBlenderUserSuffix(mat):
-			materialKey = mat
-			matchCount += 1
-	if matchCount == 1:
-		#print(f"Linked {materialObj.name} to {bpy.data.materials[materialKey]} (Fast)")
-		materialObj.re_mdf_material.linkedMaterial = bpy.data.materials[materialKey]
-	elif matchCount > 1:
-		#If there's more than one material with the same name, search for a mesh collection with the same name as the mdf and find the material assigned to an object
-		mdfCollectionName = None#Get first mdf collection linked to material obj
-		for collection in materialObj.users_collection:
-			if ".mdf2" in collection.name:
-				mdfCollectionName = collection.name
+	nameList = _getMaterialNameIndex().get(materialName)
+	if nameList is None:
+		return
+	if len(nameList) == 1:
+		#Fast path: exactly one material with this (stripped) name
+		#print(f"Linked {materialObj.name} to {bpy.data.materials[nameList[0]]} (Fast)")
+		materialObj.re_mdf_material.linkedMaterial = bpy.data.materials[nameList[0]]
+		return
+	#If there's more than one material with the same name, search for a mesh collection with the same name as the mdf and find the material assigned to an object
+	mdfCollectionName = None#Get first mdf collection linked to material obj
+	for collection in materialObj.users_collection:
+		if ".mdf2" in collection.name:
+			mdfCollectionName = collection.name
+	
+	if mdfCollectionName != None:
+		meshCollection = bpy.data.collections.get(getMeshCollectionNameFromMDFName(mdfCollectionName),None)
 		
-		if mdfCollectionName != None:
-			meshCollection = bpy.data.collections.get(getMeshCollectionNameFromMDFName(mdfCollectionName),None)
-			
-			if meshCollection != None:
-				meshObj = None#Mesh object with mdf material assigned to it
-				for obj in meshCollection.all_objects:
-					if obj.type == "MESH":
-						if materialName == parseREMeshObjectMaterialName(obj.name):
-							meshObj = obj
-							break
-				if meshObj != None:
-					for material in meshObj.data.materials:
-						if stripBlenderUserSuffix(material.name) == materialName:
-							materialObj.re_mdf_material.linkedMaterial = material
-							#print(f"Linked {materialObj.name} to {material} (Slow)")
-							break						
+		if meshCollection != None:
+			meshObj = None#Mesh object with mdf material assigned to it
+			for obj in meshCollection.all_objects:
+				if obj.type == "MESH":
+					if materialName == parseREMeshObjectMaterialName(obj.name):
+						meshObj = obj
+						break
+			if meshObj != None:
+				for material in meshObj.data.materials:
+					if _stripBlenderSuffix(material.name) == materialName:
+						materialObj.re_mdf_material.linkedMaterial = material
+						#print(f"Linked {materialObj.name} to {material} (Slow)")
+						break						
 
 def update_mdfCollection(self, context):#Set mesh collection automatically if it exists when active mdf is changed
 	meshCollectionName = getMeshCollectionNameFromMDFName(self.mdfCollection.name) if self.mdfCollection != None else None
@@ -453,13 +475,34 @@ class MDFGPBFDataPropertyGroup(bpy.types.PropertyGroup):
         name="GPBF Data",
     )	
 
-class MESH_UL_MDFPropertyList(bpy.types.UIList):
-	
+class MDFFilterableUIList(bpy.types.UIList):
+	"""Shared filter UI/behavior for the MDF UILists (previously two identical
+	copies of filterString/invoke/draw_filter/filter_items)."""
 	filterString: StringProperty(
 		name = "Filter",
 		description = "Search the list for items that contain this string.\nPress enter to search",
 		default='',
 		update = update_listFilter)
+	# Disable double-click to rename
+	def invoke(self, context, event):
+		return {'PASS_THROUGH'}
+	def draw_filter(self, context, layout):
+		col = layout.column(align=True)
+		row = col.row(align=True)
+		row.prop(self, 'filterString', text='', icon='VIEWZOOM')
+	def _filterByAttr(self, items, attrName):
+		"""Return (filtered, ordered) hiding items whose attr doesn't contain the filter."""
+		filtered = []
+		ordered = []
+		if self.filterString:
+			filtered = [self.bitflag_filter_item] * len(items)
+			for i, item in enumerate(items):
+				if self.filterString.lower() not in getattr(item, attrName).lower():
+					filtered[i] &= ~self.bitflag_filter_item
+		return filtered, ordered
+
+class MESH_UL_MDFPropertyList(MDFFilterableUIList):
+	
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         # Display the properties of each item in the UIList
         #col1.label(text=item.name)
@@ -478,34 +521,12 @@ class MESH_UL_MDFPropertyList(bpy.types.UIList):
 			row.prop(item, "bool_value")
 		elif item.data_type == 'COLOR':
 			row.prop(item, "color_value")
-	# Disable double-click to rename
-	def invoke(self, context, event):
-		return {'PASS_THROUGH'}
-	def draw_filter(self, context, layout):
-		col = layout.column(align=True)
-		row = col.row(align=True)
-		row.prop(self, 'filterString', text='', icon='VIEWZOOM')
 	def filter_items(self, context, data, propname):
-		"""Filter and order items in the list.""" 
-		filtered = []
-		ordered = []
-		items = getattr(data, propname)
-		
-		# Initialize with all items visible
-		if self.filterString:
-			filtered = [self.bitflag_filter_item] * len(items)
-			for i, item in enumerate(items):
-				if self.filterString.lower() not in item.prop_name.lower():
-					filtered[i] &= ~self.bitflag_filter_item
-		return filtered, ordered
+		"""Filter and order items in the list."""
+		return self._filterByAttr(getattr(data, propname), "prop_name")
 
-class MESH_UL_MDFTextureBindingList(bpy.types.UIList):
+class MESH_UL_MDFTextureBindingList(MDFFilterableUIList):
 	
-	filterString: StringProperty(
-		name = "Filter",
-		description = "Search the list for items that contain this string.\nPress enter to search",
-		default='',
-		update = update_listFilter)
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         # Display the properties of each item in the UIList
         #col1.label(text=item.name)
@@ -517,26 +538,9 @@ class MESH_UL_MDFTextureBindingList(bpy.types.UIList):
 		col2.alignment='RIGHT'
 		col1.label(text = item.textureType)
 		row.prop(item,"path")
-	# Disable double-click to rename
-	def invoke(self, context, event):
-		return {'PASS_THROUGH'}
-	def draw_filter(self, context, layout):
-		col = layout.column(align=True)
-		row = col.row(align=True)
-		row.prop(self, 'filterString', text='', icon='VIEWZOOM')
 	def filter_items(self, context, data, propname):
-		"""Filter and order items in the list.""" 
-		filtered = []
-		ordered = []
-		items = getattr(data, propname)
-		
-		# Initialize with all items visible
-		if self.filterString:
-			filtered = [self.bitflag_filter_item] * len(items)
-			for i, item in enumerate(items):
-				if self.filterString.lower() not in item.textureType.lower():
-					filtered[i] &= ~self.bitflag_filter_item
-		return filtered, ordered
+		"""Filter and order items in the list."""
+		return self._filterByAttr(getattr(data, propname), "textureType")
 
 class MESH_UL_MDFMMTRSDataList(bpy.types.UIList):
 	

@@ -133,6 +133,14 @@ def analyzeMaterial(material,presetList,gameName,meshCollectionName = "newModel.
 		priorityList.append((presetName,presetNameDict[presetName]["score"]))
 	
 	priorityList.sort(key = lambda i: i[1],reverse = True)
+	outputPreset = None
+	if not priorityList:
+		print(f"No preset matched for material {material.name}, skipping preset selection.")
+		matInfoDict["imageXRes"] = imageXRes
+		matInfoDict["imageYRes"] = imageYRes
+		matInfoDict["materialPreset"] = None
+		matInfoDict["uv2AOBake"] = False
+		return matInfoDict
 	highestScore = priorityList[0][1]
 	#Sort the list by preset name length
 	#This makes the entries with the same score get decided by the less specific preset (ex: Weapon instead of Weapon Emissive)
@@ -157,31 +165,49 @@ def analyzeMaterial(material,presetList,gameName,meshCollectionName = "newModel.
 
 def analyzePreset(presetPath):#Determine the best preset to use for material conversion,returns dict containing material settings to apply
 	texInfoDict = dict()
-	whitelistPath = os.path.join(os.path.dirname(os.path.abspath(__file__)),"tex_bindings_whitelist.json")
-	try:
-		with open(whitelistPath,"r", encoding ="utf-8") as file:
-			texTypeWhitelist = set(json.load(file))
-			#print(f"Loaded {whitelistPath}")
-	except Exception as err:
-		print(f"Failed to load {whitelistPath} - {err}")
-	texBindingTypePath = os.path.join(os.path.dirname(os.path.abspath(__file__)),"tex_binding_types.json")
-	try:
-		with open(texBindingTypePath,"r", encoding ="utf-8") as file:
-			texBindingTypeDict = json.load(file)
-			#print(f"Loaded {texBindingTypePath}")
-	except Exception as err:
-		print(f"Failed to load {texBindingTypePath} - {err}")
+	#The two helper JSONs are static addon data - load once per session, not once per material
+	global _texTypeWhitelist, _texBindingTypeDict
+	if _texTypeWhitelist is None:
+		whitelistPath = os.path.join(os.path.dirname(os.path.abspath(__file__)),"tex_bindings_whitelist.json")
+		try:
+			with open(whitelistPath,"r", encoding ="utf-8") as file:
+				_texTypeWhitelist = set(json.load(file))
+				#print(f"Loaded {whitelistPath}")
+		except Exception as err:
+			print(f"Failed to load {whitelistPath} - {err}")
+			_texTypeWhitelist = set()
+	if _texBindingTypeDict is None:
+		texBindingTypePath = os.path.join(os.path.dirname(os.path.abspath(__file__)),"tex_binding_types.json")
+		try:
+			with open(texBindingTypePath,"r", encoding ="utf-8") as file:
+				_texBindingTypeDict = json.load(file)
+				#print(f"Loaded {texBindingTypePath}")
+		except Exception as err:
+			print(f"Failed to load {texBindingTypePath} - {err}")
+			_texBindingTypeDict = dict()
+	texTypeWhitelist = _texTypeWhitelist
+	texBindingTypeDict = _texBindingTypeDict
 
-	try:
-		with open(presetPath,"r", encoding ="utf-8") as file:
-			presetDict = json.load(file)
-			print(f"Loaded {presetPath}")
-	except Exception as err:
-		print(f"Failed to load {presetPath} - {err}")
-		
+	#Preset files don't change mid-conversion - cache parsed results per path
+	presetDict = _presetDictCache.get(presetPath)
+	if presetDict is None:
+		try:
+			with open(presetPath,"r", encoding ="utf-8") as file:
+				presetDict = json.load(file)
+				_presetDictCache[presetPath] = presetDict
+				print(f"Loaded {presetPath}")
+		except Exception as err:
+			print(f"Failed to load {presetPath} - {err}")
+			presetDict = {"Texture Bindings": []}
+			_presetDictCache[presetPath] = presetDict
+
 	for entry in presetDict["Texture Bindings"]:
 		if entry["Texture Type"] in texTypeWhitelist:
 			if entry["Texture Type"] in texBindingTypeDict:
 				texInfoDict[entry["Texture Type"]] = texBindingTypeDict[entry["Texture Type"]]
 				print(f"Binding: " + entry["Texture Type"] +": "+texBindingTypeDict[entry["Texture Type"]])
 	return texInfoDict
+
+_texTypeWhitelist = None
+_texBindingTypeDict = None
+_presetDictCache = {}

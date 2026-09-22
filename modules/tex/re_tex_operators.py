@@ -3,7 +3,7 @@ import bpy
 import os
 
 
-from ..blender_utils import showErrorMessageBox,showMessageBox
+from ..blender_utils import showErrorMessageBox,showMessageBox,getAddonPreferences
 from bpy.types import Operator,OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty,CollectionProperty
@@ -131,12 +131,9 @@ class WM_OT_PNGToTexConversionWindow(Operator):
 		
 		#Find preferences to check tex conversion filetype setting
 		texToPNG = False
-		for addon in bpy.context.preferences.addons:
-               #print(addon)
-			   if "RE-Mesh-Editor" in addon.module:
-				   preferencesName = addon.module
-				   texToPNG = bpy.context.preferences.addons[addon.module].preferences.convertTexToPNG
-				   break
+		preferences = getAddonPreferences()
+		if preferences is not None:
+			texToPNG = preferences.convertTexToPNG
 		successCount,failCount = convertTexDDSList(fileNameList = ddsTexList,inDir = self.directory, outDir = self.outDir, gameName = bpy.context.scene.re_mdf_toolpanel.activeGame,createStreamingTex = self.createStreamingTex,texToPNG = texToPNG)
 		
 		#Delete converted dds files after converting to tex

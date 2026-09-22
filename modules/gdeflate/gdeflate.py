@@ -131,6 +131,14 @@ class GDeflate:
         ]
         self._compress_func.restype = c_bool
     
+    def _as_input_array(self, data: Union[bytes, bytearray]):
+        """Build a ctypes input array; zero-copy for writable buffers (bytearray)."""
+        arr_type = c_uint8 * len(data)
+        try:
+            return arr_type.from_buffer(data)          # bytearray/memoryview: zero-copy
+        except (TypeError, ValueError):
+            return arr_type.from_buffer_copy(data)     # bytes: must copy
+
     def get_uncompressed_size(self, compressed_data: Union[bytes, bytearray]) -> int:
         """
         Get the uncompressed size of compressed data.
@@ -144,7 +152,7 @@ class GDeflate:
         Raises:
             GDeflateError: If the size calculation fails
         """
-        input_array = (c_uint8 * len(compressed_data)).from_buffer_copy(compressed_data)
+        input_array = self._as_input_array(compressed_data)
         uncompressed_size = c_uint64(0)
         
         success = self._get_uncompressed_size_func(
@@ -174,16 +182,23 @@ class GDeflate:
         Raises:
             GDeflateError: If decompression fails
         """
-        # Get the uncompressed size first
-        output_size = self.get_uncompressed_size(compressed_data)
-        
-        # Prepare input and output buffers
-        input_array = (c_uint8 * len(compressed_data)).from_buffer_copy(compressed_data)
-        output_array = (c_uint8 * output_size)()
+        # Get the uncompressed size first, reusing the same input buffer
+        input_array = self._as_input_array(compressed_data)
+        output_size = c_uint64(0)
+        success = self._get_uncompressed_size_func(
+            input_array,
+            c_uint64(len(compressed_data)),
+            byref(output_size)
+        )
+        if not success:
+            raise GDeflateError("Failed to get uncompressed size")
+
+        # Prepare output buffer
+        output_array = (c_uint8 * output_size.value)()
         
         success = self._decompress_func(
             output_array,
-            c_uint64(output_size),
+            output_size,
             input_array,
             c_uint64(len(compressed_data)),
             c_uint32(num_workers)
@@ -191,8 +206,8 @@ class GDeflate:
         
         if not success:
             raise GDeflateError("Decompression failed")
-        
-        return bytes(output_array)
+
+        return ctypes.string_at(output_array, output_size)
     
     def compress(self, 
                 data: Union[bytes, bytearray], 
@@ -221,7 +236,6 @@ class GDeflate:
         output_size = c_uint64(bounded_output_size)
         output_array = (c_uint8 * bounded_output_size)()
         input_array = (c_uint8 * len(data)).from_buffer_copy(data)
-        
         success = self._compress_func(
             output_array,
             byref(output_size),
@@ -235,4 +249,4 @@ class GDeflate:
             raise GDeflateError("Compression failed")
         
         # Return only the actual compressed bytes
-        return bytes(output_array[:output_size.value])
+        return ctypes.string_at(output_array, output_size.value)

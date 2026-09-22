@@ -1,6 +1,8 @@
 #murmur3 hash algorithm
 #Credit to Darkness for adapting this
 
+import functools
+
 def _fmix(h):
 	h ^= h >> 16
 	h = (h * 0x85ebca6b) & 0xFFFFFFFF
@@ -9,6 +11,7 @@ def _fmix(h):
 	h ^= h >> 16
 	return h
 
+@functools.lru_cache(maxsize=4096)
 def hashUTF8(key, seed=0xffffffff):
 	key = bytearray(key, 'utf8')
 
@@ -58,6 +61,7 @@ def hashUTF8(key, seed=0xffffffff):
 		return -((unsigned_val ^ 0xFFFFFFFF) + 1) & 0xFFFFFFFF
 
 #About 19% faster
+@functools.lru_cache(maxsize=4096)
 def hashUTF16(key, seed=0xffffffff):
 	key = bytearray(key, 'utf-16le')
 

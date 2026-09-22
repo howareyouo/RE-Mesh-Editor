@@ -724,23 +724,22 @@ def importREMeshFile(filePath, options):
 	errorList = []
 
 	if options["clearScene"]:
-		for collection in bpy.data.collections:
-			for obj in collection.objects:
-				collection.objects.unlink(obj)
+		#Single-pass removal with do_unlink (handles collection unlinking internally);
+		#the old loop also called user_clear() on already-removed IDs (dangling refs).
+		for obj in list(bpy.data.objects):
+			bpy.data.objects.remove(obj, do_unlink=True)
+		for collection in list(bpy.data.collections):
 			bpy.data.collections.remove(collection)
-		for bpy_data_iter in (bpy.data.objects, bpy.data.meshes, bpy.data.lights, bpy.data.cameras):
-			for id_data in bpy_data_iter:
+		for bpy_data_iter in (bpy.data.meshes, bpy.data.lights, bpy.data.cameras):
+			for id_data in list(bpy_data_iter):
 				bpy_data_iter.remove(id_data)
-		for material in bpy.data.materials:
+		for material in list(bpy.data.materials):
 			bpy.data.materials.remove(material)
-		for amt in bpy.data.armatures:
+		for amt in list(bpy.data.armatures):
 			bpy.data.armatures.remove(amt)
-		for obj in bpy.data.objects:
-			bpy.data.objects.remove(obj)
-			obj.user_clear()
-		for nodeGroup in bpy.data.node_groups:
+		for nodeGroup in list(bpy.data.node_groups):
 			bpy.data.node_groups.remove(nodeGroup)
-		for img in bpy.data.images:
+		for img in list(bpy.data.images):
 			if not img.users:
 				bpy.data.images.remove(img)
 

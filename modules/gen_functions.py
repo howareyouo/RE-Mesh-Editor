@@ -17,7 +17,6 @@ _struct_short = struct.Struct('<h')
 _struct_ushort = struct.Struct('<H')
 _struct_int = struct.Struct('<i')
 _struct_uint = struct.Struct('<I')
-_struct_int64 = struct.Struct('<q')
 _struct_uint64 = struct.Struct('<Q')
 _struct_float = struct.Struct('<f')
 
@@ -41,8 +40,8 @@ class ClampNameList(list):
 
 
 #---General Functions---#
-if platform.system() == 'Windows':
-	os.system("color")  # Enable console colors (Windows only)
+#Note: ANSI colors work in modern Windows terminals without the legacy
+#`color` command; the old os.system("color") forked a shell on every import.
 class textColors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -71,12 +70,26 @@ def read_uint64(file_object):
 def read_float(file_object):
 	return _struct_float.unpack(file_object.read(4))[0]
 def read_unicode_string(file_object):#Reads unicode string from file into utf-8 string
-	byteString = b''
-	wchar = file_object.read(2)
-	while wchar != b'\x00\x00':
-		byteString += wchar
-		wchar = file_object.read(2)
-	return byteString.decode("utf-16le").replace('\x00', '')
+	#Block-read instead of one read(2) per character; join once instead of O(n^2) bytes concatenation
+	chunks = []
+	pending = b''
+	while True:
+		block = file_object.read(256)
+		if not block:
+			break
+		buf = pending + block
+		pending = b''
+		if len(buf) & 1:  #Keep UTF-16 pairs aligned across block boundaries
+			pending = buf[-1:]
+			buf = buf[:-1]
+		for i in range(0, len(buf), 2):
+			if buf[i:i+2] == b'\x00\x00':
+				chunks.append(buf[:i])
+				return b''.join(chunks).decode("utf-16le")
+		chunks.append(buf)
+	if pending:
+		chunks.append(pending)
+	return b''.join(chunks).decode("utf-16le")
 def write_ubyte(file_object, input):
 	file_object.write(_struct_ubyte.pack(input))
 def write_byte(file_object, input):
@@ -91,8 +104,6 @@ def write_int(file_object, input):
 	file_object.write(_struct_int.pack(input))
 def write_uint64(file_object, input):
 	file_object.write(_struct_uint64.pack(input))
-def write_int64(file_object, input):
-	file_object.write(_struct_int64.pack(input))
 def write_float(file_object, input):
 	file_object.write(_struct_float.pack(input))
 #write null terminated string to file
@@ -100,21 +111,39 @@ def write_string(file_object,input):
      file_object.write(bytes(input + '\x00', 'utf-8'))
 def write_unicode_string(file_object,input):#Writes utf-8 string as utf-16
      file_object.write(input.encode('UTF-16LE') + b'\x00\x00')
-def collectStringOffsets(strings):#Builds a {string: offset} table for a UTF-16 string table, assigning each unique string's offset in first-seen order (len*2+2 bytes per entry, including the terminator)
-    stringOffsetDict = {}
-    currentStringOffset = 0
-    for string in strings:
-        if stringOffsetDict.get(string,None) == None:
-            stringOffsetDict[string] = currentStringOffset
-            currentStringOffset += len(string)*2+2
-    return stringOffsetDict
 
-def getStringTableOffset(stringOffsetDict,string,currentStringOffset):#Returns the offset of the string's first occurrence, registering currentStringOffset if new. Callers that serialize duplicate strings must still advance their offset counter afterwards.
-    offset = stringOffsetDict.get(string,None)
-    if offset == None:
-        stringOffsetDict[string] = currentStringOffset
-        return currentStringOffset
-    return offset
+
+def read_null_terminated_names(file, name_offsets, next_section_offsets=()):
+    """Read a null-terminated ASCII name table addressed by absolute offsets.
+
+    Loads the whole string region in one shot and splits by null terminators
+    (avoids per-string seek + byte-by-byte reads). Shared by the RE and MPLY
+    mesh parsers, which previously carried two drifted copies of this logic.
+
+    next_section_offsets: absolute offsets of sections that may follow the
+    string table; the smallest one above the table start bounds the read so a
+    mid-file table doesn't slurp the rest of the file. Empty/unset -> read to
+    EOF (the table is the last section in that layout).
+    """
+    if not name_offsets:
+        return []
+    first_offset = name_offsets[0]
+    file.seek(first_offset)
+    bounds = [o for o in next_section_offsets if o and o > first_offset]
+    if bounds:
+        region = file.read(min(bounds) - first_offset)
+    else:
+        region = file.read()
+    names = []
+    for name_offset in name_offsets:
+        rel_offset = name_offset - first_offset
+        if rel_offset < 0 or rel_offset >= len(region):
+            continue  #Skip bad offsets, keep reading the remaining names
+        end = region.find(b'\x00', rel_offset)
+        if end == -1:
+            end = len(region)
+        names.append(region[rel_offset:end].decode('utf-8'))
+    return names
 
 
 class StringTableBuilder:
@@ -158,6 +187,19 @@ class StringTableBuilder:
 		if self._write_duplicates or string not in self._seen:
 			self._serialized.append(string)
 			self._seen.add(string)
+		return offset
+
+	def add_shared_alloc(self, string):
+		"""Shared offset (first occurrence wins) but every call advances the
+		cursor and serializes - the vanilla mdf layout where duplicate strings
+		still occupy table space while entries reference the first occurrence
+		(previously four hand-rolled dicts + getStringTableOffset)."""
+		offset = self._offsets.get(string)
+		if offset is None:
+			offset = self._cursor
+			self._offsets[string] = offset
+		self._serialized.append(string)
+		self._cursor += len(string) * 2 + 2
 		return offset
 
 	def offset_of(self, string):
@@ -344,18 +386,6 @@ def openFolder(path):
 def isLinux():
     return not IS_WINDOWS
 
-def log(*args, tag="RE", **kwargs):
-    """集中式日志输出, 统一加标签前缀, 便于排查和过滤.
-    用法与 print 一致: log("msg") / log("key=%s", val) 支持 str.format 风格."""
-    ts = time.strftime("%H:%M:%S")
-    if len(args) == 1 and isinstance(args[0], str) and kwargs:
-        msg = args[0].format(*kwargs.pop("args", ()), **kwargs)
-    elif len(args) == 1 and isinstance(args[0], str) and "%" in args[0]:
-        msg = args[0] % args[1:]
-    else:
-        msg = " ".join(str(a) for a in args)
-    return print(f"[{ts}] [{tag}] {msg}")
-	
 def _case_insensitive_pattern(name):
     escaped = glob.escape(name)
     pattern = ""

@@ -26,15 +26,33 @@ IMPORT_MPLY = True
 MESH_IO_BUFFER_SIZE = 1024 * 1024
 
 import numpy as np
+import os
 import struct
 import time
 from io import BytesIO
-from ..gen_functions import *
+from ..gen_functions import (ClampNameList, formatMs, getBit, getPaddedPos, getPaddingAmount,
+                             openFileRead, openFileWrite, parseFileVersion, raiseError, raiseWarning,
+                             read_float, read_null_terminated_names, read_ubyte, read_uint, read_uint64,
+                             read_uint64_array, read_ushort, read_ushort_array, setBit, splitNativesPath,
+                             write_float, write_ubyte, write_uint, write_uint64, write_ushort)
 from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 
 # Version numbers and remap tables live in mesh_versions.py (single source of truth,
 # shared with re_mesh_parse.py and file_re_mesh_mply.py).
-from .mesh_versions import *  # noqa: F401,F403 -- re-exported for blender_re_mesh
+# Explicit import (was `import *`): the star import both hid `os` leaking in via
+# gen_functions' old star export (fixed 2026-09) and prevented static analysis.
+# meshFileVersionToGameNameDict + SIX_WEIGHT_MESH_FILE_VERSIONS are re-exported
+# for blender_re_mesh_import/export/utils which import them FROM this module.
+from .mesh_versions import (SIX_WEIGHT_GAMES, SIX_WEIGHT_MESH_FILE_VERSIONS,
+                            VERSION_DD2, VERSION_DD2NEW, VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
+                            VERSION_PRAGDEMO, VERSION_RE8, VERSION_RE9, VERSION_SF6,
+                            getNearestRemapVersion, meshFileVersionToGameNameDict,
+                            meshFileVersionToInternalVersionDict, meshFileVersionToNewVersionDict,
+                            newVersionToMeshFileVersion)
+
+# Vertex element layout (u16 typing + u16 stride + u32 offset) - shared by every
+# batched read/write of vertex element tables (previously a hardcoded literal x6)
+VERTEX_ELEMENT_DTYPE = np.dtype([('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')])
 
 
 
@@ -488,6 +506,9 @@ class MeshBufferHeader():
 			# print(f"Streamed buffer size {len(streamingBuffer)}")
 			# elementArrayList = []
 
+			# Zero-copy view over the streamed file data (slicing a memoryview is O(1))
+			streamingView = memoryview(streamingBuffer)
+
 			for i in range(0, streamingHeader.entryCount):
 
 				entry = StreamingBufferHeaderEntry()
@@ -496,9 +517,9 @@ class MeshBufferHeader():
 				streamInfo = streamingHeader.streamingInfoEntryList[i]
 				# vertexBytes = streamingBuffer[streamInfo.bufferStart:streamInfo.bufferStart+entry.vertexBufferLength]
 				# faceBytes = streamingBuffer[streamInfo.bufferStart+entry.vertexBufferLength:streamInfo.bufferStart+entry.unpaddedBufferSize]
-				entry.vertexBuffer = streamingBuffer[
+				entry.vertexBuffer = streamingView[
 					streamInfo.bufferStart:streamInfo.bufferStart + entry.vertexBufferLength]
-				entry.faceBuffer = streamingBuffer[
+				entry.faceBuffer = streamingView[
 					streamInfo.bufferStart + entry.vertexBufferLength:streamInfo.bufferStart + entry.unpaddedBufferSize]
 				# print(f"stream header {i} vertex buffer size: {len(entry.vertexBuffer)}")
 				# print(f"stream header {i} face buffer size: {len(entry.faceBuffer)}")
@@ -512,7 +533,7 @@ class MeshBufferHeader():
 				# Batch read streaming vertex elements
 				if self.mainVertexElementCount > 0:
 					raw_elem_data = file.read(self.mainVertexElementCount * 8)
-					entry.vertexElementList = np.frombuffer(raw_elem_data, dtype=[('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')]).copy()
+					entry.vertexElementList = np.frombuffer(raw_elem_data, dtype=VERTEX_ELEMENT_DTYPE).copy()
 				file.seek(currentPos)
 				# self.vertexBuffer.extend(vertexBytes)
 				# self.faceBuffer.extend(faceBytes)
@@ -525,20 +546,27 @@ class MeshBufferHeader():
 		# print(f"current vertex buffer size {i} {len(self.vertexBuffer)}")
 		# print(f"current face buffer size {i} {len(self.faceBuffer)}")
 
-		self.vertexElementList = np.empty(0, dtype=[('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')])
+		self.vertexElementList = np.empty(0, dtype=VERTEX_ELEMENT_DTYPE)
 		file.seek(self.vertexElementOffset)
 		# Batch read all vertex elements at once (8 bytes each: u16 typing + u16 stride + u32 offset)
 		if self.vertexElementCount > 0:
 			raw_data = file.read(self.vertexElementCount * 8)
-			self.vertexElementList = np.frombuffer(raw_data, dtype=[('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')]).copy()
+			self.vertexElementList = np.frombuffer(raw_data, dtype=VERTEX_ELEMENT_DTYPE).copy()
 
 		file.seek(self.vertexBufferOffset)
 		# print(f"Vertex buffer start {str(file.tell())}")
-		self.vertexBuffer.extend(file.read(self.vertexBufferSize))
+		# Preallocate and read in place to avoid an extra full-size copy of 100MB+ buffers
+		self.vertexBuffer = bytearray(self.vertexBufferSize)
+		read_vertex_len = file.readinto(self.vertexBuffer)
+		if read_vertex_len < self.vertexBufferSize:
+			del self.vertexBuffer[read_vertex_len:]
 		# print(f"Vertex buffer end {str(file.tell())}")
 		file.seek(self.faceBufferOffset)
 		# print(f"Face buffer start {str(file.tell())}")
-		self.faceBuffer.extend(file.read(self.faceBufferSize))
+		self.faceBuffer = bytearray(self.faceBufferSize)
+		read_face_len = file.readinto(self.faceBuffer)
+		if read_face_len < self.faceBufferSize:
+			del self.faceBuffer[read_face_len:]
 
 		if self.sunbreakOffset != 0:
 			if (version == VERSION_DD2 or version == VERSION_DD2NEW):
@@ -1208,22 +1236,15 @@ class REMesh():
 				raw_data = file.read(self.fileHeader.nameCount * 8)
 				self.rawNameOffsetList = list(struct.unpack(f'<{self.fileHeader.nameCount}Q', raw_data))
 
-				# Batch read: load entire string region in one shot, then split by null terminators
-				# This avoids per-string seek + byte-by-byte read_string calls
-				if self.rawNameOffsetList:
-					first_offset = self.rawNameOffsetList[0]
-					file.seek(first_offset)
-					string_region = file.read()  # Read all remaining bytes (string table is last)
-					for name_offset in self.rawNameOffsetList:
-						rel_offset = name_offset - first_offset
-						if rel_offset < 0 or rel_offset > len(string_region):
-							# 跳过坏偏移, 继续读取后面的名称
-							continue
-						end = string_region.find(b'\x00', rel_offset)
-						if end == -1:
-							# No null terminator found: treat rest of region as the string
-							end = len(string_region)
-						self.rawNameList.append(string_region[rel_offset:end].decode('utf-8'))
+				# Batch read: load the string region in one shot and split by null
+				# terminators (shared with the MPLY parser). The region is bounded by
+				# the next section offset so a mid-file table doesn't slurp the rest
+				# of the file (previously this read straight to EOF).
+				self.rawNameList = read_null_terminated_names(
+					file, self.rawNameOffsetList,
+					(self.fileHeader.meshOffset, self.fileHeader.floatsOffset,
+					 self.fileHeader.materialNameRemapOffset, self.fileHeader.boneNameRemapOffset,
+					 self.fileHeader.blendShapeNameOffset, self.fileHeader.streamingInfoOffset))
 
 		if self.fileHeader.materialNameRemapOffset and self.lodHeader != None:
 			file.seek(self.fileHeader.materialNameRemapOffset)
@@ -1759,9 +1780,9 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 	# Build numpy structured array directly from collected tuples
 	if vertexElementTuples:
 		reMesh.meshBufferHeader.vertexElementList = np.array(vertexElementTuples,
-			dtype=[('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')])
+			dtype=VERTEX_ELEMENT_DTYPE)
 	else:
-		reMesh.meshBufferHeader.vertexElementList = np.empty(0, dtype=[('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')])
+		reMesh.meshBufferHeader.vertexElementList = np.empty(0, dtype=VERTEX_ELEMENT_DTYPE)
 	reMesh.meshBufferHeader.vertexElementCount = len(reMesh.meshBufferHeader.vertexElementList)
 	reMesh.meshBufferHeader.mainVertexElementCount = reMesh.meshBufferHeader.vertexElementCount
 	reMesh.meshBufferHeader.vertexElementOffset = reMesh.fileHeader.meshOffset + sd.VERTEX_ELEMENT_OFFSET

@@ -41,24 +41,28 @@ def findNodeByTypeRecursive(node_tree,nodeType = "BSDF_PRINCIPLED"):
             yield from findNodeByTypeRecursive(node.node_tree,nodeType)
 
 def _prepareBakeImage(imageName, imageXRes, imageYRes, colorspace, useExistingBakes, BAKE_OUTPUT_DIR, FILE_EXT):
-	"""Load an existing bake or create/scale the bake target image.
+    """Load an existing bake or create/scale the bake target image.
 
-	Returns (img, skipBake) - skipBake is True when an existing bake was loaded.
-	"""
-	skipBake = False
-	bakePath = os.path.join(BAKE_OUTPUT_DIR,imageName+FILE_EXT)
-	if useExistingBakes and os.path.isfile(bakePath):
-		img = bpy.data.images.load(bakePath,check_existing = True)
-		img.name = imageName
-		print(f"\tLoaded existing bake for {imageName}")
-		skipBake = True
-	if imageName in bpy.data.images:
-		img = bpy.data.images[imageName]
-		img.scale(imageXRes,imageYRes)
-	else:
-		img = bpy.data.images.new(imageName,imageXRes,imageYRes)
-	img.colorspace_settings.name = colorspace
-	return img, skipBake
+    Returns (img, skipBake) - skipBake is True when an existing bake was loaded.
+    """
+    skipBake = False
+    bakePath = os.path.join(BAKE_OUTPUT_DIR,imageName+FILE_EXT)
+    if useExistingBakes and os.path.isfile(bakePath):
+        img = bpy.data.images.load(bakePath,check_existing = True)
+        img.name = imageName
+        print(f"\tLoaded existing bake for {imageName}")
+        skipBake = True
+    else:
+        if imageName in bpy.data.images:
+            img = bpy.data.images[imageName]
+            #Only rescale when the size actually differs - a same-size scale()
+            #still reallocates and resamples the whole image
+            if img.size[0] != imageXRes or img.size[1] != imageYRes:
+                img.scale(imageXRes,imageYRes)
+        else:
+            img = bpy.data.images.new(imageName,imageXRes,imageYRes)
+    img.colorspace_settings.name = colorspace
+    return img, skipBake
 
 def _bakeCore(rootNodes, img, nodePos, nodeName, bakeType, samples, adaptiveMin, bakeLabel,
               passDirect=None, passIndirect=None, passColor=None):
@@ -82,6 +86,10 @@ def _bakeCore(rootNodes, img, nodePos, nodeName, bakeType, samples, adaptiveMin,
 	textureNode.select = True
 	with stdout_redirected():
 		bpy.ops.object.bake(type = bakeType,save_mode = "INTERNAL")
+
+	#Remove the bake target node so repeated bakes don't accumulate dead nodes
+	#in the material tree (hundreds of leftovers after multi-material runs)
+	rootNodes.remove(textureNode)
 
 	print(f"\t{bakeLabel} bake took {int((time.time() - bakeStartTime)*1000)} ms.")
 

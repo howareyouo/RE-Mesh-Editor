@@ -1,12 +1,25 @@
 #Author: NSA Cloud
 import bpy
 import os
+import concurrent.futures
 from..gen_functions import raiseWarning,wildCardFileSearchList
 from .file_re_tex import getTexVersionFromGameName
 from .re_tex_utils import DDSToTex,convertTexFileToDDS
-from ..ddsconv.directx.texconv import Texconv, unload_texconv
+from ..ddsconv.directx.texconv import Texconv
 DELETE_DDS = True
 BLENDER_MAX_IMAGE_ARRAY_SIZE = 16#Blender can't handle much more mix nodes than this
+
+
+def _convertSingleDDSToTex(ddsPath, texVersion, outDir, createStreamingTex):
+	"""Convert a single DDS file to .tex inside a worker thread (GDeflate-heavy path)."""
+	baseName = os.path.splitext(os.path.split(ddsPath)[1])[0]
+	texPath = os.path.join(outDir,baseName)+f".tex.{str(texVersion)}"
+	print(str(texPath))
+	# The streaming tex holds the high resolution mips, the copy operator
+	# recognizes it by the #STREAMING marker and places it in the streaming folder
+	streamingOutPath = os.path.join(outDir,baseName+" #STREAMING")+f".tex.{str(texVersion)}" if createStreamingTex else None
+	DDSToTex([ddsPath],texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
+
 def loadTex(texPath,outputPath,texConv,reloadCachedTextures,useDDS):
 	ddsPath = os.path.splitext(outputPath)[0]+".dds"
 	if useDDS:
@@ -115,15 +128,15 @@ def convertTexDDSList (fileNameList,inDir,outDir,gameName,createStreamingTex = F
 		os.makedirs(outDir,exist_ok = True)
 		
 		#Single Texture Conversion
-		for ddsPath in ddsConversionList:
-			baseName = os.path.splitext(os.path.split(ddsPath)[1])[0]
-			texPath = os.path.join(outDir,baseName)+f".tex.{str(texVersion)}"
-			print(str(texPath))
-			# The streaming tex holds the high resolution mips, the copy operator
-			# recognizes it by the #STREAMING marker and places it in the streaming folder
-			streamingOutPath = os.path.join(outDir,baseName+" #STREAMING")+f".tex.{str(texVersion)}" if createStreamingTex else None
-			DDSToTex([ddsPath],texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
-			conversionCount += 1
+		with concurrent.futures.ThreadPoolExecutor(max_workers = min(4,os.cpu_count() or 1)) as executor:
+			futureToPath = {executor.submit(_convertSingleDDSToTex, ddsPath, texVersion, outDir, createStreamingTex): ddsPath for ddsPath in ddsConversionList}
+			for future in concurrent.futures.as_completed(futureToPath):
+				try:
+					future.result()
+					conversionCount += 1
+				except Exception as err:
+					print(f"Failed to convert {futureToPath[future]} - {err}")
+					failCount += 1
 
 
 		#Array Texture Conversion
@@ -161,5 +174,4 @@ def convertTexDDSList (fileNameList,inDir,outDir,gameName,createStreamingTex = F
 					os.remove(ddsPath)
 			except:
 				pass
-		unload_texconv()
 	return (conversionCount,failCount)

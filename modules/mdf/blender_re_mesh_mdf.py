@@ -6,7 +6,7 @@ import traceback
 import glob
 
 from mathutils import Vector
-from ..gen_functions import isLinux,resolveLinuxPath,fname
+from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
 
@@ -200,7 +200,7 @@ from ..game_versions import mdfVersionDict, texVersionDict
 from .file_re_mdf import readMDF,getMDFVersionToGameName
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
-from ..ddsconv.directx.texconv import Texconv, unload_texconv
+from ..ddsconv.directx.texconv import Texconv
 DEBUG_MODE = False
 def debugprint(string):
 	if DEBUG_MODE:
@@ -322,22 +322,50 @@ def findMDFPathFromMeshPath(meshPath,gameName = None):
 			
 	return mdfPath
 
+_dirListingCache = {}
+
+
+def _listTexDir(dirPath):
+	"""Cached directory listing; avoids re-enumerating the same dir per texture."""
+	entry = _dirListingCache.get(dirPath)
+	if entry is None:
+		try:
+			entry = frozenset(os.listdir(dirPath))
+		except OSError:
+			entry = frozenset()
+		if len(_dirListingCache) >= 512:  # simple memory guard
+			_dirListingCache.clear()
+		_dirListingCache[dirPath] = entry
+	return entry
+
+
 def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 	inputPath = None
 	texVersion = texVersionDict.get(mdfVersion,"")
+	exactName = baseTexturePath + f".tex{texVersion}"
+	exactLower = exactName.lower() if IS_WINDOWS else exactName
 	for chunkPath in chunkPathList:
-		inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath,"streaming",baseTexturePath+f".tex{texVersion}"))+"*")#Searches for texture even if the version is known because capcom can add platform or lang extensions
-		
-		if inputPath == None:
-			inputPath = wildCardFileSearch(glob.escape(os.path.join(chunkPath,baseTexturePath+f".tex{texVersion}"))+"*")
-		
+		#Fast path: exact file name via a single stat, no directory enumeration
+		for relDir in ("streaming",""):
+			exactPath = os.path.join(chunkPath,relDir,exactName)
+			if os.path.isfile(exactPath):
+				return exactPath
+		#Slow path: capcom can append platform/lang extensions - scan a cached directory listing once
+		for relDir in ("streaming",""):
+			dirPath = os.path.join(chunkPath,relDir)
+			for fname in _listTexDir(dirPath):
+				if (fname.lower() if IS_WINDOWS else fname).startswith(exactLower):
+					inputPath = os.path.join(dirPath,fname)
+					break
+			if inputPath != None:
+				break
 		if inputPath != None:
 			break
 		
 		if isLinux():
-			inputPath = resolveLinuxPath(os.path.join(chunkPath,"streaming",baseTexturePath+f".tex{texVersion}"))
+			inputPath = resolveLinuxPath(os.path.join(chunkPath,"streaming",exactName))
 			if inputPath == None:
-				inputPath = resolveLinuxPath(os.path.join(chunkPath,baseTexturePath+f".tex{texVersion}"))
+				inputPath = resolveLinuxPath(os.path.join(chunkPath,exactName))
 			if inputPath != None:
 				break
 				
@@ -385,6 +413,30 @@ def addLayerUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, tilingProp, off
 		offsetNode = addPropertyNode(matInfo["mPropDict"][offsetProp], matInfo["currentPropPos"], nodeTree)
 		nodeTree.links.new(offsetNode.outputs[0], groupNode.inputs["OffsetX"])
 		nodeTree.links.new(offsetNode.outputs[1], groupNode.inputs["OffsetY"])
+	return groupNode
+
+
+def wireDualUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, textureNode,
+                       useSecondaryUVProp, tilingProp=None, offsetProp=None):
+	"""Wire a dual-UV mapping group feeding textureNode's Vector input.
+	Shared by the LayerMaskOcclusionMap / DirtWearMap wirings (previously two
+	hand-rolled copies); optional tiling/offset props drive Tiling/Offset."""
+	groupNode = getDualUVMappingNodeGroup(nodeTree)
+	groupNode.location = textureNode.location + Vector((-300, 0))
+	setDualUVTilingDefault(groupNode)
+	nodeTree.links.new(UVMap1Node.outputs["UV"], groupNode.inputs["UV1"])
+	nodeTree.links.new(UVMap2Node.outputs["UV"], groupNode.inputs["UV2"])
+	if useSecondaryUVProp in matInfo["mPropDict"]:
+		useUV2Node = addPropertyNode(matInfo["mPropDict"][useSecondaryUVProp], matInfo["currentPropPos"], nodeTree)
+		nodeTree.links.new(useUV2Node.outputs["Value"], groupNode.inputs["UseSecondaryUV"])
+	if tilingProp is not None and tilingProp in matInfo["mPropDict"]:
+		tilingNode = addPropertyNode(matInfo["mPropDict"][tilingProp], matInfo["currentPropPos"], nodeTree)
+		nodeTree.links.new(tilingNode.outputs["Value"], groupNode.inputs["Tiling"])
+	if offsetProp is not None and offsetProp in matInfo["mPropDict"]:
+		offsetNode = addPropertyNode(matInfo["mPropDict"][offsetProp], matInfo["currentPropPos"], nodeTree)
+		nodeTree.links.new(offsetNode.outputs[0], groupNode.inputs["OffsetX"])
+		nodeTree.links.new(offsetNode.outputs[1], groupNode.inputs["OffsetY"])
+	nodeTree.links.new(groupNode.outputs["Vector"], textureNode.inputs["Vector"])
 	return groupNode
 
 
@@ -751,17 +803,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					links.new(LYMONode.outputs["Color"],LYMOSepNode.inputs["Color"])
 					matInfo["aoNodeLayerGroup"].addMixLayer(LYMONode.outputs["Alpha"],mixType = "MULTIPLY",mixFactor = 1.0)
 					
-					layerMaskUVMappingGroupNode =  getDualUVMappingNodeGroup(nodeTree)
-					layerMaskUVMappingGroupNode.location = LYMONode.location + Vector((-300,0))
-					
-					setDualUVTilingDefault(layerMaskUVMappingGroupNode)
-					nodeTree.links.new(UVMap1Node.outputs["UV"],layerMaskUVMappingGroupNode.inputs["UV1"])
-					nodeTree.links.new(UVMap2Node.outputs["UV"],layerMaskUVMappingGroupNode.inputs["UV2"])
-					if "LayerMask_Use_SecondaryUV" in matInfo["mPropDict"]:
-						layerMaskUV2Node = addPropertyNode(matInfo["mPropDict"]["LayerMask_Use_SecondaryUV"], matInfo["currentPropPos"], nodeTree)
-						links.new(layerMaskUV2Node.outputs["Value"],layerMaskUVMappingGroupNode.inputs["UseSecondaryUV"])
+					layerMaskUVMappingGroupNode = wireDualUVMapping(
+						matInfo, nodeTree, UVMap1Node, UVMap2Node, LYMONode,
+						"LayerMask_Use_SecondaryUV")
 					#
-					links.new(layerMaskUVMappingGroupNode.outputs["Vector"],LYMONode.inputs["Vector"])
 					if "BaseAlphaMap" in nodeTree.nodes:
 						#Use secondary uv on base alpha texture if it's enabled on the layer mask
 						#TODO Check this in game, there's a mesh that uses secondary uv but doesn't have base secondary uv flag enabled: "RE4_EXTRACT\re_chunk_000\natives\STM\_Chainsaw\Environment\sm\sm2X\sm21\sm21_515\sm21_515_00.mesh.221108797"
@@ -808,24 +853,11 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				if "DirtWearMap" in matInfo["textureNodeDict"]:
 					DirtWearNode = matInfo["textureNodeDict"]["DirtWearMap"]
 					
-					dirtMapUVMappingGroupNode = getDualUVMappingNodeGroup(nodeTree)
-					dirtMapUVMappingGroupNode.location = DirtWearNode.location + Vector((-300,0))
-					setDualUVTilingDefault(dirtMapUVMappingGroupNode)
-					nodeTree.links.new(UVMap1Node.outputs["UV"],dirtMapUVMappingGroupNode.inputs["UV1"])
-					nodeTree.links.new(UVMap2Node.outputs["UV"],dirtMapUVMappingGroupNode.inputs["UV2"])
-					if "DirtMap_Use_SecondaryUV" in matInfo["mPropDict"]:
-						dirtMapUV2Node = addPropertyNode(matInfo["mPropDict"]["DirtMap_Use_SecondaryUV"], matInfo["currentPropPos"], nodeTree)
-						links.new(dirtMapUV2Node.outputs["Value"],dirtMapUVMappingGroupNode.inputs["UseSecondaryUV"])
+					dirtMapUVMappingGroupNode = wireDualUVMapping(
+						matInfo, nodeTree, UVMap1Node, UVMap2Node, DirtWearNode,
+						"DirtMap_Use_SecondaryUV",
+						"DirtWearMap_Tiling", "DirtWearMap_Tiling_Offset")
 					#
-					if "DirtWearMap_Tiling" in matInfo["mPropDict"]:
-						DirtWearTiling = addPropertyNode(matInfo["mPropDict"]["DirtWearMap_Tiling"], matInfo["currentPropPos"], nodeTree)
-						links.new(DirtWearTiling.outputs["Value"],dirtMapUVMappingGroupNode.inputs["Tiling"])
-					if "DirtWearMap_Tiling_Offset" in matInfo["mPropDict"]:
-						DirtWearLocation = addPropertyNode(matInfo["mPropDict"]["DirtWearMap_Tiling_Offset"], matInfo["currentPropPos"], nodeTree)
-						links.new(DirtWearLocation.outputs[0],dirtMapUVMappingGroupNode.inputs["OffsetX"])
-						links.new(DirtWearLocation.outputs[1],dirtMapUVMappingGroupNode.inputs["OffsetY"])
-						
-					links.new(dirtMapUVMappingGroupNode.outputs["Vector"],DirtWearNode.inputs["Vector"])
 					
 					DirtWearBrightContrastNode = nodes.new("ShaderNodeBrightContrast")
 					DirtWearBrightContrastNode.location = DirtWearNode.location + Vector((300,0))
@@ -1556,7 +1588,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 	
 	errorFileSet.clear()
 	loadedImageDict.clear()
-	unload_texconv()
+	#Note: the texconv DLL stays loaded (its module-level cache makes Texconv()
+	#cheap); unloading it here forced a reload on every subsequent import.
 	if inErrorState:
 		showErrorMessageBox("An error occurred while importing materials. See the Window > Toggle System Console for details.")
 	else:

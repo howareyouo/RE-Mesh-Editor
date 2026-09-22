@@ -263,8 +263,17 @@ class Texconv:
                        image_filter="LINEAR",
                        export_as_cubemap=False,
                        cubemap_layout="h-cross",
-                       verbose=True, allow_slow_codec=False):
-        """Convert texture to dds."""
+                       verbose=True, allow_slow_codec=False,
+                       init_com=False, single_proc=False):
+        """Convert texture to dds.
+
+        init_com: pass True when calling from a non-main Python thread so the DLL
+            initializes MTA COM on THAT thread (COM is per-thread; WIC needs it).
+            Default False preserves the historical single-threaded behavior.
+        single_proc: append --single-proc so the DLL's internal OpenMP BC
+            compression runs single-threaded. Use this when running several
+            conversions in parallel to avoid N-workers x N-threads oversubscription.
+        """
         if self.dll is None:
             raise RuntimeError("texconv is unloaded.")
 
@@ -293,6 +302,10 @@ class Texconv:
             args += ['-m', '1']
         if image_filter != "LINEAR":
             args += ["-if", image_filter]
+        if single_proc:
+            # See docstring; harmless (accepted option) even when the DLL was
+            # built without OpenMP
+            args += ['--single-proc']
 
         if is_signed(dds_fmt):
             args += ['-x2bias']
@@ -314,14 +327,20 @@ class Texconv:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_dds = os.path.join(temp_dir, base_name)
                 self.__image_to_cube(file, temp_dds, temp_args, cubemap_layout=cubemap_layout, verbose=verbose)
-                out = self.__texconv(temp_dds, args, out=out, verbose=verbose, allow_slow_codec=allow_slow_codec)
+                out = self.__texconv(temp_dds, args, out=out, verbose=verbose, allow_slow_codec=allow_slow_codec, init_com=init_com)
         else:
-            out = self.__texconv(file, args, out=out, verbose=verbose, allow_slow_codec=allow_slow_codec)
+            out = self.__texconv(file, args, out=out, verbose=verbose, allow_slow_codec=allow_slow_codec, init_com=init_com)
         name = os.path.join(out, base_name)
         return name
 
-    def __texconv(self, file, args, out=None, verbose=True, allow_slow_codec=False):
-        """Run texconv."""
+    def __texconv(self, file, args, out=None, verbose=True, allow_slow_codec=False, init_com=False):
+        """Run texconv.
+
+        init_com: see convert_to_dds. The DLL's 4th parameter runs
+        CoInitializeEx(COINIT_MULTITHREADED)/CoUninitialize around the call on
+        the CALLING thread (source: TexconvDLL/texconv.cpp entry point); it
+        correctly tolerates an already-STA thread (RPC_E_CHANGED_MODE).
+        """
         if out is not None and isinstance(out, str):
             args += ['-o', out]
         else:
@@ -336,7 +355,7 @@ class Texconv:
         args_p = (ctypes.c_wchar_p*len(args_p))(*args_p)
 		
         err_buf = ctypes.create_unicode_buffer(512)
-        result = self.dll.texconv(len(args), args_p, verbose, False, allow_slow_codec, err_buf, 512)
+        result = self.dll.texconv(len(args), args_p, verbose, init_com, allow_slow_codec, err_buf, 512)
         if result != 0:
             raise RuntimeError(err_buf.value)
 

@@ -18,13 +18,10 @@ from .texturepacker.texture_bake import bakeMaterialMaps
 from .texturepacker.texture_pack import packTextures
 from .texturepacker.re_texture_analysis import analyzeMaterial,analyzePreset
 from .texturepacker.image_utils import generatePlaceholderMaps
-from ..blender_utils import showMessageBox, findMDFCollectionForMesh
+from ..blender_utils import showMessageBox, findMDFCollectionForMesh, getAddonPreferences
 
 FILE_FORMAT = "TARGA"#Only viable option for all softwares, png is annoying to open in photoshop, tiff conversion doesn't work on linux, only problem is tga files are big
 FILE_EXT = ".tga"
-
-STANDARD_SAMPLES = 1
-AO_SAMPLES = 1024
 
 
 def does_region_exist(region):
@@ -404,13 +401,22 @@ def setCollectionVisibility(collectionName,hide):
         layerCollection.hide_viewport = hide
 
 def iterModFiles(watchDir, extensionBlackList):
-	"""Yield (filePath, relPath) for every file under watchDir whose name does not
-	match any extension in the blacklist. Shared by tracker/copy/uninstall loops."""
-	for root, _, files in os.walk(watchDir):
-		for file in files:
-			if not any(ext in file.lower() for ext in extensionBlackList):
-				filePath = os.path.join(root, file)
-				yield filePath, os.path.relpath(filePath, start=watchDir)
+	"""Yield (filePath, relPath, mtime) for every file under watchDir whose name does not
+	match any extension in the blacklist. Shared by tracker/copy/uninstall loops.
+	mtime comes from the scandir entry (cached on Windows, no extra syscalls)."""
+	def _scan(dirPath):
+		with os.scandir(dirPath) as scan:
+			for entry in scan:
+				if entry.is_dir(follow_symlinks=False):
+					yield from _scan(entry.path)
+				elif entry.is_file(follow_symlinks=False):
+					if not any(ext in entry.name.lower() for ext in extensionBlackList):
+						try:
+							mtime = entry.stat(follow_symlinks=False).st_mtime
+						except OSError:
+							mtime = None
+						yield entry.path, os.path.relpath(entry.path, start=watchDir), mtime
+	yield from _scan(watchDir)
 
 def safeCopyFile(filePath, outPath):
 	"""Copy a file, creating its parent directory first. Raises on failure."""
@@ -428,12 +434,41 @@ def copyTrackedFile(filePath, outPath):
 		print(f"Failed to copy {filePath} - {e}")
 
 def getFileCRC(filePath):
-	size = 1024*1024*10  # 10 MiB chunks
-	with open(filePath, 'rb') as f:
-	    crcval = 0
-	    while chunk := f.read(size):
-	        crcval = crc32(chunk, crcval)
-	return crcval
+    size = 1024*1024*10  # 10 MiB chunks
+    with open(filePath, 'rb') as f:
+        crcval = 0
+        while chunk := f.read(size):
+            crcval = crc32(chunk, crcval)
+    return crcval
+
+#Records the (mtime, size) of the source pak at the moment its destination was
+#verified/copied; lets repeat copies skip the full GB-scale CRC read.
+_pakSyncCache = {}
+
+def iterPakFiles(pakDir, pakOutDir):
+	"""Yield (filePath, outPath, name) for every .pak in pakDir. Shared by the
+	tracker/copy/uninstall pak loops (previously three near-identical blocks)."""
+	for entry in os.scandir(pakDir):
+		if entry.name.endswith(".pak"):
+			yield entry.path, os.path.join(pakOutDir, entry.name), entry.name
+
+def _pakNeedsCopy(filePath, outPath):
+	"""Decide whether a pak needs copying. (mtime,size) of the source acts as a
+	cheap change detector - the full CRC comparison only runs when it changed."""
+	srcStat = os.stat(filePath)
+	srcKey = (srcStat.st_mtime, srcStat.st_size)
+	if _pakSyncCache.get(outPath) == srcKey:
+		return False  #Source unchanged since the last verified copy
+	if not os.path.isfile(outPath):
+		return True
+	needsCopy = getFileCRC(filePath) != getFileCRC(outPath)
+	if not needsCopy:
+		_pakSyncCache[outPath] = srcKey  #Remember the sync state to skip future CRCs
+	return needsCopy
+
+def _markPakCopied(filePath, outPath):
+	srcStat = os.stat(filePath)
+	_pakSyncCache[outPath] = (srcStat.st_mtime, srcStat.st_size)
 
 class WM_OT_ConvertToREEngine(Operator):
 	bl_label = "Convert Model to RE Engine"
@@ -757,16 +792,11 @@ class WM_OT_ConvertToREEngine(Operator):
 			for index, bakeObjName in enumerate(newObjNameList):
 				bakeObj = bpy.data.objects[bakeObjName]
 				bakeObj.hide_render = False
-				bpy.ops.object.select_all(action='DESELECT')
-				bakeObj.select_set(True)
-				
-				bpy.context.view_layer.objects.active = bakeObj
+				#Selection/active state is maintained inside bakeMaterialMaps, so no bpy.ops.object.select_all per object
 				
 				#Clear existing uvs from normal bake
-				uvIndex = len(normalBakeObj.data.uv_layers) - 1
-				for uv in reversed(normalBakeObj.data.uv_layers):
-					obj.data.uv_layers.remove(normalBakeObj.data.uv_layers[uvIndex])
-					uvIndex -= 1
+				while len(normalBakeObj.data.uv_layers):
+					normalBakeObj.data.uv_layers.remove(normalBakeObj.data.uv_layers[0])
 				
 				#Copy uv map names from bake object to normal bake obj
 				for i in range(0,len(bakeObj.data.uv_layers)):
@@ -848,11 +878,13 @@ class WM_OT_ConvertToREEngine(Operator):
 				for collection in obj.users_collection:
 					   collection.objects.unlink(obj)
 				meshCollection.objects.link(obj)
-				bpy.context.view_layer.objects.active = obj
-				#Split each object by material
-				bpy.ops.object.mode_set(mode='EDIT')
-				bpy.ops.mesh.separate(type='MATERIAL')
-				bpy.ops.object.mode_set(mode='OBJECT')
+				#Only split by material when there's more than one - skips 3 full-scene ops per single-material object
+				if len(obj.data.materials) > 1:
+					bpy.context.view_layer.objects.active = obj
+					#Split each object by material
+					bpy.ops.object.mode_set(mode='EDIT')
+					bpy.ops.mesh.separate(type='MATERIAL')
+					bpy.ops.object.mode_set(mode='OBJECT')
 			newObjNameSet = set([obj.name for obj in bpy.data.objects])
 			#print("new objects: " + str(newObjNameSet.difference(oldObjNameSet)))
 			newObjNameList.extend(list(newObjNameSet.difference(oldObjNameSet)))#Get names of new objects created by material splitting if there are any
@@ -925,14 +957,11 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 				print(f"Watching: {self.watchDir}")
 				self.outDir = os.path.split(exePath)[0]
 				print(f"Copying Changes To: {self.outDir}")
-				#Get polling rate from preferences
-				pollingRate = 5#5 seconds
-				for addon in bpy.context.preferences.addons:
-				   #print(addon)
-				   if "RE-Mesh-Editor" in addon.module:
-					   preferencesName = addon.module
-					   pollingRate = bpy.context.preferences.addons[addon.module].preferences.modFileTrackingPollingRate
-					   break
+			#Get polling rate from preferences
+			pollingRate = 5#5 seconds
+			preferences = getAddonPreferences()
+			if preferences is not None:
+				pollingRate = preferences.modFileTrackingPollingRate
 				if os.path.isdir(self.watchDir) and os.path.isdir(self.outDir):
 					self._timer = wm.event_timer_add(pollingRate, window=context.window)
 					wm.modal_handler_add(self)
@@ -956,18 +985,18 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 			#Format as HH:MM:SS
 			currentTime = now.strftime("%H:%M:%S")
 			trackedFileCount = 0
-			for filePath, relPath in iterModFiles(self.watchDir, self.extensionBlackList):
+			for filePath, relPath, mtime in iterModFiles(self.watchDir, self.extensionBlackList):
 					trackedFileCount += 1
+					if mtime is None:
+						continue  #File vanished between the scan and the stat
 					if filePath not in self.filePathDict:
 						print(f"Mod File Tracker: [{currentTime}] New File - {relPath}")
-						self.filePathDict[filePath] = os.stat(filePath).st_mtime
+						self.filePathDict[filePath] = mtime
 						copyTrackedFile(filePath, os.path.join(self.outDir,relPath))
-					else:
-						st_mtime = os.stat(filePath).st_mtime
-						if st_mtime != self.filePathDict[filePath]:
-							self.filePathDict[filePath] = st_mtime
-							print(f"Mod File Tracker: [{currentTime}] File Modified - {relPath}")
-							copyTrackedFile(filePath, os.path.join(self.outDir,relPath))
+					elif mtime != self.filePathDict[filePath]:
+						self.filePathDict[filePath] = mtime
+						print(f"Mod File Tracker: [{currentTime}] File Modified - {relPath}")
+						copyTrackedFile(filePath, os.path.join(self.outDir,relPath))
 					
 			if trackedFileCount != len(self.filePathDict):
 				#Find which files were deleted, remove them from the game directory and path dict
@@ -986,20 +1015,19 @@ class WM_OT_ToggleModFileTracking(bpy.types.Operator):
 			if not self.allowTexCopy:
 				#If it's a game that uses direct storage, paks have to be used
 				#Check for paks in the mod output directory and copy them into the pak_mods directory in the game folder. This only works for direct storage games so paks won't be copied on older games
-				for entry in os.scandir(self.watchDirPak):
-					if entry.name.endswith(".pak"):
-						filePath = os.path.join(self.watchDirPak, entry.name)
-						outPath = os.path.join(self.outDir,"pak_mods",entry.name)
-						if filePath not in self.pakPathDict:
-							print(f"Mod File Tracker: [{currentTime}] New Pak File - {entry.name}")
-							self.pakPathDict[filePath] = os.stat(filePath).st_mtime
-							copyTrackedFile(filePath, outPath)
-						else:
-							st_mtime = os.stat(filePath).st_mtime
-							if st_mtime != self.pakPathDict[filePath]:
-								self.pakPathDict[filePath] = st_mtime
-								print(f"Mod File Tracker: [{currentTime}] Pak File Modified - {entry.name}")
-								copyTrackedFile(filePath, outPath)
+				for filePath, outPath, pakName in iterPakFiles(self.watchDirPak, os.path.join(self.outDir,"pak_mods")):
+					try:
+						mtime = os.stat(filePath).st_mtime
+					except OSError:
+						continue
+					if filePath not in self.pakPathDict:
+						print(f"Mod File Tracker: [{currentTime}] New Pak File - {pakName}")
+						self.pakPathDict[filePath] = mtime
+						copyTrackedFile(filePath, outPath)
+					elif mtime != self.pakPathDict[filePath]:
+						self.pakPathDict[filePath] = mtime
+						print(f"Mod File Tracker: [{currentTime}] Pak File Modified - {pakName}")
+						copyTrackedFile(filePath, outPath)
 		return {'PASS_THROUGH'}
 
 	def cancel(self, context):
@@ -1034,7 +1062,7 @@ class WM_OT_CopyModFilesToGameDir(Operator):
 				print(f"Copying To: {outDir}")
 				allowTexCopy = bpy.context.scene["modWorkspace_allowTexCopy"]
 				extensionBlackList = FILE_BLACKLIST if allowTexCopy else FILE_BLACKLIST_NO_TEX
-				for filePath, relPath in iterModFiles(inDir, extensionBlackList):
+				for filePath, relPath, _mtime in iterModFiles(inDir, extensionBlackList):
 						fileCount += 1
 						print(f"Copying: {relPath}")
 						try:
@@ -1048,31 +1076,22 @@ class WM_OT_CopyModFilesToGameDir(Operator):
 					pakOutDir = os.path.join(os.path.split(exePath)[0],"pak_mods")
 					#If it's a game that uses direct storage, paks have to be used
 					#Check for paks in the mod output directory and copy them into the pak_mods directory in the game folder. This only works for direct storage games so paks won't be copied on older games
-					for entry in os.scandir(pakDir):
-						if entry.name.endswith(".pak"):
+					for filePath, outPath, pakName in iterPakFiles(pakDir, pakOutDir):
+						if _pakNeedsCopy(filePath, outPath):
+							fileCount += 1
 							
-							filePath = os.path.join(pakDir, entry.name)
-							
-							outPath = os.path.join(pakOutDir,entry.name)
-							localPakCRC = getFileCRC(filePath)
-							if os.path.isfile(outPath):
-								remotePakCRC = getFileCRC(outPath)
-							else:
-								remotePakCRC = 0
-							if localPakCRC != remotePakCRC:
-								fileCount += 1
-									
-								try:
-									print(f"Copying: {entry.name} to {pakOutDir}")
-									safeCopyFile(filePath,outPath)
-									copyCount += 1
-								except PermissionError as e:
-									pakCopyFailed = True
-									print(f"Permission Error - Failed to copy {filePath}\nMake sure the game isn't running when copying pak files.")
-								except Exception as e:
-									print(f"Failed to copy {filePath} - {e}")
-							else:
-								print(f"{entry.name} is unchanged, skipping copy.")
+							try:
+								print(f"Copying: {pakName} to {pakOutDir}")
+								safeCopyFile(filePath,outPath)
+								_markPakCopied(filePath, outPath)
+								copyCount += 1
+							except PermissionError as e:
+								pakCopyFailed = True
+								print(f"Permission Error - Failed to copy {filePath}\nMake sure the game isn't running when copying pak files.")
+							except Exception as e:
+								print(f"Failed to copy {filePath} - {e}")
+						else:
+							print(f"{pakName} is unchanged, skipping copy.")
 									
 			self.report({"INFO"},f"Copied {copyCount} / {fileCount} files." + (" Pak file was not copied, make sure the game isn't running." if pakCopyFailed else ""))
 		return {'FINISHED'}
@@ -1106,7 +1125,7 @@ class WM_OT_UninstallModFilesFromGameDir(Operator):
 			allowTexCopy = bpy.context.scene["modWorkspace_allowTexCopy"]
 			extensionBlackList = FILE_BLACKLIST if allowTexCopy else FILE_BLACKLIST_NO_TEX
 			
-			for filePath, relPath in iterModFiles(inDir, extensionBlackList):
+			for filePath, relPath, _mtime in iterModFiles(inDir, extensionBlackList):
 					outPath = os.path.join(outDir,relPath)
 					try:
 						#print(outPath)
@@ -1122,22 +1141,19 @@ class WM_OT_UninstallModFilesFromGameDir(Operator):
 				pakOutDir = os.path.join(os.path.split(exePath)[0],"pak_mods")
 				#If it's a game that uses direct storage, paks have to be used
 				#Check for paks in the mod output directory and copy them into the pak_mods directory in the game folder. This only works for direct storage games so paks won't be copied on older games
-				for entry in os.scandir(pakDir):
-					if entry.name.endswith(".pak"):
-						filePath = os.path.join(pakDir, entry.name)
-						outPath = os.path.join(pakOutDir,entry.name)
-						try:
-							outPath = os.path.join(pakOutDir,entry.name)
-							if os.path.isfile(outPath):
-								fileCount += 1
-								os.remove(outPath)
-								deleteCount += 1
-						except PermissionError as e:
-							pakDeleteFailed = True
-							print(f"Permission Error - Failed to delete {outPath}\nMake sure the game isn't running when deleting pak files.")
-						except Exception as e:
-							pakDeleteFailed = True
-							print(f"Failed to delete {outPath} - {e}")
+				for filePath, outPath, _pakName in iterPakFiles(pakDir, pakOutDir):
+					try:
+						if os.path.isfile(outPath):
+							fileCount += 1
+							os.remove(outPath)
+							deleteCount += 1
+					except PermissionError as e:
+						pakDeleteFailed = True
+						print(f"Permission Error - Failed to delete {outPath}\nMake sure the game isn't running when deleting pak files.")
+					except Exception as e:
+						pakDeleteFailed = True
+						print(f"Failed to delete {outPath} - {e}")
+				_pakSyncCache.pop(outPath, None)
 			self.report({"INFO"},f"Deleted {deleteCount} / {fileCount} files."  + (" Pak file was not deleted, make sure the game isn't running." if pakDeleteFailed else ""))
 		return {'FINISHED'}
 

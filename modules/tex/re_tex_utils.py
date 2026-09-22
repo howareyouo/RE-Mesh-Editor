@@ -5,24 +5,27 @@ from ..dds.file_dds import DDS, DX10_Header, DDSFile, getDDSHeader
 from .file_re_tex import RE_TexFile, MipData, CompressedImageHeader,GDEFLATE_VERSIONS
 from ..gen_functions import raiseWarning
 from ..gdeflate.gdeflate import GDeflate, GDeflateCompressionLevel, GDeflateError
-from ..ddsconv.directx.texconv import Texconv, unload_texconv
+from ..ddsconv.directx.texconv import Texconv
 from .enums import tex_format_enum as texenum
 from .enums import dxgi_format_enum as dxgienum
 from .enums.dds_bpps import ddsBpps
 from . import tex_math as tmath
 from . import format_ops
 import os
+import threading
+import concurrent.futures
 import numpy as np
 
-# Reuse a single GDeflate instance for compression (stateless, safe to share);
-# loading the wrapper DLL once avoids reloading it per tex file export.
-_gdeflateCompressor = None
+# One GDeflate instance per thread so concurrent texture packing (from the
+# parallel DDSToTex conversion path) never shares ctypes wrapper state.
+_gdeflateThreadLocal = threading.local()
 
 def _getGDeflateCompressor():
-    global _gdeflateCompressor
-    if _gdeflateCompressor is None:
-        _gdeflateCompressor = GDeflate()
-    return _gdeflateCompressor
+    compressor = getattr(_gdeflateThreadLocal, 'compressor', None)
+    if compressor is None:
+        compressor = GDeflate()
+        _gdeflateThreadLocal.compressor = compressor
+    return compressor
 
 def TexToDDS(tex, imageIndex):
     """ Generates a DDS file from the 'imageIndex'th image in the tex file"""
@@ -355,7 +358,6 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
                     print(f"Fixing mip count on {os.path.split(fixPath)[1]}")
                     texConv.fix_mip_count(fixPath, os.path.split(
                         fixPath)[0], baseHeader.dwMipMapCount)
-                unload_texconv()
 
             ddsList = []
             for ddsPath in ddsPathList:
@@ -370,18 +372,60 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
                 texFile.write(outPath)
 
 def ImageListToDDS(imageConvertList,outDir,generateMipMaps):
-
+    # PARALLEL texconv.dll CONVERSION - safety notes (2026-09 audit, DLL v0.6.0 era)
+    # -------------------------------------------------------------------------
+    # Why this is considered safe (source audit of TexconvDLL/texconv.cpp + GitHub
+    # issues #10/#20; bundled DLL verified: exports init_com/uninit_com, no s_tryonce):
+    #   - the historic cross-call GPU state bug (static bool s_tryonce, issue #20)
+    #     was fixed in v0.5.0; remaining mutable statics are two idempotent lazy
+    #     function pointers (harmless) and GetErrorDesc's 1024-byte buffer (worst
+    #     case: garbled error TEXT when two threads fail simultaneously, no crash)
+    #   - WIC factory singleton is created under InitOnceExecuteOnce (thread-safe)
+    #   - D3D11 GPU device is created and destroyed per call (no shared GPU state)
+    #
+    # Rules obeyed below (required for correctness):
+    #   1. init_com=True  -> each worker thread initializes MTA COM on ITSELF
+    #      (COM is per-thread; WIC needs it; DLL tolerates RPC_E_CHANGED_MODE)
+    #   2. --single-proc  -> disables the DLL's internal OpenMP BC compression so
+    #      N workers == N busy cores instead of N x cpu_count oversubscription
+    #   3. verbose=False  -> avoids interleaved stdout from concurrent calls
+    #      (errors still surface: each call has its own err_buf, raised as
+    #      RuntimeError with the file path in the message below)
+    #   4. every call builds its own argv/err_buf (thread-local by construction)
+    #
+    # IF THIS EVER MISBEHAVES (crash/garbled output):
+    #   - quick rollback without reverting code: set maxWorkers to 1 below
+    #   - full rollback: replace the ThreadPoolExecutor block with the old loop:
+    #         for inPath, ddsFormat in imageConvertList:
+    #             try: texConv.convert_to_dds(file=inPath, dds_fmt=ddsFormat,
+    #                  out=outDir, no_mip=not generateMipMaps, verbose=True)
+    #             except Exception as err: print(f"Failed to convert {inPath} - {err}")
+    #   - single file diagnosis: run the same convert_to_dds call with
+    #     init_com=False/single_proc=False/verbose=True on the main thread
+    # -------------------------------------------------------------------------
+    if not imageConvertList:
+        return
     texConv = Texconv()
-	#Tuple containing image path, dds format
-    for inPath,ddsFormat in imageConvertList:
-        try:
-	        texConv.convert_to_dds(
-				file = inPath,
-				dds_fmt = ddsFormat,
-				out = outDir,
-				no_mip = not generateMipMaps,
-				verbose = True
-	        )
-        except Exception as err:
-            print(f"Failed to convert {inPath} - {err}")
-    unload_texconv()
+    maxWorkers = min(8, os.cpu_count() or 1)  # set to 1 to serialize (quick rollback)
+
+    def _convertOne(inPath, ddsFormat):
+        texConv.convert_to_dds(
+            file = inPath,
+            dds_fmt = ddsFormat,
+            out = outDir,
+            no_mip = not generateMipMaps,
+            verbose = False,
+            init_com = True,
+            single_proc = True,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers = maxWorkers) as executor:
+        futureToPath = {executor.submit(_convertOne, inPath, ddsFormat): inPath
+                        for inPath, ddsFormat in imageConvertList}
+        for future in concurrent.futures.as_completed(futureToPath):
+            inPath = futureToPath[future]
+            try:
+                future.result()
+            except Exception as err:
+                print(f"Failed to convert {inPath} - {err}")
+    #DLL stays loaded for the next conversion batch (Texconv() is cheap via the module cache)

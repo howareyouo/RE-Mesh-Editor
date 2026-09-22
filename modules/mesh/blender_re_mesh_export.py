@@ -250,6 +250,11 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 		shapekey_set = shapeKeyGroupIndices
 		min_w = MIN_WEIGHT
 		secondary = hasSecondaryWeight
+		#Precompute per-group name facts once instead of per vertex: the same few
+		#groups are visited by nearly every vertex, so startswith/slicing per
+		#vertex is wasted work (500k verts x 8 groups = millions of string ops)
+		bare_name_list = [n[9:] if n.startswith("SHAPEKEY_") else n for n in vg_name_list]
+		is_shapekey_list = [n.startswith("SHAPEKEY_") for n in vg_name_list]
 		# Only the unique verts are actually processed; their positions are read
 		# directly from the float32 vert_positions array when building the bone bbox.
 		# Resolve UV-rebuild remap ONCE outside the loop: when UV solve split
@@ -269,10 +274,9 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 				gidx = g.group
 				if gidx >= vertexGroupCount:
 					continue
-				rawN = vg_name_list[gidx]
-				used_names.add(rawN[9:] if rawN.startswith("SHAPEKEY_") else rawN)
-				if not rawN.startswith("SHAPEKEY_") and rawN not in armatureBoneNameSet:
-					invalidBoneGroupSet.add(rawN)
+				used_names.add(bare_name_list[gidx])
+				if not is_shapekey_list[gidx] and vg_name_list[gidx] not in armatureBoneNameSet:
+					invalidBoneGroupSet.add(vg_name_list[gidx])
 				if secondary and gidx in shapekey_set:
 					sec.append((gidx, g.weight))
 				elif g.weight >= min_w:
@@ -653,25 +657,25 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 					parsedMesh.bufferHasSecondaryWeight = True
 
 				parsedMesh.bufferHasPosition = True
-				parsedSubMesh.vertexPosList = np.zeros((len(evaluatedSubMeshData.vertices), 3))
+				parsedSubMesh.vertexPosList = np.zeros((len(evaluatedSubMeshData.vertices), 3), dtype=np.float32)
 				parsedMesh.bufferHasNorTan = True
-				parsedSubMesh.normalList = np.zeros((len(evaluatedSubMeshData.vertices), 3))
+				parsedSubMesh.normalList = np.zeros((len(evaluatedSubMeshData.vertices), 3), dtype=np.float32)
 				parsedSubMesh.tangentList = np.zeros((len(evaluatedSubMeshData.vertices), 4), dtype="<B")
 				if armatureObj:
 					parsedMesh.bufferHasWeight = True
-					parsedSubMesh.weightList = np.zeros((len(evaluatedSubMeshData.vertices), 8))
+					parsedSubMesh.weightList = np.zeros((len(evaluatedSubMeshData.vertices), 8), dtype=np.float32)
 					parsedSubMesh.weightIndicesList = np.zeros((len(evaluatedSubMeshData.vertices), 8),
 					                                           dtype="<H")  # ushort because of SF6
 					# In case weights exceed standard maximum
-					parsedSubMesh.extraWeightList = np.zeros((len(evaluatedSubMeshData.vertices), 8))
+					parsedSubMesh.extraWeightList = np.zeros((len(evaluatedSubMeshData.vertices), 8), dtype=np.float32)
 					parsedSubMesh.extraWeightIndicesList = np.zeros((len(evaluatedSubMeshData.vertices), 8),
 					                                                dtype="<H")  # ushort because of SF6
 					if parsedMesh.bufferHasSecondaryWeight:
-						parsedSubMesh.secondaryWeightList = np.zeros((len(evaluatedSubMeshData.vertices), 8))
+						parsedSubMesh.secondaryWeightList = np.zeros((len(evaluatedSubMeshData.vertices), 8), dtype=np.float32)
 						parsedSubMesh.secondaryWeightIndicesList = np.zeros(
 							(len(evaluatedSubMeshData.vertices), 8), dtype="<H")  # ushort because of SF6
 				if len(evaluatedSubMeshData.uv_layers) > 0 and len(evaluatedSubMeshData.uv_layers[0].data) > 0:
-					parsedSubMesh.uvList = np.zeros((len(evaluatedSubMeshData.vertices), 2))
+					parsedSubMesh.uvList = np.zeros((len(evaluatedSubMeshData.vertices), 2), dtype=np.float32)
 					meshHasUV = True
 					parsedMesh.bufferHasUV = True
 				else:
@@ -679,14 +683,14 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 					addErrorToDict(errorDict, "NoUVMapOnSubMesh", rawsubmesh.name)
 				if len(evaluatedSubMeshData.uv_layers) > 1 and len(evaluatedSubMeshData.uv_layers[1].data) > 0:
 					meshHasUV2 = True
-					parsedSubMesh.uv2List = np.zeros((len(evaluatedSubMeshData.vertices), 2))
+					parsedSubMesh.uv2List = np.zeros((len(evaluatedSubMeshData.vertices), 2), dtype=np.float32)
 					parsedMesh.bufferHasUV2 = True
 				else:
 					parsedSubMesh.uv2List = None
 					meshHasUV2 = False
 				if len(evaluatedSubMeshData.vertex_colors) > 0 and len(
 						evaluatedSubMeshData.vertex_colors[0].data) > 0:
-					parsedSubMesh.colorList = np.zeros((len(evaluatedSubMeshData.vertices), 4))
+					parsedSubMesh.colorList = np.zeros((len(evaluatedSubMeshData.vertices), 4), dtype=np.float32)
 					meshHasColor = True
 					parsedMesh.bufferHasColor = True
 				else:
