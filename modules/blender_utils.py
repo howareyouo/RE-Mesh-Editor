@@ -139,6 +139,17 @@ def getMDFMaterialNames(mdfCollection):
 	object-name-wins resolution as the MDF writer, so it agrees with the exported file."""
 	return set(getMDFMaterialName(obj) for obj in iterMDFMaterialObjects(mdfCollection))
 
+def setMDFMaterialName(materialObj, newName):
+	"""Set an MDF material's materialName, skipping no-op writes.
+
+	The property's update callback rewrites the "Material NN (name)" object name,
+	so this is the single write path for programmatic renames (Rename Meshes,
+	Reindex Materials). Returns True when the name actually changed."""
+	if newName == materialObj.re_mdf_material.materialName:
+		return False
+	materialObj.re_mdf_material.materialName = newName
+	return True
+
 def iterMeshLODCollections(meshCollection, exportAllLODs = True):
 	"""Return the collections the mesh exporter processes, in export order.
 

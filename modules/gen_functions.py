@@ -567,3 +567,16 @@ def capitalizeREMaterialName(name):
 	already-capitalized names pass through unchanged.
 	"""
 	return re.sub(r"(^|[^A-Za-z])([a-z])", lambda match: match.group(1) + match.group(2).upper(), name)
+
+
+def normalizeREMaterialName(name, stripSuffix = True):
+	"""Canonicalize a material name for RE mesh/MDF naming.
+
+	Optionally strips a trailing "_Mat" suffix (case-insensitive) and then
+	capitalizes the first letter of every word. The single source for the name
+	rule shared by the Rename Meshes operator and reindexMaterials, so both
+	buttons converge on the same name; idempotent, so already-normalized names
+	pass through unchanged."""
+	if stripSuffix:
+		name = stripREMatSuffix(name)
+	return capitalizeREMaterialName(name)

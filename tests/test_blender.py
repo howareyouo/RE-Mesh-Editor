@@ -956,7 +956,10 @@ def test_import_meshbuffer_numpy():
 def test_rename_meshes_syncs_mdf_materials(tmpDir):
     """The RE engine requires the mesh name suffix (after the Group_/Sub_ prefix)
     to match the MDF material name one-to-one, so renaming meshes must also rename
-    the matching MDF materials."""
+    the matching MDF materials. The rename ends with a reindex of the affected MDF
+    collection (stripSuffix = False), aligning the result with the "Reindex
+    Materials" operator: names normalized and NN indices following the alphabetical
+    order of the normalized names."""
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
     for col in list(bpy.data.collections):
@@ -997,9 +1000,12 @@ def test_rename_meshes_syncs_mdf_materials(tmpDir):
     check("mesh renamed with new suffix", obj.name == "Group_0_Sub_0__Shirts", obj.name)
     check("MDF material renamed to match new suffix",
           matObj.re_mdf_material.materialName == "Shirts", matObj.re_mdf_material.materialName)
-    check("MDF material object name updated", matObj.name == "Material 00 (Shirts)", matObj.name)
+    # The closing reindex numbers entries alphabetically by normalized name:
+    # "othermat" sorts before "shirts".
+    check("MDF material object name updated", matObj.name == "Material 01 (Shirts)", matObj.name)
     check("unrelated MDF material untouched",
           otherObj.re_mdf_material.materialName == "OtherMat")
+    check("unrelated MDF material reindexed", otherObj.name == "Material 00 (OtherMat)", otherObj.name)
 
     # Fallback: mesh not linked to a mesh collection still renames scene MDF materials
     for obj in list(bpy.data.objects):

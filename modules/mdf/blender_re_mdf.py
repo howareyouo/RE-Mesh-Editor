@@ -2,11 +2,11 @@ import os
 import bpy
 
 from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
-	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, iterExportableMeshObjects, getMDFMaterialName,
+	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, iterExportableMeshObjects, getMDFMaterialName, setMDFMaterialName,
 	normalizeMaterialNameFilter,
 	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,capitalizeREMaterialName,stripREMatSuffix,getREMeshMaterialName,formatREMaterialObjectName,ENABLE_EXPORT_WARNINGS
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,normalizeREMaterialName,getREMeshMaterialName,formatREMaterialObjectName,ENABLE_EXPORT_WARNINGS
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
 from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
 from .ui_re_mdf_panels import tag_redraw
@@ -199,30 +199,24 @@ def syncMDFMaterialNameFromObject(obj):
 	material object in the outliner without touching the property makes the two
 	sides diverge and the material goes missing in game. The parenthesised name
 	wins, matching the convention documented in reindexMaterials."""
-	objectMaterialName = getMDFMaterialName(obj)
-	if objectMaterialName != obj.re_mdf_material.materialName:
-		obj.re_mdf_material.materialName = objectMaterialName
+	setMDFMaterialName(obj, getMDFMaterialName(obj))
 def reindexMaterials(mdfCollection, stripSuffix = True):
 
 	if mdfCollection != None:
 
-		# Sort by material name (case-insensitive, matching the Rename Meshes
-		# operator) and capitalize each word of the material name the same way,
-		# so MDF material order and names stay consistent with the mesh.
-		# stripSuffix = True (the manual "Reindex Materials" operator) also
-		# drops a trailing "_Mat" suffix (case-insensitive). Export paths pass
-		# stripSuffix = False so "_Mat" names are preserved in the output file.
-		def normalizeMaterialName(name):
-			if stripSuffix:
-				name = stripREMatSuffix(name)
-			return capitalizeREMaterialName(name)
+		# Sort by material name (case-insensitive) and normalize each name with the
+		# same shared rule the Rename Meshes operator uses, so MDF material order
+		# and names stay consistent with the mesh. stripSuffix = True (the manual
+		# "Reindex Materials" operator) also drops a trailing "_Mat" suffix
+		# (case-insensitive). Export paths pass stripSuffix = False so "_Mat" names
+		# are preserved in the output file.
 		materialObjs = list(iterMDFMaterialObjects(mdfCollection))
-		materialObjs.sort(key = lambda obj: normalizeMaterialName(obj.re_mdf_material.materialName).lower())
+		materialObjs.sort(key = lambda obj: normalizeREMaterialName(obj.re_mdf_material.materialName, stripSuffix).lower())
 		for currentIndex, obj in enumerate(materialObjs):
 			#Change the material name in the mdf material settings to the one in the object name
 			#This allows for the user to set the material name by either method of renaming the object or setting it in the mdf material settings
 			syncMDFMaterialNameFromObject(obj)
-			obj.re_mdf_material.materialName = normalizeMaterialName(obj.re_mdf_material.materialName)
+			setMDFMaterialName(obj, normalizeREMaterialName(obj.re_mdf_material.materialName, stripSuffix))
 			obj.name = formatREMaterialObjectName("Material", currentIndex, obj.re_mdf_material.materialName)
 def MDFErrorCheck(collectionName, onlyMaterialNames = None, useBlenderMaterialName = False, exportAllLODs = True):
 	print("\nChecking for problems with MDF structure...")

@@ -12,9 +12,10 @@ from bpy.props import (StringProperty,
                        )
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
-from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, capitalizeREMaterialName, stripREMatSuffix, formatREMeshObjectName
-from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh, resolveSourcePath,
+from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, normalizeREMaterialName, formatREMeshObjectName
+from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh, resolveSourcePath, setMDFMaterialName,
                              isMDFCollection, isMeshCollection, iterMDFMaterialObjects)
+from ..mdf.blender_re_mdf import reindexMaterials
 
 
 class WM_OT_DeleteLoose(Operator):
@@ -83,14 +84,18 @@ class WM_OT_DeleteLoose(Operator):
 
 
 def renameMDFMaterialsForMeshes(renameMap, meshObjects):
-	"""Rename MDF material objects to match renamed meshes.
+	"""Rename MDF material objects to match renamed meshes, then reindex.
 
 	The RE engine requires the mesh object name's material suffix (the part after
 	`__`) to match the MDF material name one-to-one, so every MDF material whose
 	materialName matches a renamed mesh material is renamed to the mesh's new
 	suffix. Targets the MDF collections associated with the mesh objects via
 	findMDFCollectionForMesh; falls back to every MDF material object in the scene
-	when no association can be found. Returns the number of renamed materials.
+	when no association can be found. Each affected collection is then run through
+	reindexMaterials (stripSuffix = False, the same rule the export paths use, so
+	"_Mat" names on materials the renamed meshes don't use are preserved), aligning
+	the result with the "Reindex Materials" operator: both buttons converge on the
+	same normalized names and NN indices. Returns the number of renamed materials.
 	"""
 	if not renameMap or not meshObjects:
 		return 0
@@ -110,11 +115,10 @@ def renameMDFMaterialsForMeshes(renameMap, meshObjects):
 	renamedCount = 0
 	for collection in mdfCollections:
 		for materialObj in iterMDFMaterialObjects(collection):
-			materialName = materialObj.re_mdf_material.materialName
-			newName = renameMap.get(materialName.lower())
-			if newName != None and newName != materialName:
-				materialObj.re_mdf_material.materialName = newName
+			newName = renameMap.get(materialObj.re_mdf_material.materialName.lower())
+			if newName != None and setMDFMaterialName(materialObj, newName):
 				renamedCount += 1
+		reindexMaterials(collection, stripSuffix = False)
 	return renamedCount
 
 
@@ -135,11 +139,11 @@ class WM_OT_RenameMeshToREFormat(Operator):
 			if selectedObj.type == "MESH":
 				groupID = parseREMeshGroupID(selectedObj.name)
 				# Raw material name (as stored in the MDF) so the MDF materials
-				# can be matched later, before the RE-suffix stripping.
+				# can be matched later, before normalization.
 				# Prefer the material slot name here (this operator renames arbitrary
 				# models whose object name may not carry the "__" marker yet).
 				rawMaterialName = getREMeshMaterialName(selectedObj, useBlenderMaterialName = True)
-				materialName = stripREMatSuffix(rawMaterialName)
+				materialName = normalizeREMaterialName(rawMaterialName)
 				if groupID not in groupDict:
 					groupDict[groupID] = []
 				groupDict[groupID].append((selectedObj, materialName, rawMaterialName))
@@ -155,9 +159,8 @@ class WM_OT_RenameMeshToREFormat(Operator):
 			# land after uppercase ones ("Stockings") in the Sub_N order.
 			objList.sort(key=lambda x: x[1].lower())
 			for subIndex, (obj, materialName, rawMaterialName) in enumerate(objList):
-				newMatName = capitalizeREMaterialName(materialName)
-				obj.name = formatREMeshObjectName(groupID, subIndex, newMatName)
-				renameMap[rawMaterialName.lower()] = newMatName
+				obj.name = formatREMeshObjectName(groupID, subIndex, materialName)
+				renameMap[rawMaterialName.lower()] = materialName
 
 		# Keep the MDF material names in sync: the RE engine requires the mesh
 		# name suffix (after the Group_/Sub_ prefix) to match the MDF material name.
