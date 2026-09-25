@@ -245,6 +245,9 @@ class Material():
 		self.matNameOffset = read_uint64(file)
 		debugprint("matNameOffset:"+str(self.matNameOffset))
 		self.matNameHash = read_uint(file)
+		#Hide-in-game is encoded as a zeroed hash (see recalculateHashesAndOffsets),
+		#so recover it here to keep the state through an import/export round trip
+		self.hideInGame = self.matNameHash == 0
 		debugprint("matNameHash:"+str(self.matNameHash))
 		self.propBlockSize = read_int(file)
 		self.propertyCount = read_int(file)

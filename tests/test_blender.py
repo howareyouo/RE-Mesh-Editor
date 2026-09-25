@@ -192,6 +192,72 @@ def test_export_mesh_with_mdf(tmpDir):
     check("no MDF written when MDF collection absent",
           not os.path.isfile(os.path.join(tmpDir, "Char2.mdf2.32")))
 
+# ---------------------------------------------------------------- 2d-pre. Hide-in-game round trip
+def test_hide_in_game_roundtrip(tmpDir):
+    """Regression: "Hide Material In Game" is encoded in the file as a zeroed
+    material name hash. Exporting a hidden material and re-importing it must
+    restore the checkbox (previously the read side never recovered the flag,
+    so re-exporting silently un-hid the material)."""
+    from modules.mdf.file_re_mdf import readMDF
+    from modules.mdf.blender_re_mdf import importMDFFile
+
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    parent = bpy.data.collections.new("CharHiddenRoot")
+    bpy.context.scene.collection.children.link(parent)
+    meshCol = bpy.data.collections.new("CharHidden.mesh")
+    parent.children.link(meshCol)
+    meshCol["~TYPE"] = "RE_MESH_COLLECTION"
+    mdfCol = bpy.data.collections.new("CharHidden.mdf2")
+    parent.children.link(mdfCol)
+    mdfCol["~TYPE"] = "RE_MDF_COLLECTION"
+
+    me = bpy.data.meshes.new("m")
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me.update()
+    me.uv_layers.new(name="UVMap")
+    me.materials.append(bpy.data.materials.new("Shirts_Mat"))
+    obj = bpy.data.objects.new("Group_0_Sub_0__Shirts_Mat", me)
+    meshCol.objects.link(obj)
+
+    matObj = bpy.data.objects.new("Material 00 (Shirts_Mat)", None)
+    matObj["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj.re_mdf_material.materialName = "Shirts_Mat"
+    matObj.re_mdf_material.flags.hideMaterialInGame = True
+    mdfCol.objects.link(matObj)
+
+    meshPath = os.path.join(tmpDir, "CharHidden.mesh.221108797")
+    mdfPath = os.path.join(tmpDir, "CharHidden.mdf2.32")
+    result = bpy.ops.re_mesh.exportfile(filepath=meshPath, targetCollection="CharHidden.mesh", exportMDF=True)
+    check("hide-in-game mesh+MDF export finishes", result == {'FINISHED'})
+
+    exported = readMDF(mdfPath).materialList[0]
+    check("hidden material exported with zeroed hash",
+          exported.matNameHash == 0 and exported.hideInGame,
+          f"hash={exported.matNameHash}")
+
+    # Remove the scene's MDF collection so the re-import can claim its name,
+    # like a fresh import into an empty scene
+    bpy.data.objects.remove(matObj, do_unlink=True)
+    bpy.data.collections.remove(mdfCol)
+
+    importMDFFile(mdfPath)
+    importedCol = bpy.data.collections.get("CharHidden.mdf2")
+    importedMatObjs = [o for o in importedCol.all_objects
+                       if o.get("~TYPE") == "RE_MDF_MATERIAL"] if importedCol else []
+    check("re-imported MDF has one material", len(importedMatObjs) == 1,
+          f"col={importedCol.name if importedCol else None} objs={len(importedMatObjs)}")
+    if importedMatObjs:
+        check("hide-in-game checkbox restored after import",
+              importedMatObjs[0].re_mdf_material.flags.hideMaterialInGame is True)
+
+    for path in (meshPath, mdfPath):
+        if os.path.isfile(path):
+            os.remove(path)
+
 # ---------------------------------------------------------------- 2d. Renamed MDF must be read live
 def test_mdf_renamed_in_blender(tmpDir):
     """Regression: after renaming mesh/materials in Blender, the exporter must
@@ -1042,6 +1108,10 @@ def test_rename_meshes_syncs_mdf_materials(tmpDir):
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
     test_addon_props()
+    try:
+        test_hide_in_game_roundtrip(tmpDir)
+    except Exception:
+        check("hide-in-game roundtrip test crashed", False, traceback.format_exc())
     try:
         test_export_mesh_with_mdf(tmpDir)
     except Exception:

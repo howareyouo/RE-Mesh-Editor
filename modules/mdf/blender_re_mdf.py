@@ -174,6 +174,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 		materialObj.re_mdf_material.flags.bakeTextureArraySize = material.bakeTextureArraySize
 		
 		getMDFFlags(materialObj,material.flags,material.flagsB)
+		materialObj.re_mdf_material.flags.hideMaterialInGame = material.hideInGame
 		if gameName == "SF6":
 			flipSF6CustomizeValues(material.propertyList, toGame=False)
 		addPropsToPropList(materialObj,material.propertyList)
