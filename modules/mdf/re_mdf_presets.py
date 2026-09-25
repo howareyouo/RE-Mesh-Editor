@@ -11,7 +11,24 @@ from .blender_re_mdf import checkNameUsage
 
 from .mdf_value import getPropValueJSON,setPropValue
 
-PRESET_VERSION = 5#To be changed when there are changes to material variables
+PRESET_VERSION = 6#To be changed when there are changes to material variables
+
+#Flag keys saved into presets, shared by saveAsPreset/readPresetJSON so the two
+#sides can never drift apart. Each JSON key is its MDFFlagsPropertyGroup property
+#name with the first letter capitalised.
+PRESET_FLAG_KEYS = ("Ver32Unknown", "Ver32Unknown1", "Ver32Unknown2",
+					"FlagIntValue", "FlagIntValueB",
+					"ShaderLODNum", "BakeTextureArraySize", "HideMaterialInGame")
+#Backwards compatibility only. Preset version 5 and older spelled these keys
+#"FlagBitFlag"/"FlagBitFlagB". Preset JSONs are shared between users and mods,
+#and without this map an old preset still loads but its flag ints are silently
+#reset to 0. If legacy preset support is not needed, delete this map and the
+#legacy fallback branch in readPresetJSON.
+_LEGACY_FLAG_KEY_ALIASES = {"FlagIntValue":"FlagBitFlag", "FlagIntValueB":"FlagBitFlagB"}
+
+def flagPropName(key):
+	return key[0].lower() + key[1:]
+
 def saveAsPreset(activeObj,presetName,gameName):
 	folderPath = os.path.join(PRESET_DIR,gameName)
 	if activeObj != None:
@@ -21,25 +38,19 @@ def saveAsPreset(activeObj,presetName,gameName):
 			presetDict = {}
 			materialJSONDict = {}
 			if MDFObjType == "RE_MDF_MATERIAL":
+				mat = activeObj.re_mdf_material
+				flags = mat.flags
 				materialJSONDict["presetType"] = "RE_MDF_MATERIAL"
 				materialJSONDict["MDFVersion"] = bpy.context.scene.re_mdf_toolpanel.activeGame
 				materialJSONDict["presetVersion"] = PRESET_VERSION
-				
+
 				materialJSONDict["Material Header"] = {
-					"Material Name":activeObj.re_mdf_material.materialName,
-					"Master Material Path":activeObj.re_mdf_material.mmtrPath,
-					"Material Shader Type":activeObj.re_mdf_material.shaderType,
+					"Material Name":mat.materialName,
+					"Master Material Path":mat.mmtrPath,
+					"Material Shader Type":mat.shaderType,
 					}
-				
-				materialJSONDict["Flags"] = {
-					"Ver32Unknown":activeObj.re_mdf_material.flags.ver32Unknown,
-					"Ver32Unknown1":activeObj.re_mdf_material.flags.ver32Unknown1,
-					"Ver32Unknown2":activeObj.re_mdf_material.flags.ver32Unknown2,
-					"FlagBitFlag":activeObj.re_mdf_material.flags.flagIntValue,
-					"FlagBitFlagB":activeObj.re_mdf_material.flags.flagIntValueB,
-					"ShaderLODNum":activeObj.re_mdf_material.flags.shaderLODNum,
-					"BakeTextureArraySize":activeObj.re_mdf_material.flags.bakeTextureArraySize,
-					}
+
+				materialJSONDict["Flags"] = {key:getattr(flags,flagPropName(key)) for key in PRESET_FLAG_KEYS}
 				
 				materialJSONDict["Property List"] = []
 				for prop in activeObj.re_mdf_material.propertyList_items:
@@ -127,19 +138,16 @@ def readPresetJSON(filepath,targetCollection = None):
 		materialObj.re_mdf_material.materialName = materialJSONDict["Material Header"]["Material Name"]
 		materialObj.re_mdf_material.shaderType = materialJSONDict["Material Header"]["Material Shader Type"]
 		materialObj.re_mdf_material.mmtrPath = materialJSONDict["Material Header"]["Master Material Path"]
-		materialObj.re_mdf_material.flags.ver32Unknown = materialJSONDict["Flags"]["Ver32Unknown"]
-		try:
-			materialObj.re_mdf_material.flags.ver32Unknown1 = materialJSONDict["Flags"]["Ver32Unknown1"]
-			materialObj.re_mdf_material.flags.ver32Unknown2 = materialJSONDict["Flags"]["Ver32Unknown2"]
-		except:
-			pass
-		materialObj.re_mdf_material.flags.flagIntValue = materialJSONDict["Flags"]["FlagBitFlag"]
-		try:
-			materialObj.re_mdf_material.flags.flagIntValueB = materialJSONDict["Flags"]["FlagBitFlagB"]
-			materialObj.re_mdf_material.flags.shaderLODNum = materialJSONDict["Flags"]["ShaderLODNum"]
-			materialObj.re_mdf_material.flags.bakeTextureArraySize = materialJSONDict["Flags"]["BakeTextureArraySize"]
-		except:
-			pass
+		presetFlags = materialJSONDict["Flags"]
+		for key in PRESET_FLAG_KEYS:
+			if key in presetFlags:
+				value = presetFlags[key]
+			else:
+				legacyKey = _LEGACY_FLAG_KEY_ALIASES.get(key)
+				if legacyKey is None or legacyKey not in presetFlags:
+					continue
+				value = presetFlags[legacyKey]
+			setattr(materialObj.re_mdf_material.flags, flagPropName(key), value)
 		for propEntry in materialJSONDict["Property List"]:
 			prop = materialObj.re_mdf_material.propertyList_items.add()
 			prop.prop_name = propEntry["Property Name"]

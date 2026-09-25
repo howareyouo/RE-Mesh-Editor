@@ -1,7 +1,7 @@
 {
     "presetType": "RE_MDF_MATERIAL",
     "MDFVersion": "RE4",
-    "presetVersion": 5,
+    "presetVersion": 6,
     "Material Header": {
         "Material Name": "SkinMat",
         "Master Material Path": "_Chainsaw/MasterMaterial/Master/Character_Detail.mmtr",
@@ -11,8 +11,8 @@
         "Ver32Unknown": -1,
         "Ver32Unknown1": -1,
         "Ver32Unknown2": -1,
-        "FlagBitFlag": 134228120,
-        "FlagBitFlagB": 0,
+        "FlagIntValue": 134228120,
+        "FlagIntValueB": 0,
         "ShaderLODNum": 0,
         "BakeTextureArraySize": 0
     },

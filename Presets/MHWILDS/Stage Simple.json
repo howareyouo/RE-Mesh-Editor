@@ -1,7 +1,7 @@
 {
     "presetType": "RE_MDF_MATERIAL",
     "MDFVersion": "MHWILDS",
-    "presetVersion": 5,
+    "presetVersion": 6,
     "Material Header": {
         "Material Name": "StageSimpleMat",
         "Master Material Path": "MaterialShader/Variation/Base_simple.mmtr",
@@ -11,8 +11,8 @@
         "Ver32Unknown": -1,
         "Ver32Unknown1": -1,
         "Ver32Unknown2": -1,
-        "FlagBitFlag": 134217872,
-        "FlagBitFlagB": 0,
+        "FlagIntValue": 134217872,
+        "FlagIntValueB": 0,
         "ShaderLODNum": 0,
         "BakeTextureArraySize": 0
     },
