@@ -7,6 +7,15 @@ from bpy.types import (
 	PropertyGroup,
 )
 from ..blender_utils import tag_redraw
+from .file_re_mdf import getMDFVersionToGameName
+
+
+def getActiveMaterialMDFVersion(context):
+	#MDF version the active material was imported from, -1 when the game (and with it the version) is unknown
+	obj = context.active_object
+	if obj == None:
+		return -1
+	return getMDFVersionToGameName(obj.re_mdf_material.gameName)
 
 
 class OBJECT_PT_MDFObjectModePanel(Panel):
@@ -154,21 +163,27 @@ class OBJECT_PT_MDFFlagsPanel(Panel):
 	def draw(self, context):
 		layout = self.layout
 		obj = context.active_object
-		flags = obj.re_mdf_material.flags
+		re_mdf_material = obj.re_mdf_material
+		flags = re_mdf_material.flags
+		#Bit Flag B and the SF6 only fields are only written to the file on MDF version 31 (SF6) and
+		#newer, so hide them for older materials where they have no effect
+		isSF6OrNewer = getActiveMaterialMDFVersion(context) >= 31
 		split = layout.split(factor=0.025)#Indent list slightly to make it more clear it's a part of a sub panel
 		col1 = split.column()
 		col2 = split.column()
 		col2.alignment='RIGHT'
 		col2.prop(flags, "hideMaterialInGame")
-		col2.prop(flags, "shaderLODNum")
-		col2.prop(flags, "bakeTextureArraySize")
+		if isSF6OrNewer:
+			col2.prop(flags, "shaderLODNum")
+			col2.prop(flags, "bakeTextureArraySize")
 		col2.separator()
-		
+
 		col2.prop(flags,"flagIntValue")
-		col2.prop(flags, "flagIntValueB")
+		if isSF6OrNewer:
+			col2.prop(flags, "flagIntValueB")
 		col2.separator()
 		col2.separator(type = "LINE")
-		
+
 		col2.prop(flags,"BaseTwoSideEnable")
 		col2.prop(flags,"BaseAlphaTestEnable")
 		col2.prop(flags,"ShadowCastDisable")
@@ -179,7 +194,8 @@ class OBJECT_PT_MDFFlagsPanel(Panel):
 		col2.prop(flags,"AlphaMaskUsed")
 		col2.prop(flags,"ForcedTwoSideEnable")
 		col2.prop(flags,"TwoSideEnable")
-		col2.prop(flags,"TransparentZPostPassEnable")
+		if isSF6OrNewer:
+			col2.prop(flags,"TransparentZPostPassEnable")
 		col2.prop(flags,"TessFactor")
 		col2.prop(flags,"PhongFactor")
 		col2.prop(flags,"RoughTransparentEnable")
@@ -190,23 +206,24 @@ class OBJECT_PT_MDFFlagsPanel(Panel):
 		col2.prop(flags,"RequireDualQuaternion")
 		col2.prop(flags,"PixelDepthOffsetUsed")
 		col2.prop(flags,"NoRayTracing")
-		
-		col2.separator()
-		col2.separator(type = "LINE")
-		col2.prop(flags,"TransparentDistortionEnable")
-		col2.prop(flags,"AlphaUsed")
-		col2.prop(flags,"BakeTextureUseSecondaryUV")
-		col2.prop(flags,"ForwardPrepassEnabled")
-		col2.prop(flags,"ForcedAlphaTestEnableShadow")
-		col2.prop(flags,"TessellationZPrepassDisable")
-		col2.prop(flags,"DitheredLodTransitionEnable")
-		col2.prop(flags,"reserved0")
-		col2.prop(flags,"TransparentPriorityBias")
-		col2.prop(flags,"reserved1")
-		col2.prop(flags,"reserved2")
+
+		if isSF6OrNewer:
+			col2.separator()
+			col2.separator(type = "LINE")
+			col2.prop(flags,"TransparentDistortionEnable")
+			col2.prop(flags,"AlphaUsed")
+			col2.prop(flags,"BakeTextureUseSecondaryUV")
+			col2.prop(flags,"ForwardPrepassEnabled")
+			col2.prop(flags,"ForcedAlphaTestEnableShadow")
+			col2.prop(flags,"TessellationZPrepassDisable")
+			col2.prop(flags,"DitheredLodTransitionEnable")
+			col2.prop(flags,"reserved0")
+			col2.prop(flags,"TransparentPriorityBias")
+			col2.prop(flags,"reserved1")
+			col2.prop(flags,"reserved2")
 		
 
-def _build_list_panel(cls_name, idname, label, listtype_name, propname, active_propname, count_attr, count_prefix, rows, warning_label = None, has_replace_operator = False, panel_options = None):
+def _build_list_panel(cls_name, idname, label, listtype_name, propname, active_propname, count_attr, count_prefix, rows, warning_label = None, has_replace_operator = False, panel_options = None, min_mdf_version = None):
 	# NOTE: the parameter names deliberately differ from the Blender panel
 	# attributes they feed (label/idname/panel_options) -- a class body cannot
 	# read a name it assigns itself (LOAD_NAME never reaches the enclosing
@@ -219,10 +236,16 @@ def _build_list_panel(cls_name, idname, label, listtype_name, propname, active_p
 		bl_region_type = 'WINDOW'
 		if panel_options is not None:
 			bl_options = panel_options
-		if warning_label is not None:
+		if warning_label is not None or min_mdf_version is not None:
 			@classmethod
 			def poll(cls, context):
-				return context.active_object != None and len(getattr(context.active_object.re_mdf_material, count_attr)) != 0
+				if context.active_object == None:
+					return False
+				#Data that only exists on newer MDF versions is hidden entirely, editing it
+				#would either be dropped on export or corrupt the file layout
+				if min_mdf_version is not None and getActiveMaterialMDFVersion(context) < min_mdf_version:
+					return False
+				return len(getattr(context.active_object.re_mdf_material, count_attr)) != 0
 		def draw(self, context):
 			layout = self.layout
 			obj = context.active_object
@@ -285,6 +308,7 @@ OBJECT_PT_MDFMaterialMMTRSIndexListPanel = _build_list_panel(
 	8,
 	warning_label = "Do not change these unless you know what you're doing.",
 	panel_options = {"DEFAULT_CLOSED"},
+	min_mdf_version = 31,#MMTRS data is only present in the file on SF6 (version 31) and newer
 )
 OBJECT_PT_MDFMaterialGPBFDataListPanel = _build_list_panel(
 	"OBJECT_PT_MDFMaterialGPBFDataListPanel",
@@ -298,4 +322,5 @@ OBJECT_PT_MDFMaterialGPBFDataListPanel = _build_list_panel(
 	3,
 	warning_label = "Do not change these unless you know what you're doing.",
 	panel_options = {"DEFAULT_CLOSED"},
+	min_mdf_version = 19,#GPBF buffer entries are only present in the file on version 19 and newer
 )
