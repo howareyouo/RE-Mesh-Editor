@@ -9,6 +9,102 @@ from mathutils import Vector
 from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
+#RE2 RT frosted glass: a transmission shader with a blur/clear approximation and
+#an optional unscaled FrostMask, replacing the flat principled output (ported from REME v0.73)
+def buildRE2FrostedGlass(matInfo, normalNode):
+	material = matInfo["blenderMaterial"]
+	tree = material.node_tree
+	nodes, links = tree.nodes, tree.links
+	props = matInfo["mPropDict"]
+	texture = matInfo["textureNodeDict"].get("NormalRoughnessMap")
+	if texture is None:
+		raise ValueError("RE2 frosted glass requires NormalRoughnessMap")
+
+	def scalar(name, default):
+		prop = props.get(name)
+		return float(prop.propValue[0]) if prop and prop.propValue else default
+
+	colorProp = props.get("Glass_Color")
+	color = tuple(colorProp.propValue) if colorProp and len(colorProp.propValue) == 4 else (1, 1, 1, 1)
+	#Blender 4.2+ raytraced refraction settings
+	try:
+		material.surface_render_method = "DITHERED"
+		material.use_raytrace_refraction = True
+		material.thickness_mode = "SLAB"
+	except:
+		pass
+
+	clear = nodes.new("ShaderNodeValue")
+	clear.name = "RE2 Preview Clear-through"
+	clear.outputs[0].default_value = 0.65
+
+	blur = nodes.new("ShaderNodeValue")
+	blur.name = "RE2 Frost Blur Approximation"
+	blur.outputs[0].default_value = 0.35
+
+	frost = nodes.new("ShaderNodeMath")
+	frost.name = "RE2 Frost Amount"
+	frost.operation = "MULTIPLY"
+	frost.use_clamp = True
+	links.new(texture.outputs["Alpha"], frost.inputs[0])
+	frost.inputs[1].default_value = scalar("frosted_Roughness", 1.0)
+
+	#FrostMask is unscaled
+	mask = nodes.new("ShaderNodeMath")
+	mask.name = "RE2 Frost Mask"
+	mask.operation = "MULTIPLY"
+	mask.use_clamp = True
+	links.new(frost.outputs[0], mask.inputs[0])
+	mask.inputs[1].default_value = 1.0
+	if "FrostMask" in matInfo["textureNodeDict"]:
+		maskChannels = nodes.new("ShaderNodeSeparateColor")
+		links.new(matInfo["textureNodeDict"]["FrostMask"].outputs["Color"], maskChannels.inputs["Color"])
+		links.new(maskChannels.outputs["Red"], mask.inputs[1])
+
+	rough = nodes.new("ShaderNodeMath")
+	rough.name = "RE2 Transmission Roughness"
+	rough.operation = "MULTIPLY"
+	rough.use_clamp = True
+	links.new(mask.outputs[0], rough.inputs[0])
+	links.new(blur.outputs[0], rough.inputs[1])
+
+	refract = nodes.new("ShaderNodeBsdfRefraction")
+	refract.name = "RE2 Frosted Transmission"
+	refract.inputs["Color"].default_value = color
+	refract.inputs["IOR"].default_value = 1.45
+	links.new(rough.outputs[0], refract.inputs["Roughness"])
+
+	transparent = nodes.new("ShaderNodeBsdfTransparent")
+	transparent.name = "RE2 Preview Background"
+	transparent.inputs["Color"].default_value = color
+
+	background = nodes.new("ShaderNodeMixShader")
+	background.name = "RE2 Background Approximation"
+	links.new(clear.outputs[0], background.inputs[0])
+	links.new(refract.outputs[0], background.inputs[1])
+	links.new(transparent.outputs[0], background.inputs[2])
+
+	reflection = nodes.new("ShaderNodeBsdfGlossy")
+	reflection.name = "RE2 Glass Reflection"
+	reflection.inputs["Color"].default_value = (1, 1, 1, 1)
+	reflection.inputs["Roughness"].default_value = max(0.0, min(1.0, scalar("Roughness", 1.0)))
+
+	fresnel = nodes.new("ShaderNodeFresnel")
+	fresnel.name = "RE2 Glass Fresnel"
+	fresnel.inputs["IOR"].default_value = 1.45
+
+	if normalNode is not None:
+		for node in (refract, reflection, fresnel):
+			links.new(normalNode.outputs["Normal"], node.inputs["Normal"])
+
+	surface = nodes.new("ShaderNodeMixShader")
+	surface.name = "RE2 Frosted Glass Surface"
+	links.new(fresnel.outputs[0], surface.inputs[0])
+	links.new(background.outputs[0], surface.inputs[1])
+	links.new(reflection.outputs[0], surface.inputs[2])
+
+	return surface.outputs[0]
+
 
 #Texture types referenced via matInfo["textureNodeDict"] - statically maintained
 #(previously scanned from this file at import time via getUsedTextureNodes).
@@ -21,6 +117,7 @@ usedTextureSet = set([
 	"DetailMap","DetailMaskMap","DirtWearMap","HairOverMap","LayerMaskOcclusionMap",
 	"MaskMap","OcclusionCavityTranslucentDetailMap","SecondaryBaseColorMap","SkinMap",
 	"Tex2D_0","Tex_Dirty","Tex_Effect","Tex_Normal","tex_lineMusk","tex_noise",
+	"FrostMask",
 ])
 
 #Detail maps that use regular normal maps
@@ -606,6 +703,19 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			
 			nodeBSDF.location = (400,0)
 			blenderMaterial.node_tree.links.new(nodeBSDF.outputs[0],nodeMaterialOutput.inputs[0])
+			if gameName == "RE2RT" and os.path.basename(mdfMaterial.mmtrPath).lower() == "glass_frosted.mmtr":
+				#RE2 RT frosted glass preview: transmission is built later, in buildRE2FrostedGlass
+				if "Transmission Weight" in nodeBSDF.inputs:
+					nodeBSDF.inputs["Transmission Weight"].default_value = 1.0
+				try:
+					blenderMaterial.surface_render_method = "DITHERED"
+					blenderMaterial.use_raytrace_refraction = True
+					blenderMaterial.thickness_mode = "SLAB"
+				except:
+					pass
+				glassColor = mdfMaterial.getPropertyDict().get("Glass_Color")
+				if glassColor is not None and len(glassColor.propValue) == 4:
+					nodeBSDF.inputs["Base Color"].default_value = tuple(glassColor.propValue)
 			if "eyetear" in mdfMaterial.mmtrPath.lower():
 				#RE9 eyetear: full blend, no shadow casting, base alpha hidden (ported from REME v0.73)
 				#blend_method/shadow_method were removed in Blender 4.2+, guard both
@@ -712,6 +822,20 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				inErrorState = True
 			
 			try:#Detect nodes for game specific setups
+
+				#RE2RT Glass_Frosted scales only the normal/roughness texture
+				if gameName == "RE2RT" and matInfo["mmtrName"] == "glass_frosted.mmtr":
+					glassTexture = matInfo["textureNodeDict"].get("NormalRoughnessMap")
+					glassUVScale = matInfo["mPropDict"].get("UV_Scale")
+					if glassTexture is not None and glassUVScale is not None and glassUVScale.propValue:
+						glassMapping = nodes.new("ShaderNodeVectorMath")
+						glassMapping.operation = "SCALE"
+						glassMapping.name = "RE2 Frosted Glass UV Scale"
+						glassMapping.label = "Glass UV_Scale"
+						glassMapping.inputs["Scale"].default_value = float(glassUVScale.propValue[0])
+						glassMapping.location = glassTexture.location - Vector((220, 0))
+						links.new(UVMap1Node.outputs["UV"], glassMapping.inputs[0])
+						links.new(glassMapping.outputs["Vector"], glassTexture.inputs["Vector"])
 
 				#WILDS
 				if "SkinMap" in matInfo["textureNodeDict"] and matInfo["gameName"] == "MHWILDS":
@@ -1598,6 +1722,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							nodeTree.links.remove(link)
 						else:
 							links.new(linkSource,link.to_socket)
+				if gameName == "RE2RT" and matInfo["mmtrName"] == "glass_frosted.mmtr":
+					matInfo["currentShaderOutput"] = buildRE2FrostedGlass(matInfo, normalNode)
+					nodes.remove(nodeBSDF)
 				links.new(matInfo["currentShaderOutput"],nodeMaterialOutput.inputs["Surface"])
 				if arrangeNodes:
 					#TODO Force blender to update node dimensions so that a large margin doesn't need to be used as a workaround
