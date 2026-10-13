@@ -1,11 +1,13 @@
 # Author: TrueShadow01
 
+import functools
 import math
 import os
 import struct
 from dataclasses import dataclass, field
 
 from ..hashing.mmh3.pymmh3 import hashUTF16
+from ..gen_functions import readUTF16String
 
 JCNS_VERSION = 22
 JCNS_MAGIC = b"jcns"
@@ -43,26 +45,26 @@ def _requireRange(data, offset, size, label):
     if offset < 0 or size < 0 or offset + size > len(data):
         raise JCNSParseError(f"{label} is outside the file: offset=0x{offset:X}, size=0x{size:X}")
 
+_struct_cache = {}
 def _unpack(data, formatString, offset, label):
-    size = struct.calcsize(formatString)
-    _requireRange(data, offset, size, label)
-    return struct.unpack_from(formatString, data, offset)
+    s = _struct_cache.get(formatString)
+    if s is None:
+        s = struct.Struct(formatString)
+        _struct_cache[formatString] = s
+    _requireRange(data, offset, s.size, label)
+    return s.unpack_from(data, offset)
 
 def _readUTF16(data, offset, label):
     if offset == 0 or offset % 2:
         raise JCNSParseError(f"{label} has invalid string offset 0x{offset:X}")
-    
-    endOffset = offset
-    while True:
-        _requireRange(data, endOffset, 2, label)
-        if data[endOffset:endOffset + 2] == b"\x00\x00":
-            break
-        endOffset += 2
-    
+
     try:
-        return data[offset:endOffset].decode("utf-16le")
+        value, _ = readUTF16String(data, offset, label)
     except UnicodeDecodeError as error:
         raise JCNSParseError(f"{label} is not valid UTF-16LE") from error
+    except ValueError as error:
+        raise JCNSParseError(str(error)) from error
+    return value
 
 def _validateHash(name, storedHash, label):
     calculatedHash = hashUTF16(name) & 0xFFFFFFFF
@@ -186,6 +188,7 @@ def _readDependencyTable(data, graphOffset, outputCount, outputHashSet):
         dependencyHashDict[outputHash] = sourceHashes
     return dependencyHashDict
 
+@functools.lru_cache(maxsize=32)
 def readJCNS(filePath):
     try:
         with open(filePath, "rb") as file:
@@ -203,6 +206,7 @@ def readJCNS(filePath):
     dependencyHashDict = _readDependencyTable(data, graphOffset, outputCount, outputHashSet)
     return JCNSFile(filePath, recordList, dependencyHashDict)
 
+@functools.lru_cache(maxsize=256)
 def findJCNSPath(meshFilePath):
     if not meshFilePath:
         return None

@@ -7,8 +7,14 @@ import glob
 import struct
 
 from mathutils import Vector
-from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname
+from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname,readUTF16String
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
+def getAnisoInputName(nodeBSDF):
+	for inputName in nodeBSDF.inputs.keys():
+		if inputName == "Anisotropic" or "Anisotropic IOR" in inputName:
+			return inputName
+	return "Anisotropic"
+
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
 DEBUG_MODE = False#Enables verbose console logging for console import diagnostics
 #RE2 RT frosted glass: a transmission shader with a blur/clear approximation and
@@ -234,8 +240,8 @@ def getSF6CMDMaterialMap(cmdPath):
 			continue
 
 		try:
-			materialName = data[nameOffset:stringEnd - 2].decode("utf-16le")
-		except UnicodeDecodeError:
+			materialName = readUTF16String(data, nameOffset, "SF6 CMD material name")[0]
+		except ValueError:
 			continue
 
 		if not materialName or not all(32 <= ord(char) <= 126 for char in materialName):
@@ -259,14 +265,14 @@ def sf6RGBToLinear(value):
 		return value / 12.92
 	return ((value + 0.055) / 1.055) ** 2.4
 
-def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None):
+def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None, caseInsensitiveMap=None, meshPathParts=None):
 	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
 
 	cmdMaterialName = materialName
 	matchType = "exact"
 
 	if cmdMaterialName not in materialMap:
-		caseInsensitiveMaterialMap = {
+		caseInsensitiveMaterialMap = caseInsensitiveMap if caseInsensitiveMap is not None else {
 			name.casefold(): name for name in materialMap
 		}
 
@@ -282,7 +288,7 @@ def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None):
 
 	# C. Viper's scalp is Head00 slot 4, but its intended tint comes from hair slot 0.
 	#Keep this hardcoded patch isolated so it can be reverted when real data says otherwise.
-	meshPathParts = {
+	meshPathParts = meshPathParts if meshPathParts is not None else {
 		part.casefold()
 		for part in os.path.normpath(meshPath).split(os.sep)
 	} if meshPath else set()
@@ -531,6 +537,7 @@ MiscMapTypes = set([
 	#"Detail_NRRH_A",
 	])
 
+# RE9 leather detail routing is not wired up yet; kept for reference.
 re9LeatherDetailTypeSet = set([
 	"DetailMapArray",
 	"DetailMask_Leather",
@@ -563,6 +570,31 @@ sf6DetailNormalTypeSet = set([
 	"Cloth_DetailMapD",
 	"WrinkledMap",
 ])
+
+sf6DetailRouting = {
+	"Cloth_DetailMask": "SF6DETAIL",
+	"Body_DetailBlendMask": "SF6BODYDETAIL",
+	"Face_DetailMapBlendMask": "SF6FACEDETAIL",
+	"BodyMuscle_Mask": "UNKN",
+	"Cloth_DetailMapA": "SF6DETAIL",
+	"Cloth_DetailMapB": "SF6DETAIL",
+	"Cloth_DetailMapC": "SF6DETAIL",
+	"Cloth_DetailMapD": "SF6DETAIL",
+	"Body_UniqueDetail_NRRC": "SF6BODYDETAIL",
+	"Body_DetailMapA": "SF6BODYDETAIL",
+	"Body_DetailMapB": "SF6BODYDETAIL",
+	"Body_DetailMapC": "SF6BODYDETAIL",
+	"Body_DetailMapD": "SF6BODYDETAIL",
+	"Face_DetailMapA": "SF6FACEDETAIL",
+	"Face_DetailMapB": "SF6FACEDETAIL",
+	"Face_DetailMapC": "SF6FACEDETAIL",
+	"Face_DetailMapD": "SF6FACEDETAIL",
+	"BodyMuscle_NormalA": "UNKN",
+	"BodyMuscle_NormalB": "UNKN",
+	"BodyMuscle_NormalC": "UNKN",
+	"BodyMuscle_NormalD": "UNKN",
+	"WrinkledMap": "UNKN",
+}
 
 sf6FurTypeSet = set([
 	"Fur_Map",
@@ -604,7 +636,7 @@ from .file_re_mdf import readMDF,getMDFVersionToGameName
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
 from ..ddsconv.directx.texconv import Texconv
-DEBUG_MODE = False
+
 def debugprint(string):
 	if DEBUG_MODE:
 		print(string)
@@ -891,6 +923,14 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			addChunkPath(chunkPath,gameName)
 	#print(chunkPathList)
 	texConv = Texconv()
+	cmdCaseInsensitiveMapList = [
+		{name.casefold(): name for name in cmdMap} if cmdMap else {}
+		for cmdMap in sf6CMDMaterialMapList
+	]
+	cmdMeshPathParts = {
+		part.casefold()
+		for part in os.path.normpath(meshPath).split(os.sep)
+	} if meshPath else set()
 
 	for materialName in meshMaterialDict.keys():
 		#print(materialName)
@@ -936,7 +976,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				isUsedTexture = (
 				textureType in usedTextureSet
 				or (gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet)
-				or (gameName == "RE9" and textureType in re9LeatherDetailTypeSet)
+				
 			)
 			if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo and DEBUG_MODE:
 				print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
@@ -1018,7 +1058,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						textureNodeInfoList.append(("ALP",textureType,imageList,outputPath))
 						hasAlpha = True
 					elif textureType in occlusionTypeSet:
-						textureNodeInfoList.append(("OCC", textureType, imageList, outputPath))
+						textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
 					elif textureType in cmmTypeSet:
 						textureNodeInfoList.append(("CMM",textureType,imageList,outputPath))
 					elif textureType in cmaskTypeSet:
@@ -1037,21 +1077,21 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					elif gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet:
 						textureNodeInfoList.append(("SF6WRINKLE", textureType, imageList, outputPath))
 					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
-						if textureType == "Cloth_DetailMask":
+						if sf6DetailRouting.get(textureType) == "SF6DETAIL":
 							nodeType = "SF6DETAIL"
-						elif textureType == "Body_DetailBlendMask":
+						elif sf6DetailRouting.get(textureType) == "SF6BODYDETAIL":
 							nodeType = "SF6BODYDETAIL"
-						elif textureType == "Face_DetailMapBlendMask":
+						elif sf6DetailRouting.get(textureType) == "SF6FACEDETAIL":
 							nodeType = "SF6FACEDETAIL"
 						else:
 							nodeType = "UNKN"
 						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
 					elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
-						if textureType.startswith("Cloth_DetailMap"):
+						if sf6DetailRouting.get(textureType) == "SF6DETAIL":
 							nodeType = "SF6DETAIL"
-						elif (textureType == "Body_UniqueDetail_NRRC" or textureType.startswith("Body_DetailMap")):
+						elif sf6DetailRouting.get(textureType) == "SF6BODYDETAIL":
 							nodeType = "SF6BODYDETAIL"
-						elif textureType.startswith("Face_DetailMap"):
+						elif sf6DetailRouting.get(textureType) == "SF6FACEDETAIL":
 							nodeType = "SF6FACEDETAIL"
 						else:
 							nodeType = "UNKN"
@@ -1140,8 +1180,8 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				}
 			#print(gameName)
 			if gameName == "SF6":
-				for sf6CMDMaterialMap in sf6CMDMaterialMapList:
-					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"], meshPath)
+				for sf6CMDMaterialMap, cmdCaseInsensitiveMap in zip(sf6CMDMaterialMapList, cmdCaseInsensitiveMapList):
+					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"], meshPath, cmdCaseInsensitiveMap, cmdMeshPathParts)
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links
 			nodeTree = blenderMaterial.node_tree
@@ -1904,7 +1944,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					shiftNode = matInfo["textureNodeDict"][shiftNodeName]
 
 					if matInfo["gameName"] == "SF6":
-						anisoInputName = ("Anisotropic IOR Level" if "Anisotropic IOR Level" in nodeBSDF.inputs else "Anisotropic")
+						anisoInputName = getAnisoInputName(nodeBSDF)
 
 						if "Primaly_Anisotropy" in matInfo["mPropDict"]:
 							anisoNode = addPropertyNode(
@@ -1986,7 +2026,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						nodeTree
 					)
 
-					links.new(hairAnisotropyNode.outputs["Value"], nodeBSDF.inputs["Anisotropic"])
+					links.new(hairAnisotropyNode.outputs["Value"], nodeBSDF.inputs[getAnisoInputName(nodeBSDF)])
 
 					if "AnisoSpecular1_Intensity" in matInfo["mPropDict"]:
 						hairSpecularNode = addPropertyNode(
@@ -2155,10 +2195,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						nodeTree
 					)
 
-					anisoInputName = (
-						"Anisotropic IOR Level"
-						if "Anisotropic IOR Level" in nodeBSDF.inputs
-						else "Anisotropic"
+					anisoInputName = getAnisoInputName(
+						nodeBSDF
+						
+						
 					)
 
 					links.new(anisoNode.outputs["Value"], nodeBSDF.inputs[anisoInputName])
@@ -2303,13 +2343,19 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 
 						links.new(invertEdgeAlphaNode.outputs["Value"], edgeMixNode.inputs[1])
 
-						finalAlphaNode = nodes.new("ShaderNodeMath")
-						finalAlphaNode.name = "SF6 See Through Final Alpha"
-						finalAlphaNode.operation = "MULTIPLY"
-						links.new(matInfo["alphaSocket"], finalAlphaNode.inputs[0])
-						links.new(edgeMixNode.outputs["Color"], finalAlphaNode.inputs[1])
+						if matInfo.get("alphaSocket") is not None:
+							finalAlphaNode = nodes.new("ShaderNodeMath")
+							finalAlphaNode.name = "SF6 See Through Final Alpha"
+							finalAlphaNode.operation = "MULTIPLY"
+							links.new(matInfo["alphaSocket"], finalAlphaNode.inputs[0])
+							links.new(edgeMixNode.outputs["Color"], finalAlphaNode.inputs[1])
+							matInfo["alphaSocket"] = finalAlphaNode.outputs["Value"]
+						
+						
+						
+						
 
-						matInfo["alphaSocket"] = finalAlphaNode.outputs["Value"]
+						
 				#Mix Shaders
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]

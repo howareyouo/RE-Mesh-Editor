@@ -27,9 +27,6 @@ def evaluateSF6JCNSCurve(value, x0, x1, x2, y0, y1, y2):
 	# duplicate upper knots can't reach this branch because value < x2
 	return y1 + (y2 - y1) * (value - x1) / (x2 - x1)
 
-# Keep generated driver expressions short enough for Blender's 255 character limit
-bpy.app.driver_namespace["re_sf6c"] = evaluateSF6JCNSCurve
-
 def buildSF6JCNSDriverExpression(recordList):
 	"""
 	Convert the JCNS records for one shape key into a Blender driver.
@@ -116,6 +113,32 @@ def installSF6JCNSDrivers(jcnsData, meshObjectList, armatureObj):
 	oversizedExpressionCount = 0
 	missingBoneNameSet = set()
 
+	# expression building and bone checks only depend on JCNS data and the armature, so precompute once per output
+	prepared = {}
+	for outputName, recordList in recordDict.items():
+		expression, conditionList = buildSF6JCNSDriverExpression(recordList)
+
+		# empty expressions are 0 condition records or unsupported mode 0 PointCons conditions
+		if not expression or not conditionList:
+			unsupportedOutputCount += 1
+			continue
+
+		# blender silently truncates expressions longer than 255 characters
+		if len(expression) > 255:
+			oversizedExpressionCount += 1
+			continue
+
+		missingBones = {
+			condition.boneName
+			for condition in conditionList
+			if armatureObj.pose.bones.get(condition.boneName) is None
+		}
+		if missingBones:
+			missingBoneNameSet.update(missingBones)
+			continue
+
+		prepared[outputName] = (expression, conditionList)
+
 	for meshObject in meshObjectList:
 		if meshObject.type != "MESH":
 			continue
@@ -126,30 +149,9 @@ def installSF6JCNSDrivers(jcnsData, meshObjectList, armatureObj):
 
 		meshHasDriver = False
 
-		for outputName, recordList in recordDict.items():
+		for outputName, (expression, conditionList) in prepared.items():
 			shapeKey = shapeKeyData.key_blocks.get(outputName)
 			if shapeKey is None:
-				continue
-
-			expression, conditionList = buildSF6JCNSDriverExpression(recordList)
-
-			# empty expressions are 0 condition records or unsupported mode 0 PointCons conditions
-			if not expression or not conditionList:
-				unsupportedOutputCount += 1
-				continue
-
-			# blender silently truncates expressions longer than 255 characters
-			if len(expression) > 255:
-				oversizedExpressionCount += 1
-				continue
-
-			missingBones = {
-				condition.boneName
-				for condition in conditionList
-				if armatureObj.pose.bones.get(condition.boneName) is None
-			}
-			if missingBones:
-				missingBoneNameSet.update(missingBones)
 				continue
 
 			fcurve = shapeKey.driver_add("value")

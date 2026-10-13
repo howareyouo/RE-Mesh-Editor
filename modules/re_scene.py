@@ -1,4 +1,5 @@
 """Experimental RE2 RT .scn.20 static placement import (no SCN export)"""
+import functools
 import json
 import math
 import struct
@@ -11,6 +12,7 @@ from bpy_extras.io_utils import ImportHelper
 from mathutils import Matrix, Quaternion, Vector
 
 from .mesh.blender_re_mesh import importREMeshFile
+from .gen_functions import readUTF16String
 
 class SceneError(ValueError):
     pass
@@ -41,9 +43,15 @@ class Reader:
         if field["type"] in {"String", "Resource"}:
             length, = self.unpack("I")
             raw = self.take(length * 2)
-            if raw and not raw.endswith(b"\0\0"):
+            if not raw:
+                return ""
+            if not raw.endswith(b"\0\0"):
                 raise SceneError("Unterminated RSZ string")
-            return raw.decode("utf-16le").rstrip("\0")
+            try:
+                value, _ = readUTF16String(raw, 0, "RSZ string")
+            except ValueError as error:
+                raise SceneError(str(error)) from error
+            return value.rstrip("\0")
         return self.take(field["size"])
 
 def read_scene(path, schema):
@@ -167,14 +175,28 @@ def import_scene(path, schema, root, materials=False):
         raise SceneError("Choose the extracted natives/stm folder")
     nodes, warnings, ignored = read_scene(path, schema)
 
+    _visible_cache = {}
     def visible(index):
-        while index != -1:
-            node = nodes[index]
-            if not node["draw"] or node.get("unsupported", False):
-                return False
-            index = node["parent"]
-        return True
+        if index in _visible_cache:
+            return _visible_cache[index]
 
+        chain = []
+        current = index
+        result = True
+        while current != -1 and current not in _visible_cache:
+            node = nodes[current]
+            if not node["draw"] or node.get("unsupported", False):
+                result = False
+                break
+            chain.append(current)
+            current = node["parent"]
+        if result and current in _visible_cache:
+            result = _visible_cache[current]
+        for item in chain:
+            _visible_cache[item] = result
+        return result
+
+    @functools.lru_cache(maxsize=256)
     def resolve(resource, version):
         candidate = (root / (resource.replace("\\", "/") + version)).resolve()
         if not candidate.is_relative_to(root) or not candidate.is_file():

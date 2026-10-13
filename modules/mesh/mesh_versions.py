@@ -161,6 +161,10 @@ PRAGMATA_BLEND_SHAPE_FILE_VERSIONS = frozenset([
 ])
 
 
+def isPragmataMeshFileVersion(fileVersion):
+	return fileVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+
+
 # Meshes from these FILE versions use 6 bone weights per vertex.
 SIX_WEIGHT_MESH_FILE_VERSIONS = frozenset([
 	MESH_FILE_VERSION_SF6,

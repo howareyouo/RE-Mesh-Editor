@@ -1,6 +1,6 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere, capturePragmataBlendHeader
-from .mesh_versions import (MESH_FILE_VERSION_SF6, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, SIX_WEIGHT_MESH_FILE_VERSIONS)
+from .mesh_versions import (MESH_FILE_VERSION_SF6, SIX_WEIGHT_MESH_FILE_VERSIONS, isPragmataMeshFileVersion)
 from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
@@ -406,7 +406,7 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 		# Pragmata typing-2 deltas decode via the aux/map tail; the legacy byte/short
 		# mapping below cannot handle typing 2, so skip the legacy path for PRAGMATA files.
 		if (parseBlendShapes and reMesh.blendShapeHeader != None
-		        and reMesh.meshVersion not in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+		        and not isPragmataMeshFileVersion(reMesh.meshVersion)
 		        and len(reMesh.blendShapeHeader.blendShapeList) > lodIndex):
 			blendShapeLODData = reMesh.blendShapeHeader.blendShapeList[lodIndex]
 		else:
@@ -691,7 +691,7 @@ class ParsedREMesh:
 			blendShapeBuffer = reMesh.meshBufferHeader.vertexBuffer[blendShapeStartPos:]
 			# Typing-2 aux/map split and raw skinning streams are Pragmata-only.
 			# Do not stamp pragmata_* attributes onto other games' skinned meshes.
-			if reMesh.meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS:
+			if isPragmataMeshFileVersion(reMesh.meshVersion):
 				vtx = reMesh.meshBufferHeader.vertexBuffer
 				streams = {}
 				for el in reMesh.meshBufferHeader.vertexElementList:
@@ -740,7 +740,7 @@ class ParsedREMesh:
 
 		# Decode modern blend shape formats before the legacy path.
 		wildsBlendShapeDict = None
-		if (reMesh.meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+		if (isPragmataMeshFileVersion(reMesh.meshVersion)
 		        and reMesh.blendShapeHeader is not None
 		        and len(reMesh.blendShapeHeader.blendShapeList) > 0):
 			wildsBlendShapeDict = _decodePragBlendShapes(reMesh)

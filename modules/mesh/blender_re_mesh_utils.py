@@ -223,6 +223,10 @@ def _prag_get_int_attr(mesh, name, nverts):
 
 def _prag_set_i4_record(mesh, prefix, raw16, nverts):
 	if raw16 is None or len(raw16) != nverts * 16:
+		raiseWarning(
+			f"Pragmata stream {prefix!r} length mismatch: expected {nverts * 16} bytes, "
+			f"got {len(raw16) if raw16 is not None else 0}"
+		)
 		return
 	arr = np.frombuffer(raw16, dtype="<i4").reshape(nverts, 4)
 	for c in range(4):
@@ -254,16 +258,24 @@ def writePragmataVertAttrs(meshObj, parsedMesh, srcStart, nverts):
 	mp = info.get("map")
 	if wt and len(wt) >= sl.stop * 16:
 		_prag_set_i4_record(mesh, "pragmata_wt_", wt[sl.start * 16 : sl.stop * 16], nverts)
+	else:
+		raiseWarning(f"Pragmata stream too short for submesh: expected {sl.stop * 16} bytes, got {len(wt) if wt else 0}")
 	if ew and len(ew) >= sl.stop * 16:
 		_prag_set_i4_record(mesh, "pragmata_ew_", ew[sl.start * 16 : sl.stop * 16], nverts)
+	else:
+		raiseWarning(f"Pragmata stream too short for submesh: expected {sl.stop * 16} bytes, got {len(ew) if ew else 0}")
 	if ax and len(ax) >= sl.stop * 16:
 		_prag_set_i4_record(mesh, "pragmata_ax_", ax[sl.start * 16 : sl.stop * 16], nverts)
+	else:
+		raiseWarning(f"Pragmata stream too short for submesh: expected {sl.stop * 16} bytes, got {len(ax) if ax else 0}")
 	if mp and len(mp) >= sl.stop * 4:
 		_prag_set_int_attr(
 			mesh,
 			PRAG_ATTR_MAP,
 			np.frombuffer(mp[sl.start * 4 : sl.stop * 4], dtype="<i4"),
 		)
+	else:
+		raiseWarning(f"Pragmata stream too short for submesh: expected {sl.stop * 4} bytes, got {len(mp) if mp else 0}")
 
 
 def writePragmataCollectionProps(collection, parsedMesh):
@@ -324,9 +336,16 @@ def _permute_parsed_submesh(parsedSubMesh, perm):
 	)
 	rank = np.empty(n, dtype=np.int32)
 	rank[perm] = np.arange(n, dtype=np.int32)
-	parsedSubMesh.faceList = [
-		tuple(int(rank[v]) for v in face) for face in parsedSubMesh.faceList
-	]
+	try:
+		faces = np.asarray(parsedSubMesh.faceList, dtype=np.int64)
+		if faces.ndim == 2 and faces.shape[1] == 3:
+			parsedSubMesh.faceList = [tuple(r) for r in rank[faces].tolist()]
+		else:
+			raise ValueError
+	except (ValueError, TypeError):
+		parsedSubMesh.faceList = [
+			tuple(int(rank[v]) for v in face) for face in parsedSubMesh.faceList
+		]
 	for bs in parsedSubMesh.blendShapeList:
 		d = np.asarray(bs.deltas)
 		if d.shape[0] == n:
@@ -345,13 +364,14 @@ def applyPragmataExportOrderAndStreams(rawsubmesh, parsedSubMesh, nverts):
 	src = _prag_get_int_attr(mesh, PRAG_ATTR_SRC, nverts)
 	perm = None
 	if src is not None:
-		parsedSubMesh.pragmataSrcStart = int(src.min())
 		mn = int(src.min())
+		parsedSubMesh.pragmataSrcStart = mn
 		expected = np.arange(mn, mn + nverts, dtype=np.int32)
-		if np.array_equal(np.sort(src), expected):
-			perm = np.argsort(src, kind="stable")
+		perm = np.argsort(src, kind="stable")
+		if np.array_equal(src[perm], expected):
 			_permute_parsed_submesh(parsedSubMesh, perm)
 		else:
+			perm = None
 			print(
 				f"Pragmata: src_index on {rawsubmesh.name} is not a complete "
 				f"{nverts}-vert range; keeping Blender vertex order"

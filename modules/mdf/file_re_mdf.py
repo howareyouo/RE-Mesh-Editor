@@ -240,7 +240,9 @@ class Material():
 		self.gpbfBufferPathList = []
 		
 	def getPropertyDict(self):
-		return {prop.propName : prop for prop in self.propertyList}
+		if not hasattr(self, '_propertyDict') or self._propertyDict is None:
+			self._propertyDict = {prop.propName: prop for prop in self.propertyList}
+		return self._propertyDict
 	def read(self,file,version):
 		self.matNameOffset = read_uint64(file)
 		debugprint("matNameOffset:"+str(self.matNameOffset))
@@ -310,6 +312,7 @@ class Material():
 			self.textureList.append(textureEntry)
 		file.seek(self.propHeadersOffset)
 		self.propertyList = []
+		self._propertyDict = None
 		#Get padding size of properties for SF6
 		for i in range(0,self.propertyCount):
 			propertyEntry = Property()

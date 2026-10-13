@@ -69,27 +69,34 @@ def read_uint64(file_object):
 	return _struct_uint64.unpack(file_object.read(8))[0]
 def read_float(file_object):
 	return _struct_float.unpack(file_object.read(4))[0]
+def readUTF16String(data, offset, label="string"):
+	"""Read a null-terminated UTF-16LE string from bytes `data` at `offset`.
+
+	A terminator only counts when it starts on a 2-byte-aligned offset; a
+	\x00\x00 found at an odd offset would split a code unit, so the scan keeps
+	looking past it. Returns (string, end_offset) where end_offset points just
+	past the terminator. Raises ValueError ("{label} has no string terminator")
+	when no aligned terminator exists; malformed UTF-16 raises
+	UnicodeDecodeError, a ValueError subclass callers can also catch."""
+	endOffset = data.find(b"\x00\x00", offset)
+	while endOffset != -1 and (endOffset - offset) % 2:
+		endOffset = data.find(b"\x00\x00", endOffset + 1)
+	if endOffset == -1:
+		raise ValueError(f"{label} has no string terminator")
+	return data[offset:endOffset].decode("utf-16le"), endOffset + 2
+
 def read_unicode_string(file_object):#Reads unicode string from file into utf-8 string
-	#Block-read instead of one read(2) per character; join once instead of O(n^2) bytes concatenation
-	chunks = []
-	pending = b''
-	while True:
-		block = file_object.read(256)
-		if not block:
-			break
-		buf = pending + block
-		pending = b''
-		if len(buf) & 1:  #Keep UTF-16 pairs aligned across block boundaries
-			pending = buf[-1:]
-			buf = buf[:-1]
-		for i in range(0, len(buf), 2):
-			if buf[i:i+2] == b'\x00\x00':
-				chunks.append(buf[:i])
-				return b''.join(chunks).decode("utf-16le")
-		chunks.append(buf)
-	if pending:
-		chunks.append(pending)
-	return b''.join(chunks).decode("utf-16le")
+	#Delegate the scan+decode to readUTF16String; leave the cursor just past
+	#the terminator (callers all seek() explicitly, but keep it tidy). Strings
+	#that run to EOF without a terminator decode to EOF instead of raising.
+	start = file_object.tell()
+	data = file_object.read()
+	try:
+		value, end_offset = readUTF16String(data, 0, "string")
+	except ValueError:
+		return data.decode("utf-16le")
+	file_object.seek(start + end_offset)
+	return value
 def write_ubyte(file_object, input):
 	file_object.write(_struct_ubyte.pack(input))
 def write_byte(file_object, input):
