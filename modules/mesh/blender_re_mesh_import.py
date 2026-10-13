@@ -15,7 +15,9 @@ from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
-from .blender_re_mesh_utils import joinObjects, createMaterialDict, getCollection, findArmatureObjFromData, _IMPORT_PHASES, _phase_switch, _phase_reset
+from .blender_re_mesh_utils import (joinObjects, createMaterialDict, getCollection, findArmatureObjFromData,
+                                    _IMPORT_PHASES, _phase_switch, _phase_reset,
+                                    writePragmataVertAttrs, writePragmataCollectionProps)
 
 
 def importSkeleton(parsedSkeleton, armatureName, collection, rotate90, targetArmatureName=None):
@@ -412,13 +414,18 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 MERGE_VERTEX_LIMIT = 60000
 
 
-def _subMeshMergeProfile(subMesh):
+def _subMeshMergeProfile(subMesh, pragmataData=None):
 	"""Return a (buffer-presence) profile for a submesh if it is safe to merge
 	into a combined mesh, or None if it must be imported individually.
 
 	Submeshes carrying blend shapes, extra (MH Wilds) weights or DD2 secondary
 	weights can't be merged without losing data, so they keep the per-submesh path.
+	Pragmata submeshes are excluded too: their retail vertex order is restored on
+	export through the pragmata_map/src_index permutation, so merging would break
+	the export write-back.
 	"""
+	if pragmataData:
+		return None
 	if subMesh.blendShapeList:
 		return None
 	if getattr(subMesh, "extraWeightList", None):
@@ -520,6 +527,11 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 			[("~TYPE", "RE_MESH_MPLY_ROOT")], collection=meshCollection)
 	totalMergedSubMeshes = 0
 	totalMergedMeshes = 0
+	# Pragmata submesh order is restored on export via the pragmata_map/src_index
+	# permutation; merging would break the write-back, so pragmata files always
+	# keep the per-submesh import path. The parser fills pragmataBlendAux exactly
+	# for PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, so this flag is the version check.
+	pragmataData = getattr(parsedMesh, "pragmataBlendAux", None)
 	for lodIndex, lod in enumerate(targetLODList):
 		shadowLODString = ""
 		if importShadowMeshes:
@@ -551,7 +563,7 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 				for subMesh in visconGroup.subMeshList:
 					if subMesh.isReusedMesh:
 						continue
-					profile = _subMeshMergeProfile(subMesh)
+					profile = _subMeshMergeProfile(subMesh, pragmataData)
 					if profile is None or subMesh.meshVertexOffset in reuseSourceOffsets:
 						continue
 					materialName = parsedMesh.materialNameList[subMesh.materialIndex]
@@ -608,6 +620,12 @@ def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureO
 						collection=lodCollection,
 						rotate90=rotate90,
 						blendShapeList=subMesh.blendShapeList,
+					)
+					writePragmataVertAttrs(
+						meshObj,
+						parsedMesh,
+						subMesh.meshVertexOffset,
+						len(subMesh.vertexPosList),
 					)
 					if parsedMesh.isMPLY:
 						meshObj.parent = MPLYRoot
@@ -831,6 +849,7 @@ def importREMeshFile(filePath, options):
 		               options["createCollections"], options["importShadowMeshes"], options["rotate90"],
 		               options["mergeGroups"], options["importBoundingBoxes"],
 		               options.get("mergeSameMaterialSubmeshes", False))
+		writePragmataCollectionProps(meshCollection, parsedMesh)
 		printElapsed("Mesh build", meshBuildStartTime)
 		if options["importOcclusionMeshes"] and parsedMesh.occlusionMeshLODList != []:
 			occlusionBuildStartTime = time.time()
