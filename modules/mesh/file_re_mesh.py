@@ -891,12 +891,20 @@ class BlendShapeData():
 		self.blendSSList = []
 
 	def read(self, file, version):
-		# Batch read: ushort×2 + uint×2 + uint64×4 = 4+8+32 = 44 bytes
-		raw = file.read(44)
-		(self.targetCount, self.typing, self.unknFlag, self.padding1,
-		 self.padding2) = struct.unpack_from('<HHIII', raw, 0)
-		(self.dataOffset, self.aabbOffset, self.blendSOffset,
-		 self.blendSSOffset) = struct.unpack_from('<QQQQ', raw, 12)
+		if version < VERSION_SF6:
+			# Legacy compact layout (RE8 and earlier, ported from REME v0.73):
+			# header ends after aabbOffset - no blendSOffset/blendSSOffset (u64×2).
+			raw = file.read(32)
+			(self.targetCount, self.typing, self.unknFlag, self.padding1,
+			 self.padding2) = struct.unpack_from('<HHIII', raw, 0)
+			self.dataOffset, self.aabbOffset = struct.unpack_from('<QQ', raw, 16)
+		else:
+			# Batch read: ushort×2 + uint×2 + uint64×4 = 4+8+32 = 44 bytes
+			raw = file.read(44)
+			(self.targetCount, self.typing, self.unknFlag, self.padding1,
+			 self.padding2) = struct.unpack_from('<HHIII', raw, 0)
+			(self.dataOffset, self.aabbOffset, self.blendSOffset,
+			 self.blendSSOffset) = struct.unpack_from('<QQQQ', raw, 12)
 		file.seek(self.dataOffset)
 		for i in range(0, self.targetCount):
 			blendTargetEntry = BlendTarget()
@@ -931,15 +939,26 @@ class BlendShapeHeader():
 	# TODO Blend shapes are different in wilds, fix
 
 	def read(self, file, version):
-		# Batch read: count + 3×uint64 = 32 bytes
-		raw = file.read(32)
-		self.count, = struct.unpack_from('<Q', raw, 0)
-		if version < VERSION_ONI2:
-			self.mainOffset, self.zero = struct.unpack_from('<QQ', raw, 8)
+		if version < VERSION_SF6:
+			# Legacy compact layout (RE8 and earlier, ported from REME v0.73):
+			# u8 count + skip 7 + u64×3 (mainOffset/zero/hash); the offset table
+			# lives at mainOffset instead of directly after the header.
+			self.count = read_ubyte(file)
+			file.seek(7, 1)
+			raw = file.read(24)
+			self.mainOffset, self.zero, self.hash = struct.unpack_from('<QQQ', raw, 0)
 		else:
-			self.zero, self.mainOffset = struct.unpack_from('<QQ', raw, 8)
-		self.hash, = struct.unpack_from('<Q', raw, 24)
+			# Batch read: count + 3×uint64 = 32 bytes
+			raw = file.read(32)
+			self.count, = struct.unpack_from('<Q', raw, 0)
+			if version < VERSION_ONI2:
+				self.mainOffset, self.zero = struct.unpack_from('<QQ', raw, 8)
+			else:
+				self.zero, self.mainOffset = struct.unpack_from('<QQ', raw, 8)
+			self.hash, = struct.unpack_from('<Q', raw, 24)
 		if self.count > 0:
+			if version < VERSION_SF6:
+				file.seek(self.mainOffset)
 			self.blendShapeOffsetList = read_uint64_array(file, int(self.count))
 		else:
 			self.blendShapeOffsetList = []
