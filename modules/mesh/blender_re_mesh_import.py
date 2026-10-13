@@ -373,13 +373,25 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		basis_co = np.zeros(n_verts * 3, dtype=np.float32)
 		skB.data.foreach_get("co", basis_co)
 
+		# Deltas are decoded in game space; rotate them to match the mesh's rotated
+		# basis when rotate90 is enabled (ported from REME v0.73).
+		rotN = np.asarray(rotate90Matrix.to_3x3(), dtype=np.float32) if rotate90 else None
 		for blendShapeEntry in blendShapeList:
 			name = blendShapeEntry.blendShapeName
-			deltas = np.asarray(blendShapeEntry.deltas, dtype=np.float32)
+			deltas = np.asarray(blendShapeEntry.deltas, dtype=np.float32).reshape(-1, 3)
+			# Wilds blend regions can be partial: apply what we have and leave the
+			# rest at the basis instead of discarding everything on a mismatch.
+			n = min(len(deltas), n_verts)
+			darr = np.zeros((n_verts, 3), dtype=np.float32)
+			if rotN is not None:
+				darr[:n] = deltas[:n] @ rotN.T
+			else:
+				darr[:n] = deltas[:n]
 			sk = meshObj.shape_key_add(name=name)
 			sk.interpolation = 'KEY_LINEAR'
+			sk.value = 0.0  # Default to the rest basis so the mesh isn't shown as a morph mix
 			# Batch-set: add deltas to basis coordinates in one numpy operation
-			new_co = basis_co + deltas.ravel()
+			new_co = basis_co + darr.ravel()
 			sk.data.foreach_set("co", new_co)
 
 	_phase_switch(None)
