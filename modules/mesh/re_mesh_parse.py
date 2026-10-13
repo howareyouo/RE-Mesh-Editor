@@ -1,6 +1,6 @@
 import numpy as np
-from .file_re_mesh import Matrix4x4, AABB, Sphere
-from .mesh_versions import (MESH_FILE_VERSION_SF6, SIX_WEIGHT_MESH_FILE_VERSIONS)
+from .file_re_mesh import Matrix4x4, AABB, Sphere, capturePragmataBlendHeader
+from .mesh_versions import (MESH_FILE_VERSION_SF6, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, SIX_WEIGHT_MESH_FILE_VERSIONS)
 from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
@@ -279,6 +279,103 @@ class BlendShape:
 		self.deltas = []
 
 
+def _decodePragBlendShapes(reMesh):
+	"""Decode resident Pragmata blend shape deltas"""
+
+	result = {}
+	reMesh.wildsBlendMeta = {}
+
+	bsh = reMesh.blendShapeHeader
+	mbh = reMesh.meshBufferHeader
+	if bsh is None or mbh is None or mbh.vertexBuffer is None:
+		return result
+
+	def shapeName(shapeIndex):
+		remap = reMesh.blendShapeNameRemapList
+		if remap:
+			rawNameIndex = remap[shapeIndex % len(remap)]
+			if 0 <= rawNameIndex < len(reMesh.rawNameList):
+				return reMesh.rawNameList[rawNameIndex]
+
+		return f"BlendShape_{shapeIndex}"
+
+	# The upper 32 bits contain the delta buffer offset relative to vertexBufferOffset
+	cursor = mbh.sunbreakSecondUnknown >> 32
+	if cursor >= len(mbh.vertexBuffer):
+		print(f"Pragmata blend shape offset {cursor} exceeds vertex buffer size {len(mbh.vertexBuffer)}")
+		return result
+
+	for lodIndex, blendShapeData in enumerate(bsh.blendShapeList):
+		lodDict = {}
+
+
+		for targetIndex, blendTarget in enumerate(blendShapeData.blendTargetList):
+			subEntries = (
+				blendTarget.subMeshEntryList
+				if blendTarget.subMeshEntryList else [blendTarget]
+			)
+
+			totalVerts = sum(
+				getattr(subEntry, "vertCount", 0)
+				for subEntry in subEntries
+			)
+
+			shapeCount = blendTarget.blendShapeNum
+
+			if totalVerts == 0 or shapeCount == 0:
+				continue
+
+			if blendShapeData.padding1 == 0:
+				stride = 4
+			elif blendShapeData.padding1 == 1:
+				stride = 8
+			else:
+				print(f"Unsupported Pragmata blend shape padding value: {blendShapeData.padding1}")
+				return result
+
+			byteCount = shapeCount * totalVerts * stride
+			if cursor + byteCount > len(mbh.vertexBuffer):
+				print(f"Pragmata blend shape block exceeds vertex buffer: {cursor} + {byteCount} > {len(mbh.vertexBuffer)}")
+				return result
+
+			block = memoryview(mbh.vertexBuffer)[cursor : cursor + byteCount]
+			cursor += byteCount
+
+			if blendShapeData.padding1 == 1:
+				# 4 float16 values per vertex, xyz are direct deltas and w is unused
+				deltas = np.frombuffer(block, dtype="<f2").reshape(shapeCount, totalVerts, 4)[..., :3].astype(np.float32)
+			else:
+				# Packed 11/10/11 values are normalized and remapped through the target AABB
+				normalized = ReadBlendShapeByteBuffer(block, tags=set()).reshape(shapeCount, totalVerts, 3)
+
+				aabb = (
+					blendShapeData.aabbList[targetIndex]
+					if targetIndex < len(blendShapeData.aabbList)
+					else AABB()
+				)
+
+				deltas = remapBlendShapeDeltas(normalized.reshape(-1, 3), aabb).reshape(shapeCount, totalVerts, 3)
+
+			subEntryOffset = 0
+			for subEntry in subEntries:
+				subEntryVertCount = getattr(subEntry, "vertCount", 0)
+				subMeshStart = getattr(subEntry, "subMeshVertexStartIndex", 0)
+				shapeList = lodDict.setdefault(subMeshStart, [])
+
+				for shapeIndex in range(shapeCount):
+					entry = BlendShape()
+					entry.blendShapeName = shapeName(getattr(blendTarget, "blendSSIndex", 0) + shapeIndex)
+					entry.deltas = np.array(deltas[shapeIndex, subEntryOffset: subEntryOffset + subEntryVertCount], dtype=np.float32)
+					shapeList.append(entry)
+
+				subEntryOffset += subEntryVertCount
+
+		if lodDict:
+			result[lodIndex] = lodDict
+
+	return result
+
+
 def remapBlendShapeDeltas(blendShapeDeltas, aabb, zeroIsSentinel=False):
 	# Ported from REME v0.73 (replaces rescale_blend_deltas).
 	# SF6 uses an all 0 encoded record to mean no vertex delta.
@@ -298,17 +395,24 @@ def remapBlendShapeDeltas(blendShapeDeltas, aabb, zeroIsSentinel=False):
 
 
 def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, usedVertexOffsetDictList,
-                      blendShapeBuffer=None, parseBlendShapes=True):
+                      blendShapeBuffer=None, parseBlendShapes=True,
+                      wildsBlendShapeDict=None):
 	lodList = []
 	currentBlendShapeOffset = 0
 	blendShapeDict = {}
 	for lodIndex, lodGroup in enumerate(targetLODList):
 
 		# BLEND SHAPES - LOD level
-		if parseBlendShapes and reMesh.blendShapeHeader != None and len(reMesh.blendShapeHeader.blendShapeList) > lodIndex:
+		# Pragmata typing-2 deltas decode via the aux/map tail; the legacy byte/short
+		# mapping below cannot handle typing 2, so skip the legacy path for PRAGMATA files.
+		if (parseBlendShapes and reMesh.blendShapeHeader != None
+		        and reMesh.meshVersion not in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+		        and len(reMesh.blendShapeHeader.blendShapeList) > lodIndex):
 			blendShapeLODData = reMesh.blendShapeHeader.blendShapeList[lodIndex]
 		else:
 			blendShapeLODData = None
+		if wildsBlendShapeDict is not None:
+			blendShapeDict = wildsBlendShapeDict.get(lodIndex, {})
 
 		# BLEND SHAPES - submesh
 		currentBlendShapeNameIndex = 0
@@ -477,6 +581,9 @@ class ParsedREMesh:
 		self.bufferHasIntFaces = False
 		self.bufferHasExtraWeight = False  # Doubled weight buffer, used in MH Wilds
 		self.bufferHasSecondaryWeight = False  # DD2 shapekeys
+		# Filled for Pragmata typing-2 meshes: raw type-4/7 streams, split aux/map, veSize/unkn1.
+		# Consumed on Blender import as vertex attributes; see docs/PRAGMATA.md.
+		self.pragmataBlendAux = None
 
 	def ParseREMesh(self, reMesh, importOptions={"importAllLOD": True, "importShadowMesh": True,
 	                                             "importOcclusionMesh": True, "importBlendShapes": True}):
@@ -582,9 +689,61 @@ class ParsedREMesh:
 			lastElement = reMesh.meshBufferHeader.vertexElementList[-1]
 			blendShapeStartPos = int(lastElement['posStartOffset']) + vertexCount * int(lastElement['stride'])
 			blendShapeBuffer = reMesh.meshBufferHeader.vertexBuffer[blendShapeStartPos:]
+			# Typing-2 aux/map split and raw skinning streams are Pragmata-only.
+			# Do not stamp pragmata_* attributes onto other games' skinned meshes.
+			if reMesh.meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS:
+				vtx = reMesh.meshBufferHeader.vertexBuffer
+				streams = {}
+				for el in reMesh.meshBufferHeader.vertexElementList:
+					if int(el['typing']) == 4 and int(el['stride']) == 16:
+						streams["weight"] = bytes(
+							vtx[int(el['posStartOffset']) : int(el['posStartOffset']) + vertexCount * 16]
+						)
+					elif int(el['typing']) == 7 and int(el['stride']) == 16:
+						streams["extraW"] = bytes(
+							vtx[int(el['posStartOffset']) : int(el['posStartOffset']) + vertexCount * 16]
+						)
+				sun2 = getattr(reMesh.meshBufferHeader, "sunbreakSecondUnknown", 0) or 0
+				deltaOff = sun2 >> 32
+				aux = extra = vmap = None
+				if deltaOff > blendShapeStartPos:
+					auxBlob = bytes(vtx[blendShapeStartPos:deltaOff])
+					# Retail typing-2 tail: 16 bytes/vert + 896-byte extra + u32 vert map.
+					# Deltas start at sun2.hi — do not treat aux as shape-key data. docs/PRAGMATA.md.
+					if len(auxBlob) == vertexCount * 20 + 896:
+						extra = auxBlob[vertexCount * 16 : vertexCount * 16 + 896]
+						vmap = auxBlob[vertexCount * 16 + 896 :]
+						aux = auxBlob[: vertexCount * 16]
+					else:
+						aux = auxBlob
+					blendShapeBuffer = vtx[deltaOff:]
+				self.pragmataBlendAux = {
+					"aux": aux,
+					"auxExtra": extra,
+					"map": vmap,
+					"veSize": reMesh.meshBufferHeader.vertexElementSize,
+					"unkn1": reMesh.meshBufferHeader.unkn1,
+					"nverts": vertexCount,
+					"weight": streams.get("weight"),
+					"extraW": streams.get("extraW"),
+				}
+				if (
+					reMesh.blendShapeHeader is not None
+					and reMesh.blendShapeHeader.blendShapeList
+				):
+					self.pragmataBlendAux["blendHeader"] = capturePragmataBlendHeader(
+						reMesh.blendShapeHeader.blendShapeList[0]
+					)
 			if reMesh.blendShapeHeader != None:
 				print(
 					f"blendShape buffer start pos {str(reMesh.meshBufferHeader.vertexBufferOffset + blendShapeStartPos)}")
+
+		# Decode modern blend shape formats before the legacy path.
+		wildsBlendShapeDict = None
+		if (reMesh.meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+		        and reMesh.blendShapeHeader is not None
+		        and len(reMesh.blendShapeHeader.blendShapeList) > 0):
+			wildsBlendShapeDict = _decodePragBlendShapes(reMesh)
 
 		# Parse Main Meshes
 		if reMesh.lodHeader != None and len(vertexDictList) != 0:
@@ -594,7 +753,7 @@ class ParsedREMesh:
 			self.boundingBox = reMesh.lodHeader.bbox
 			self.mainMeshLODList = parseLODStructure(reMesh, reMesh.lodHeader.lodGroupList, vertexDictList,
 			                                         faceBufferList, usedVertexOffsetDictList,
-			                                         blendShapeBuffer)
+			                                         blendShapeBuffer, wildsBlendShapeDict)
 			for i in range(len(self.mainMeshLODList)):
 				lodOffsetDict[reMesh.lodHeader.lodGroupOffsetList[i]] = self.mainMeshLODList[i]
 		if reMesh.shadowHeader != None and len(vertexDictList) != 0:

@@ -43,7 +43,8 @@ from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 # gen_functions' old star export (fixed 2026-09) and prevented static analysis.
 # meshFileVersionToGameNameDict + SIX_WEIGHT_MESH_FILE_VERSIONS are re-exported
 # for blender_re_mesh_import/export/utils which import them FROM this module.
-from .mesh_versions import (SIX_WEIGHT_GAMES, SIX_WEIGHT_MESH_FILE_VERSIONS,
+from .mesh_versions import (PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, SIX_WEIGHT_GAMES,
+                            SIX_WEIGHT_MESH_FILE_VERSIONS,
                             VERSION_DD2, VERSION_DD2NEW, VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
                             VERSION_PRAG, VERSION_RE8, VERSION_RE9, VERSION_SF6,
                             getNearestRemapVersion, meshFileVersionToGameNameDict,
@@ -886,6 +887,7 @@ class BlendShapeData():
 		self.blendSOffset = 0
 		self.blendSSOffset = 0
 		self.blendTargetList = []
+		self.pragmataExtraTargets = []
 		self.aabbList = [AABB()]
 		self.blendS = [0, 0, 0, 0]
 		self.blendSSList = []
@@ -910,6 +912,15 @@ class BlendShapeData():
 			blendTargetEntry = BlendTarget()
 			blendTargetEntry.read(file, version)
 			self.blendTargetList.append(blendTargetEntry)
+		# Pragmata typing-2 files reserve (targetCount + typing) BlendTarget slots. The extra
+		# slots group non-morphing submeshes (teeth/eyes/leftover). Read them so export can
+		# paste the table instead of reconstructing it from one character's vert counts.
+		self.pragmataExtraTargets = []
+		if version == VERSION_PRAG and self.typing:
+			for i in range(0, self.typing):
+				extraTarget = BlendTarget()
+				extraTarget.read(file, version)
+				self.pragmataExtraTargets.append(extraTarget)
 		file.seek(self.aabbOffset)  # TODO FIX WRITE
 		self.aabbList.clear()
 		for i in range(0, self.targetCount):
@@ -970,6 +981,46 @@ class BlendShapeHeader():
 			entry.read(file, version)
 			self.blendShapeList.append(entry)
 		file.seek(currentPos)
+
+
+def capturePragmataBlendHeader(bsData):
+	"""Snapshot typing-2 BlendTarget grouping as JSON-friendly dicts.
+
+	Retail files store extra padded target slots after ``targetCount``. Those slots
+	hold the non-morphing submesh records (params, leftover grouping). Pasting this
+	table on export works for any character; reconstructing it from vert counts does not.
+	"""
+	extra = getattr(bsData, "pragmataExtraTargets", None) or []
+	subTable = []
+	targetMeta = []
+	for target in list(bsData.blendTargetList) + list(extra):
+		subStart = len(subTable)
+		for se in target.subMeshEntryList:
+			subTable.append(
+				[
+					int(se.subMeshVertexStartIndex),
+					int(se.vertOffset),
+					int(se.vertCount),
+					int(se.paramUnkn3),
+				]
+			)
+		targetMeta.append(
+			{
+				"ssIndex": int(target.blendSSIndex),
+				"nSh": int(target.blendShapeNum),
+				"unkn0": int(target.unkn0),
+				"subCount": int(target.subMeshEntryCount),
+				"unkn2": int(target.unkn2),
+				"subStart": subStart,
+			}
+		)
+	return {
+		"typing": int(getattr(bsData, "typing", 2) or 2),
+		"padding1": int(getattr(bsData, "padding1", 1) or 0),
+		"blendS": [int(x) for x in (getattr(bsData, "blendS", None) or [0, 0, 0])[:3]],
+		"subTable": subTable,
+		"targets": targetMeta,
+	}
 
 
 
@@ -1221,7 +1272,8 @@ class REMesh():
 			self.skeletonHeader = Skeleton()
 			self.skeletonHeader.read(file)
 		# TODO - Normal recalc is changed or offset is different in mhwilds
-		if self.fileHeader.blendShapesOffset and IMPORT_BLEND_SHAPES:
+		# Pragmata typing-2 meshes always read their blend shape header; other games stay gated by the flag.
+		if self.fileHeader.blendShapesOffset and (IMPORT_BLEND_SHAPES or self.meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS):
 			file.seek(self.fileHeader.blendShapesOffset)
 			self.blendShapeHeader = BlendShapeHeader()
 			self.blendShapeHeader.read(file, version)

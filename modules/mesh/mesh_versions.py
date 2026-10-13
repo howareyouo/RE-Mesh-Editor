@@ -154,6 +154,13 @@ MESH_FILE_VERSION_MHS3 = 250604100
 MESH_FILE_VERSION_PRAG = 251121828
 MESH_FILE_VERSION_RE9 = 250925211
 
+# Pragmata retail mesh extension (file .mesh.251121828). Not MH Wilds: typing 2, float16 xyz
+# deltas, aux+map prefix, sunbreakSecondUnknown = (mapOffset, deltaOffset). See docs/PRAGMATA.md.
+PRAGMATA_BLEND_SHAPE_FILE_VERSIONS = frozenset([
+	251121828,
+])
+
+
 # Meshes from these FILE versions use 6 bone weights per vertex.
 SIX_WEIGHT_MESH_FILE_VERSIONS = frozenset([
 	MESH_FILE_VERSION_SF6,
