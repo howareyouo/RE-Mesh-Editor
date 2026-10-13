@@ -45,7 +45,7 @@ from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 # for blender_re_mesh_import/export/utils which import them FROM this module.
 from .mesh_versions import (SIX_WEIGHT_GAMES, SIX_WEIGHT_MESH_FILE_VERSIONS,
                             VERSION_DD2, VERSION_DD2NEW, VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
-                            VERSION_PRAGDEMO, VERSION_RE8, VERSION_RE9, VERSION_SF6,
+                            VERSION_PRAG, VERSION_RE8, VERSION_RE9, VERSION_SF6,
                             getNearestRemapVersion, meshFileVersionToGameNameDict,
                             meshFileVersionToInternalVersionDict, meshFileVersionToNewVersionDict,
                             newVersionToMeshFileVersion)
@@ -399,7 +399,7 @@ class StreamingBufferHeaderEntry():
 		raw = file.read(20)
 		self.unkn0, self.totalBufferSize, self.vertexBufferLength = struct.unpack_from('<QII', raw)
 		self.mainVertexElementCount, self.vertexElementCount = struct.unpack_from('<HH', raw, 12)
-		if version >= VERSION_PRAGDEMO:
+		if version >= VERSION_PRAG:
 			raw2 = file.read(16)
 			self.prag_unknOffset0, self.prag_unknOffset1 = struct.unpack_from('<QQ', raw2)
 		# Batch read: uint×9 + uint + uint = 40 bytes
@@ -411,7 +411,7 @@ class StreamingBufferHeaderEntry():
 	def write(self, file, version):
 		file.write(struct.pack('<QIIHH', self.unkn0, self.totalBufferSize,
 			self.vertexBufferLength, self.mainVertexElementCount, self.vertexElementCount))
-		if version >= VERSION_PRAGDEMO:
+		if version >= VERSION_PRAG:
 			file.write(struct.pack('<QQ', self.prag_unknOffset0, self.prag_unknOffset1))
 		file.write(struct.pack('<11I', self.unpaddedBufferSize, self.unpaddedBufferSize2,
 			self.unkn7, self.unkn8, self.unkn9, self.unkn10, self.unkn11,
@@ -490,7 +490,7 @@ class MeshBufferHeader():
 			self.totalBufferSize, self.vertexBufferSize = struct.unpack_from('<II', raw2, off); off += 8
 			self.faceBufferOffset = self.vertexBufferOffset + self.vertexBufferSize
 			self.mainVertexElementCount, self.vertexElementCount = struct.unpack_from('<HH', raw2, off); off += 4
-			if version >= VERSION_PRAGDEMO:
+			if version >= VERSION_PRAG:
 				self.prag_unknOffset0, self.prag_unknOffset1 = struct.unpack_from('<QQ', raw2, off); off += 16
 			self.block2FaceBufferOffset, self.NULL = struct.unpack_from('<II', raw2, off); off += 8
 			self.faceBufferSize = self.block2FaceBufferOffset - self.vertexBufferSize
@@ -593,7 +593,7 @@ class MeshBufferHeader():
 		elif version >= VERSION_SF6:
 			file.write(struct.pack('<QIIHH', self.sunbreakOffset, self.totalBufferSize,
 				self.vertexBufferSize, self.mainVertexElementCount, self.vertexElementCount))
-			if version >= VERSION_PRAGDEMO:
+			if version >= VERSION_PRAG:
 				file.write(struct.pack('<QQ', self.prag_unknOffset0, self.prag_unknOffset1))
 			file.write(struct.pack('<IIhh', self.block2FaceBufferOffset, self.NULL,
 				self.vertexElementSize, self.unkn1))
@@ -1484,7 +1484,7 @@ class sizeData:
 		if version >= VERSION_DR:
 			self.MATERIAL_SUBDIVISION_SIZE = 32
 
-		if version >= VERSION_PRAGDEMO:
+		if version >= VERSION_PRAG:
 			self.VERTEX_ELEMENT_OFFSET = 96
 
 		self.VERTEX_ELEMENT_SIZE = 8
@@ -1538,7 +1538,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			reMesh.lodHeader.skinWeightCount = 9
 		elif version == VERSION_MHWILDS:
 			reMesh.lodHeader.skinWeightCount = 25  # Not sure why but this fixes monsters causing crashes and dead hitbox issues
-		elif version == VERSION_PRAGDEMO:
+		elif version == VERSION_PRAG:
 			reMesh.lodHeader.skinWeightCount = 27  #
 		elif version == VERSION_RE9:
 			reMesh.lodHeader.skinWeightCount = 18  #

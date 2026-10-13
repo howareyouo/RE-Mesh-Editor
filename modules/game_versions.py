@@ -29,7 +29,7 @@ GAME_INFO = {
     "MHWILDS": (241111606,   45,   241106027,   130),
     "ONI2":    (240827123,   46,   240701001,   127),
     "MHS3":    (250604100,   49,   251111100,   136),  # mdf2.49 has no dedicated parser yet
-    "PRAG":    (250925211,   51,   251111100,   135),  # demo mesh/mdf shared w/ RE9; retail tex = MHS3's (REME v0.73)
+    "PRAG":    (251121828,   51,   251111100,   135),  # retail mesh 251121828; demo build shared RE9's 250925211
     "RE9":     (250925211,   51,   250813143,   140),
 }
 
@@ -126,8 +126,8 @@ mdfVersionDict = {
     ".241111606": ".45",  # MHWILDS
     ".240827123": ".46",  # ONI2
     ".250604100": ".49",  # MHS3
-    # ".250925211": ".51",  # PRAG
     ".250925211": ".51",  # RE9
+    ".251121828": ".51",  # PRAG
 }
 
 # MDF version -> tex file extension, used when locating .tex files next to an

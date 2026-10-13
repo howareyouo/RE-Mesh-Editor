@@ -801,6 +801,7 @@ class ExportREMesh(Operator, ExportHelper):
 				(".240827123", "Onimusha 2", "Onimusha 2"),
 				(".241111606", "Monster Hunter Wilds", "Monster Hunter Wilds"),
 				#(".250925211", "Resident Evil 9 / Pragmata", "Resident Evil 9 / Pragmata"),
+				(".251121828", "Pragmata", "Pragmata"),
 				(".250925211", "Resident Evil 9", "Resident Evil 9"),
 				(".250604100", "Monster Hunter Stories 3", "Monster Hunter Stories 3"),
 			   ]
