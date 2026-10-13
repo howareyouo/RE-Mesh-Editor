@@ -6,15 +6,15 @@ import math
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mathutils import Vector
-from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
-from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton
+from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton, BlendShape
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
 from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, parseREMeshObjectMaterialName, resolveREMeshMaterialName, stripBlenderUserSuffix, ENABLE_EXPORT_WARNINGS
-from ..blender_utils import (showMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix,
+from ..blender_utils import (showMessageBox, showErrorMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix,
                              iterMeshLODCollections, iterCollectionMeshObjects)
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath
-from .blender_re_mesh_utils import triangulateMesh, bounding_sphere_ritter, getCollection, _game_settings, _resolve_symmetry_bone_index
+from .blender_re_mesh_utils import triangulateMesh, bounding_sphere_ritter, getCollection, _game_settings, _resolve_symmetry_bone_index, applyPragmataExportOrderAndStreams, assemblePragmataBlendAux
 
 
 MIN_WEIGHT = 0.002
@@ -458,7 +458,8 @@ def _export_read_bounding_boxes(boundingBoxCollection, armatureObj, parsedMesh, 
 
 
 def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, errorDict, warningDict, dg,
-                          armatureObj, armatureBoneNameSet, deleteCopiedMeshList, cloneMeshNameDict):
+                          armatureObj, armatureBoneNameSet, deleteCopiedMeshList, cloneMeshNameDict,
+                          meshVersion):
 	subMeshCount = 0
 	vertexCount = 0
 	faceCount = 0
@@ -468,6 +469,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 	meshDataStartTime = time.time()
 	isFirstLOD = True
 	remapDict = dict()
+	pragmataChunks = []  # (weight16, extra16, aux16, map4, src) per submesh, joined in finalize
 	# Aggregated across the parallel submesh extraction for the current LOD:
 	all_used_names = set()      # unprefixed group names actually referenced -> builds weightedBones/remap
 	all_submesh_vg = []         # (parsedSubMesh, vgNameList, bbox) -> raw weight indices remapped later
@@ -495,7 +497,22 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 			# Get copy of sub mesh with modifiers applied
 			# Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
 			cloneObj.name = "CLN_" + obj.name
+			# Evaluate with shape key values muted when exporting Pragmata blend shapes, so the
+			# exported positions and normals are the rest basis, not whatever morph mix the shape
+			# key sliders are set to. Only the Pragmata blend-shape path does this.
+			mutedShapeKeyValues = None
+			if (meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+					and obj.data.shape_keys is not None
+					and any(kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks)):
+				mutedShapeKeyValues = [kb.value for kb in obj.data.shape_keys.key_blocks]
+				for kb in obj.data.shape_keys.key_blocks:
+					kb.value = 0.0
+				dg.update()
 			cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
+			if mutedShapeKeyValues is not None:
+				for kb, v in zip(obj.data.shape_keys.key_blocks, mutedShapeKeyValues):
+					kb.value = v
+				dg.update()
 			clonedMeshCollection.objects.link(cloneObj)
 
 			print(f"Created temporary clone of {obj.name}: {cloneObj.name}")
@@ -713,7 +730,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 			# Mesh-mutating prep is already done, and foreach_get / numpy / bytes IO release
 			# the GIL, so worker threads overlap in real time (near-linear on multicore).
 
-			def _mergeSubMeshResult(res):
+			def _mergeSubMeshResult(res, rawsubmeshName):
 				# Serial merge (runs on main thread). Remap + bbox are deferred until the
 				# weighted-bone table is built from all groups' used_names.
 				ps, errs, bb, fl, used, vgNames = res
@@ -725,6 +742,44 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 					else:
 						addErrorToDict(errorDict, code, name)
 				visconGroup.subMeshList.append(ps)
+				if meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS:
+					# Pragmata blend shapes are exported automatically: sample per-vertex deltas
+					# from the ORIGINAL mesh's shape keys (the import writes them onto the source
+					# mesh; the worker thread never touches bpy). Runs on the main thread while
+					# the original objects still exist (clone cleanup happens after process_lods).
+					skVertCount = len(ps.vertexPosList)
+					rawsubmesh = bpy.data.objects.get(rawsubmeshName)
+					if (rawsubmesh is not None and rawsubmesh.data.shape_keys is not None
+							and len(rawsubmesh.data.shape_keys.key_blocks) > 1):
+						keyBlocks = rawsubmesh.data.shape_keys.key_blocks
+						basisBlock = keyBlocks[0]
+						if len(basisBlock.data) == skVertCount:
+							# Deltas transform by the rotation/scale (3x3) of the submesh world
+							# matrix, the same transform applied to the exported vertex positions
+							# (translation cancels out in the delta).
+							if options["rotate90"]:
+								subMeshWorldMatrix = rotateNeg90Matrix @ rawsubmesh.matrix_world
+							else:
+								subMeshWorldMatrix = rawsubmesh.matrix_world
+							blendRot = np.array(subMeshWorldMatrix.to_3x3())
+							basisCo = np.empty(skVertCount * 3, dtype=np.float32)
+							basisBlock.data.foreach_get("co", basisCo)
+							basisCo = basisCo.reshape(-1, 3)
+							for kb in keyBlocks[1:]:
+								skCo = np.empty(skVertCount * 3, dtype=np.float32)
+								kb.data.foreach_get("co", skCo)
+								skCo = skCo.reshape(-1, 3)
+								blendShapeEntry = BlendShape()
+								blendShapeEntry.blendShapeName = kb.name
+								blendShapeEntry.deltas = ((skCo - basisCo) @ blendRot.T).astype(np.float32)
+								ps.blendShapeList.append(blendShapeEntry)
+						else:
+							raiseWarning(
+								f"Shape key vertex count mismatch on {rawsubmesh.name}; skipping blend shape export.")
+					# Restore retail vertex order from pragmata_src_index and collect the raw
+					# weight/aux/map streams (permutes ps in place, deltas included).
+					pragmataChunks.append(
+						applyPragmataExportOrderAndStreams(rawsubmesh, ps, skVertCount))
 				if used and armatureObj != None:
 					all_used_names.update(used)
 					all_submesh_vg.append((ps, vgNames, bb))
@@ -735,7 +790,8 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 				pass
 			elif workers <= 1:
 				for task in subMeshTasks:
-					_mergeSubMeshResult(_gatherSubMesh(task, profile, MAX_FACES, armatureBoneNameSet))
+					_mergeSubMeshResult(_gatherSubMesh(task, profile, MAX_FACES, armatureBoneNameSet),
+					                    task[2])
 			else:
 				results = [None] * len(subMeshTasks)
 				with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -743,8 +799,8 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 					for fut in as_completed(futures):
 						results[futures[fut]] = fut.result()
 				# Serial merge in original submesh order
-				for res in results:
-					_mergeSubMeshResult(res)
+				for res, task in zip(results, subMeshTasks):
+					_mergeSubMeshResult(res, task[2])
 			print(
 				f"  Parallel submesh extraction took {formatMs(time.time() - gatherStart)} ms ({workers} workers, {len(subMeshTasks)} meshes).")
 
@@ -818,7 +874,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 	printElapsed("Gathering mesh data", meshDataStartTime)
 	if armatureObj != None:
 		printElapsed("Generating bone remap dictionary", boneRemapStartTime)
-	return subMeshCount, vertexCount, faceCount, boneMin, boneMax
+	return subMeshCount, vertexCount, faceCount, boneMin, boneMax, pragmataChunks
 
 def _export_build_bone_bboxes(parsedMesh, armatureObj, options, transform, importedBoneBoundingBoxes,
                                boneMin, boneMax):
@@ -891,7 +947,7 @@ def _export_calc_mesh_bounds(parsedMesh):
 
 def _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollection, hashedBoneNameDict,
                       subMeshCount, vertexCount, faceCount, maxWeightedBones, meshExportStartTime,
-                      warningDict):
+                      warningDict, pragmataChunks):
 	showWarningMessage = False
 	# Warning: Compare the exported mesh materials against the materials in the mesh's MDF file
 	if parsedMesh.materialNameList:
@@ -932,6 +988,31 @@ def _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollecti
 				parsedMesh.skeleton.weightedBones[index] = hashedBoneNameDict[boneName]
 
 	meshWriteStartTime = time.time()
+	if meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS:
+		# Blend-shape (morph) export needs the full imported stream set: the retail vertex
+		# order, the type-4/7 weight streams, and the aux/map morph tail blobs. Missing
+		# streams mean a zeroed morph tail, which crashes the GPU, so refuse to write.
+		assemblePragmataBlendAux(targetCollection, parsedMesh, pragmataChunks)
+		hasShapes = any(
+			getattr(sm, "blendShapeList", None)
+			for lod in parsedMesh.mainMeshLODList
+			for viscon in lod.visconGroupList
+			for sm in viscon.subMeshList
+		)
+		auxInfo = getattr(parsedMesh, "pragmataBlendAux", None) or {}
+		if hasShapes and not auxInfo.get("topologyValid", False):
+			msg = auxInfo.get("topologyError") or (
+				"Pragmata face export requires the complete imported vertex topology.")
+			print(msg)
+			showErrorMessageBox(msg)
+			return False
+		if hasShapes and not (auxInfo.get("aux") and auxInfo.get("auxExtra")):
+			msg = ("Pragmata face export needs imported morph aux/map streams on the .blend "
+			       "(same vertex count as import). Re-import the mesh; remesh is not supported. "
+			       "Refusing to write a zeroed morph tail, which crashes the GPU.")
+			print(msg)
+			showErrorMessageBox(msg)
+			return False
 	reMesh = ParsedREMeshToREMesh(parsedMesh, meshVersion)
 	if targetCollection != None:
 		reMesh.fileHeader.lodGroupNameHash = int(targetCollection.get("LODGroupNameHash", "0"))
@@ -1067,9 +1148,9 @@ def exportREMeshFile(filePath, options):
 	dg = bpy.context.evaluated_depsgraph_get()
 	deleteCopiedMeshList = []
 	cloneMeshNameDict = {}
-	subMeshCount, vertexCount, faceCount, boneMin, boneMax = _export_process_lods(
+	subMeshCount, vertexCount, faceCount, boneMin, boneMax, pragmataChunks = _export_process_lods(
 		meshLODCollectionList, options, weightSettings, parsedMesh, errorDict, warningDict, dg,
-		armatureObj, armatureBoneNameSet, deleteCopiedMeshList, cloneMeshNameDict)
+		armatureObj, armatureBoneNameSet, deleteCopiedMeshList, cloneMeshNameDict, meshVersion)
 	_export_build_bone_bboxes(parsedMesh, armatureObj, options, transform, importedBoneBoundingBoxes,
 	                          boneMin, boneMax)
 	_export_calc_mesh_bounds(parsedMesh)
@@ -1098,4 +1179,4 @@ def exportREMeshFile(filePath, options):
 
 	return _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollection,
 	                        hashedBoneNameDict, subMeshCount, vertexCount, faceCount,
-	                        maxWeightedBones, meshExportStartTime, warningDict)
+	                        maxWeightedBones, meshExportStartTime, warningDict, pragmataChunks)

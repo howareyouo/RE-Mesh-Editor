@@ -1023,6 +1023,326 @@ def capturePragmataBlendHeader(bsData):
 	}
 
 
+def _pragmataBlendShapeName(name):
+	if not name:
+		return name
+	if name.startswith("Neutral_geo_cbs.") or "." in name:
+		return name
+	if name.startswith("crct_"):
+		return "Neutral_geo_cbs." + name
+	return name
+
+
+def computeBlendShapeAABB(deltaArrayList):
+	"""Return the symmetric (min = -max) AABB covering the per-axis extent of the given delta arrays.
+
+	This is the box the 11/10/11 delta packing quantizes against.
+	"""
+	aabb = AABB()
+	if not deltaArrayList:
+		return aabb
+	allDeltas = np.concatenate(
+		[np.asarray(d, dtype=np.float64).reshape(-1, 3) for d in deltaArrayList], axis=0)
+	if len(allDeltas) == 0:
+		return aabb
+	maxAbs = np.maximum(np.max(np.abs(allDeltas), axis=0), 1e-6)
+	aabb.min.x, aabb.min.y, aabb.min.z = (-maxAbs[0], -maxAbs[1], -maxAbs[2])
+	aabb.max.x, aabb.max.y, aabb.max.z = (maxAbs[0], maxAbs[1], maxAbs[2])
+	return aabb
+
+
+def remapPragmataBlendHeader(header, origStartToExportStart, morphExportStart, morphVertCount):
+	"""Rewrite imported subTable start indices to the exported vertex buffer.
+
+	Leftover records that span several submeshes keep their vertCount and only
+	remap ``startIdx``. The first record is the morphing submesh.
+	"""
+	subTable = []
+	for start, voff, count, param in header.get("subTable") or []:
+		newStart = origStartToExportStart.get(int(start), int(start))
+		subTable.append([int(newStart), int(voff or 0), int(count), int(param)])
+	if subTable:
+		subTable[0][0] = int(morphExportStart)
+		subTable[0][2] = int(morphVertCount)
+	return subTable
+
+
+def fallbackPragmataBlendSubs(allSubs):
+	"""Build a morph-first sub table when no imported header is on the .blend.
+
+	Each non-morphing submesh gets ``param = matIdx << 8``. No leftover collapse.
+	"""
+	extraSubs = []
+	morph = None
+	for startIdx, vertCount, matIdx, hasShapes, sm in allSubs:
+		if hasShapes:
+			morph = (int(startIdx), 0, int(vertCount), 256)
+			continue
+		extraSubs.append(
+			(int(startIdx), 0, int(vertCount), (int(matIdx) << 8) & 0xFFFFFFFF))
+	targetMeta = [
+		{"ssIndex": 0, "nSh": 0, "unkn0": 0, "subCount": 1, "unkn2": 1, "subStart": 0}
+	]
+	if extraSubs:
+		targetMeta.append(
+			{
+				"ssIndex": 0,
+				"nSh": 0,
+				"unkn0": 0,
+				"subCount": len(extraSubs),
+				"unkn2": 0,
+				"subStart": 1,
+			}
+		)
+	return morph, extraSubs, targetMeta
+
+
+def buildPragmataBlendShapeExport(parsedMesh, parsedSubMeshToSubMeshDataDict):
+	"""Pack Pragmata face blendshapes as an 8-byte-per-vert tail (face submesh only).
+
+	Unlike MH Wilds, retail Pragmata (`typing` 2) stores one target whose dense delta block covers
+	only the morphing submesh. A topology aux table and u32 vert map sit in front of the float16
+	deltas; MeshBufferHeader.sunbreakSecondUnknown points at those two streams.
+
+	Extra-submesh grouping is pasted from the imported blend header when present.
+	Without that snapshot, each non-morphing submesh is emitted as its own record.
+	"""
+	blendNames = []
+	deltaChunks = []
+	targets = []
+	if not parsedMesh.mainMeshLODList:
+		return None, None, None
+	lod = parsedMesh.mainMeshLODList[0]
+	allSubs = []  # (start, count, matIdx, hasShapes, sm)
+	for viscon in lod.visconGroupList:
+		for sm in viscon.subMeshList:
+			shapes = getattr(sm, "blendShapeList", None)
+			subData = parsedSubMeshToSubMeshDataDict.get(sm)
+			startIdx = subData.vertexStartIndex if subData is not None else 0
+			vertCount = len(sm.vertexPosList)
+			matIdx = int(getattr(sm, "materialIndex", 0) or 0)
+			allSubs.append((startIdx, vertCount, matIdx, bool(shapes), sm))
+
+	morphingSubs = [entry for entry in allSubs if entry[3]]
+	if len(morphingSubs) > 1:
+		raiseError(
+			"Pragmata typing-2 export supports exactly one morphing submesh, "
+			f"found {len(morphingSubs)}. Remove shape keys from every other "
+			"submesh before export."
+		)
+
+	extraSubs = []
+	morphStart = morphCount = morphParam = None
+	origStartToExportStart = {}
+	for startIdx, vertCount, matIdx, hasShapes, sm in allSubs:
+		orig = getattr(sm, "pragmataSrcStart", None)
+		if orig is not None:
+			origStartToExportStart[int(orig)] = int(startIdx)
+		if hasShapes:
+			morphStart, morphCount, morphParam = startIdx, vertCount, 256
+
+	header = None
+	auxInfo = getattr(parsedMesh, "pragmataBlendAux", None) or {}
+	if isinstance(auxInfo.get("blendHeader"), dict):
+		header = auxInfo["blendHeader"]
+	targetMeta = None
+	if header and header.get("subTable") and morphStart is not None:
+		subTable = remapPragmataBlendHeader(
+			header, origStartToExportStart, morphStart, morphCount)
+		extraSubs = [tuple(s) for s in subTable[1:]]
+		targetMeta = list(header.get("targets") or [])
+		print(
+			f"Pragmata blend header from .blend: {len(subTable)} sub records, "
+			f"{len(targetMeta)} target slots"
+		)
+	else:
+		_morphSub, extraSubs, targetMeta = fallbackPragmataBlendSubs(allSubs)
+		if morphStart is None and _morphSub is not None:
+			morphStart, morphCount, morphParam = (
+				_morphSub[0],
+				_morphSub[2],
+				_morphSub[3],
+			)
+		raiseWarning(
+			"Pragmata blend-header snapshot missing on the .blend; writing a generic "
+			"morph-first sub table (no leftover collapse). Re-import the mesh to paste "
+			"retail grouping."
+		)
+
+	for viscon in lod.visconGroupList:
+		for sm in viscon.subMeshList:
+			shapes = getattr(sm, "blendShapeList", None)
+			if not shapes:
+				continue
+			subData = parsedSubMeshToSubMeshDataDict.get(sm)
+			startIdx = subData.vertexStartIndex if subData is not None else 0
+			vertCount = len(sm.vertexPosList)
+			aabb = computeBlendShapeAABB([bs.deltas for bs in shapes])
+			ssIndex = len(blendNames)
+			for bs in shapes:
+				bs.blendShapeName = _pragmataBlendShapeName(bs.blendShapeName)
+				blendNames.append(bs.blendShapeName)
+			# typing 2 stores IEEE float16 xyz deltas (4th half unused). Wilds 11/10/11 packing
+			# in this slot is read as huge f16 values (~100-1000m), which swallows the camera.
+			shapeBytes = []
+			for bs in shapes:
+				real = np.asarray(bs.deltas, dtype=np.float32).reshape(-1, 3)
+				if len(real) != vertCount:
+					padded = np.zeros((vertCount, 3), dtype=np.float32)
+					n = min(len(real), vertCount)
+					padded[:n] = real[:n]
+					real = padded
+				rec = np.zeros((vertCount, 4), dtype="<f2")
+				rec[:, 0] = real[:, 0]
+				rec[:, 1] = real[:, 1]
+				rec[:, 2] = real[:, 2]
+				shapeBytes.append(rec.tobytes())
+			deltaChunks.append(b"".join(shapeBytes))
+			matIdx = int(getattr(sm, "materialIndex", 0) or 0)
+			targets.append(
+				{
+					"blendShapeNum": len(shapes),
+					"subEntries3": [
+						(startIdx, 0, vertCount, 256)
+					],
+					"extraSubs": extraSubs,
+					"aabb": aabb,
+					"blendSSIndex": ssIndex,
+					"targetMeta": targetMeta,
+				}
+			)
+			print(
+				f"Pragmata blend export: {len(shapes)} shape(s) on submesh start={startIdx} "
+				f"verts={vertCount} bytes={len(deltaChunks[-1])}"
+			)
+	if not targets:
+		return None, None, None
+	typingVal = 2
+	padding1 = 1
+	blendS = [0, 0, 0]
+	if header:
+		typingVal = int(header.get("typing") or 2)
+		padding1 = int(header.get("padding1") or 1)
+		blendS = list(header.get("blendS") or [0, 0, 0])[:3]
+	perLodList = [
+		{
+			"targets": targets,
+			"typing": typingVal,
+			"padding1": padding1,
+			"blendS": blendS,
+			"targetMeta": targetMeta,
+		}
+	]
+	return b"".join(deltaChunks), perLodList, blendNames
+
+
+def serializePragmataBlendShapeRegion(perLodList, baseOffset):
+	"""Serialize Pragmata typing-2 blend metadata in retail field order.
+
+	Wilds writes BlendTargets immediately after BlendShapeData. Retail typing-2 files store the
+	submesh table first (morphing submesh first, then extra grouped records), then
+	targetCount+typing BlendTarget slots, then AABB / blendS (16-aligned) / blendSS. The game
+	appears to walk that layout; using the Wilds order makes it read the mesh buffer header as
+	vert counts and explode the head.
+	"""
+	lod = perLodList[0]
+	targets = lod["targets"]
+	t0 = targets[0]
+	typingVal = int(lod.get("typing") or 2)
+	nTargets = 1
+	targetMeta = lod.get("targetMeta") or t0.get("targetMeta")
+	paddedTargetCount = nTargets + typingVal
+	if targetMeta:
+		paddedTargetCount = max(paddedTargetCount, len(targetMeta))
+	morphSub = tuple(t0["subEntries3"][0])
+	extraSubs = [tuple(s) for s in (t0.get("extraSubs") or [])]
+	subTable = [morphSub] + extraSubs
+	nShapes = int(t0["blendShapeNum"])
+	aabb = t0["aabb"]
+
+	# Relative layout matching vanilla ch0100_10 (720-byte block).
+	dataStructOff = 48
+	subOff = 96
+	targetListOff = subOff + 16 * len(subTable)
+	aabbOff = targetListOff + 16 * paddedTargetCount
+	blendSOff = aabbOff + 32 * nTargets
+	blendSSOff = getPaddedPos(blendSOff + 12, 16)
+	endOff = getPaddedPos(blendSSOff + nShapes * 4, 16)
+	buf = bytearray(endOff)
+
+	def abs_off(rel):
+		return baseOffset + rel
+
+	struct.pack_into("<Q", buf, 0, 1)  # count
+	struct.pack_into("<Q", buf, 8, 0)  # zero
+	struct.pack_into("<Q", buf, 16, abs_off(32))  # mainOffset -> offset list
+	struct.pack_into("<Q", buf, 24, 0)  # hash
+	struct.pack_into("<Q", buf, 32, abs_off(dataStructOff))
+
+	d = dataStructOff
+	struct.pack_into("<H", buf, d + 0, nTargets)
+	struct.pack_into("<H", buf, d + 2, typingVal)
+	struct.pack_into("<I", buf, d + 4, (nShapes << 16) | (int(t0.get("blendSSIndex", 0)) & 0xFFFF))
+	struct.pack_into("<I", buf, d + 8, int(lod.get("padding1", 1)))
+	struct.pack_into("<I", buf, d + 12, 0)
+	struct.pack_into("<Q", buf, d + 16, abs_off(targetListOff))
+	struct.pack_into("<Q", buf, d + 24, abs_off(aabbOff))
+	struct.pack_into("<Q", buf, d + 32, abs_off(blendSOff))
+	struct.pack_into("<Q", buf, d + 40, abs_off(blendSSOff))
+
+	for i, se in enumerate(subTable):
+		startIdx, vertOffset, vertCount = se[0], se[1], se[2]
+		paramUnkn3 = se[3] if len(se) > 3 else 0
+		o = subOff + i * 16
+		struct.pack_into("<I", buf, o + 0, int(startIdx))
+		struct.pack_into("<I", buf, o + 4, int(vertOffset or 0))
+		struct.pack_into("<I", buf, o + 8, int(vertCount))
+		struct.pack_into("<I", buf, o + 12, int(paramUnkn3))
+
+	# Real morph target, then `typing` extra targets that group the non-morphing submeshes.
+	# Vanilla ch0100_10: target1 has 4 entries (tooth/eyes/shell), target2 has the leftover record.
+	def pack_target(slot, ssIndex, nSh, unkn0, subCount, unkn2, subRel):
+		o = targetListOff + slot * 16
+		struct.pack_into("<H", buf, o + 0, ssIndex)
+		struct.pack_into("<H", buf, o + 2, nSh)
+		struct.pack_into("<H", buf, o + 4, unkn0)
+		struct.pack_into("<B", buf, o + 6, subCount)
+		struct.pack_into("<B", buf, o + 7, unkn2)
+		struct.pack_into("<Q", buf, o + 8, abs_off(subRel) if subCount else 0)
+
+	pack_target(0, int(t0.get("blendSSIndex", 0)), nShapes, 0, 1, 1, subOff)
+	if targetMeta and len(targetMeta) > 1:
+		for slot, tm in enumerate(targetMeta[1:], start=1):
+			pack_target(
+				slot,
+				int(tm.get("ssIndex") or 0),
+				int(tm.get("nSh") or 0),
+				int(tm.get("unkn0") or 0),
+				int(tm.get("subCount") or 0),
+				int(tm.get("unkn2") or 0),
+				subOff + 16 * int(tm.get("subStart") or 0),
+			)
+	elif len(extraSubs) >= 5:
+		pack_target(1, 0, 0, 0, 4, 0, subOff + 16)
+		pack_target(2, 0, 0, 0, 1, 0, subOff + 16 * 5)
+	elif extraSubs:
+		pack_target(1, 0, 0, 0, len(extraSubs), 0, subOff + 16)
+		pack_target(2, 0, 0, 0, 0, 0, 0)
+
+	struct.pack_into("<4f", buf, aabbOff + 0, aabb.min.x, aabb.min.y, aabb.min.z, 0.0)
+	struct.pack_into("<4f", buf, aabbOff + 16, aabb.max.x, aabb.max.y, aabb.max.z, 0.0)
+
+	for k, v in enumerate((lod.get("blendS") or [0, 0, 0])[:3]):
+		struct.pack_into("<i", buf, blendSOff + k * 4, int(v))
+	for i in range(nShapes):
+		struct.pack_into("<i", buf, blendSSOff + i * 4, i)
+
+	print(
+		f"Pragmata blend region: {endOff} bytes, {len(subTable)} sub records, "
+		f"targetRel={targetListOff} subRel={subOff}"
+	)
+	return bytes(buf)
+
 
 class BoneAABBGroup():
 	def __init__(self):
@@ -1244,6 +1564,8 @@ class REMesh():
 		self.materialNameRemapList = []
 		self.boneNameRemapList = []
 		self.blendShapeNameRemapList = []
+		self.normalRecalcRegionBytes = b""  # Pragmata 16-byte normal-recalc stub (pre-serialized)
+		self.blendShapeRegionBytes = b""  # Pragmata typing-2 blend metadata region (pre-serialized)
 
 	def read(self, file, version, lodTarget=None,
 	         streamingBuffer=None):  # LOD target is an int that determines what lod level to import, the rest get ignored
@@ -1392,6 +1714,18 @@ class REMesh():
 			checkWriteOffset(file, "aabbOffset", self.fileHeader.aabbOffset)
 			self.boneBoundingBoxHeader.write(file)
 
+		# Pragmata normal-recalc stub (pre-serialized in ParsedREMeshToREMesh).
+		if self.fileHeader.normalRecalcOffset and self.normalRecalcRegionBytes:
+			checkWriteOffset(file, "normalRecalcOffset", self.fileHeader.normalRecalcOffset)
+			file.write(self.normalRecalcRegionBytes)
+			file.write(b'\x00' * getPaddingAmount(file.tell(), 16))
+
+		# Pragmata typing-2 blend shape struct region (pre-serialized in ParsedREMeshToREMesh).
+		if self.fileHeader.blendShapesOffset and self.blendShapeRegionBytes:
+			checkWriteOffset(file, "blendShapesOffset", self.fileHeader.blendShapesOffset)
+			file.write(self.blendShapeRegionBytes)
+			file.write(b'\x00' * getPaddingAmount(file.tell(), 16))
+
 		if self.fileHeader.meshOffset:
 			checkWriteOffset(file, "meshOffset", self.fileHeader.meshOffset)
 			self.meshBufferHeader.write(file, version)
@@ -1439,23 +1773,26 @@ def _normalizeWeights(boneWeightsArray):
 	return boneWeightsArray
 
 
-def _packIndices(boneIndicesList, isSixWeight):
+def _packIndices(boneIndicesList, isSixWeight, indexPad=0):
 	if isSixWeight:
+		indexPad &= 3
 		indices = np.asarray(boneIndicesList, dtype=np.uint64)
 		uint64Array = (
 				(indices[:, 0] & 0x3FF) |
 				((indices[:, 1] & 0x3FF) << 10) |
 				((indices[:, 2] & 0x3FF) << 20) |
+				((indexPad) << 30) |
 				((indices[:, 3] & 0x3FF) << 32) |
 				((indices[:, 4] & 0x3FF) << 42) |
-				((indices[:, 5] & 0x3FF) << 52)
+				((indices[:, 5] & 0x3FF) << 52) |
+				((indexPad) << 62)
 		)
 		return np.ascontiguousarray(uint64Array).view(dtype="<B").reshape(-1, 8)
 	return np.asarray(boneIndicesList, dtype="<B")
 
 
-def WriteToWeightBuffer(bufferStream, boneWeightsList, boneIndicesList, isSixWeight):
-	boneIndicesArray = _packIndices(boneIndicesList, isSixWeight)
+def WriteToWeightBuffer(bufferStream, boneWeightsList, boneIndicesList, isSixWeight, indexPad=0):
+	boneIndicesArray = _packIndices(boneIndicesList, isSixWeight, indexPad)
 	boneWeightsArray = np.array(boneWeightsList, dtype=np.float32)
 	boneWeightsArray = _normalizeWeights(boneWeightsArray)
 	weightArray = np.empty((len(boneWeightsList) * 2, 8), dtype=np.dtype("<B"))
@@ -1465,8 +1802,8 @@ def WriteToWeightBuffer(bufferStream, boneWeightsList, boneIndicesList, isSixWei
 
 
 def WriteToWeightBufferExtended(bufferStream, boneWeightsList, boneIndicesList, extraBufferStream,
-                                extraBoneWeightsList, extraBoneIndicesList, isSixWeight):
-	boneIndicesArray = _packIndices(boneIndicesList, isSixWeight)
+                                extraBoneWeightsList, extraBoneIndicesList, isSixWeight, indexPad=0):
+	boneIndicesArray = _packIndices(boneIndicesList, isSixWeight, indexPad)
 	extraBoneIndicesArray = _packIndices(extraBoneIndicesList, isSixWeight)
 
 	boneWeightsArray = np.array(boneWeightsList, dtype=np.float32)
@@ -1608,6 +1945,8 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 
 		# SF6 uses six weights with higher possible bone index values
 		isSixWeight = version in SIX_WEIGHT_GAMES
+		# Retail Pragmata sets the 2-bit pads in the 6-weight index pack to 0b11.
+		weightIndexPad = 3 if version == VERSION_PRAG else 0
 
 		# Main Meshes
 		# TODO Move lod parsing into a function and call it for both main and shadow mesh
@@ -1669,10 +2008,12 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 								WriteToWeightBufferExtended(weightBuffer, parsedSubMesh.weightList,
 								                            parsedSubMesh.weightIndicesList,
 								                            extraWeightBuffer, parsedSubMesh.extraWeightList,
-								                            parsedSubMesh.extraWeightIndicesList, isSixWeight)
+								                            parsedSubMesh.extraWeightIndicesList, isSixWeight,
+								                            indexPad=weightIndexPad)
 							else:
 								WriteToWeightBuffer(weightBuffer, parsedSubMesh.weightList,
-								                    parsedSubMesh.weightIndicesList, isSixWeight)
+								                    parsedSubMesh.weightIndicesList, isSixWeight,
+								                    indexPad=weightIndexPad)
 
 						# DD2 shapekeys
 						if len(parsedSubMesh.secondaryWeightIndicesList) != 0 and len(
@@ -1779,12 +2120,29 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			reMesh.boneNameRemapList.append(currentNameIndex)
 			currentNameIndex += 1
 	# TODO Blend Shape Names Remap
+	# Pragmata blend shape (shape key) export: gather packed deltas and register morph names.
+	# Blend shape names are appended after material/bone names; the remap maps each to its
+	# rawNameList index (the import reads them back as the trailing name entries).
+	# Returns (None, None, None) when there are no shape keys.
+	if version == VERSION_PRAG:
+		blendDeltaBytes, blendPerLodList, blendNames = buildPragmataBlendShapeExport(
+			parsedMesh, parsedSubMeshToSubMeshDataDict)
+	else:
+		blendDeltaBytes, blendPerLodList, blendNames = None, None, None
+	if blendNames is not None:
+		for name in blendNames:
+			reMesh.blendShapeNameRemapList.append(len(reMesh.rawNameList))
+			reMesh.rawNameList.append(name)
+			currentNameIndex += 1
 
 	reMesh.fileHeader.materialNameRemapOffset = currentOffset
 	currentOffset = getPaddedPos(currentOffset + (len(reMesh.materialNameRemapList) * 2), 16)
 	if parsedMesh.skeleton != None:
 		reMesh.fileHeader.boneNameRemapOffset = currentOffset
 		currentOffset = getPaddedPos(currentOffset + (len(reMesh.boneNameRemapList) * 2), 16)
+	if blendNames is not None:
+		reMesh.fileHeader.blendShapeNameOffset = currentOffset
+		currentOffset = getPaddedPos(currentOffset + (len(reMesh.blendShapeNameRemapList) * 2), 16)
 
 	reMesh.fileHeader.nameOffsetsOffset = currentOffset
 	currentOffset = getPaddedPos(currentOffset + (len(reMesh.rawNameList) * 8),
@@ -1800,10 +2158,42 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		reMesh.boneBoundingBoxHeader.offset = currentOffset + sd.AABB_OFFSET
 		currentOffset += sd.AABB_OFFSET + reMesh.boneBoundingBoxHeader.count * sd.AABB_SIZE
 
+	# Retail Pragmata stores a 16-byte normal-recalc stub immediately before the blend header.
+	if version == VERSION_PRAG and blendPerLodList is not None:
+		reMesh.fileHeader.normalRecalcOffset = currentOffset
+		reMesh.normalRecalcRegionBytes = struct.pack("<Q", 1) + bytes(8)
+		currentOffset = getPaddedPos(currentOffset + 16, 16)
+
+	# Pragmata typing-2 blend shape struct region (header + per-LOD data), placed before the mesh buffer.
+	if blendPerLodList is not None:
+		reMesh.fileHeader.blendShapesOffset = currentOffset
+		reMesh.blendShapeRegionBytes = serializePragmataBlendShapeRegion(blendPerLodList, currentOffset)
+		currentOffset = getPaddedPos(currentOffset + len(reMesh.blendShapeRegionBytes), 16)
+
 	# Mesh Buffer
 	reMesh.fileHeader.meshOffset = currentOffset
 
 	reMesh.meshBufferHeader = MeshBufferHeader()
+	# Retail Pragmata extra-weight (type 7) is not Wilds' 7th-12th influences: it is a second
+	# index pack the face shader fetches. Blender cannot represent it as vertex groups, so
+	# reuse the streams persisted on the .blend (imported as vertex attributes).
+	if version == VERSION_PRAG:
+		auxInfo = getattr(parsedMesh, "pragmataBlendAux", None) or {}
+		nverts = vertexPosBuffer.tell() // 12
+		want = nverts * 16
+		vanWeight = auxInfo.get("weight") if auxInfo else None
+		vanExtra = auxInfo.get("extraW") if auxInfo else None
+		if vanWeight and len(vanWeight) == want:
+			weightBuffer.close()
+			weightBuffer = BytesIO(vanWeight)
+			weightBuffer.seek(0, 2)
+			print(f"Pragmata: using imported type-4 weight stream ({want} bytes); vertex-group edits are not written")
+		if vanExtra and len(vanExtra) == want:
+			extraWeightBuffer.close()
+			extraWeightBuffer = BytesIO(vanExtra)
+			extraWeightBuffer.seek(0, 2)
+			print(f"Pragmata: using imported type-7 extra-weight stream ({want} bytes); vertex-group edits are not written")
+
 	# Collect vertex buffer chunks as bytes, join once at the end (avoids repeated bytearray.extend reallocations)
 	vertexBufferChunks = []
 	vertexElementTuples = []
@@ -1842,6 +2232,39 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		vertexElementTuples.append((7, 16, currentBufferOffset))
 		currentBufferOffset += extraWeightBuffer.tell()
 		vertexBufferChunks.append(extraWeightBuffer.getvalue())
+
+	# Pragmata typing-2 tail: after declared vertex elements the buffer is
+	#   [aux 16*nverts][extra 896][u32 vert map][float16 xyz deltas]
+	# MeshBufferHeader.sunbreakSecondUnknown holds (mapOffset, deltaOffset) as two u32s.
+	# Putting deltas at the geometry end (and leaving those offsets 0) makes the face shader
+	# fail to bind -- eyes/teeth still draw because they are not morph targets.
+	if version == VERSION_PRAG and blendDeltaBytes:
+		nverts = vertexPosBuffer.tell() // 12
+		declared = currentBufferOffset
+		auxInfo = getattr(parsedMesh, "pragmataBlendAux", None)
+		aux = (auxInfo or {}).get("aux") or b""
+		extra = (auxInfo or {}).get("auxExtra") or b""
+		if not extra or len(aux) != nverts * 20 + len(extra):
+			raiseError(
+				"Pragmata face export requires imported morph aux/map streams on the .blend "
+				"(same vertex count as import). Re-import the mesh; remesh is not supported. "
+				"Refusing to write a zeroed morph tail, which crashes the GPU."
+			)
+		vertexBufferChunks.append(aux)
+		currentBufferOffset += len(aux)
+		mapOff = declared + len(aux) - nverts * 4
+		deltaOff = currentBufferOffset
+		vertexBufferChunks.append(blendDeltaBytes)
+		currentBufferOffset += len(blendDeltaBytes)
+		reMesh.meshBufferHeader.sunbreakSecondUnknown = mapOff | (deltaOff << 32)
+		if auxInfo.get("veSize") is not None:
+			reMesh.meshBufferHeader.vertexElementSize = int(auxInfo["veSize"])
+		if auxInfo.get("unkn1") is not None:
+			reMesh.meshBufferHeader.unkn1 = int(auxInfo["unkn1"])
+		print(
+			f"Pragmata blend tail: aux={len(aux)} mapOff={mapOff} deltaOff={deltaOff} "
+			f"deltas={len(blendDeltaBytes)} vtxBuf={currentBufferOffset}"
+		)
 
 	# Single allocation: join all chunks into the final vertex buffer
 	reMesh.meshBufferHeader.vertexBuffer = bytearray().join(vertexBufferChunks)
@@ -1891,9 +2314,20 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		reMesh.fileHeader.sf6UnknCount = 6
 		reMesh.fileHeader.lodGroupNameHash = 3407096719
 
+	# Final Pragmata backfill: the tail path above may already have set these, and the
+	# SF6 defaults (27104 / -1) must never leak into the retail header.
+	pragmataAux = getattr(parsedMesh, "pragmataBlendAux", None)
+	if version == VERSION_PRAG and pragmataAux:
+		if pragmataAux.get("veSize") is not None:
+			reMesh.meshBufferHeader.vertexElementSize = int(pragmataAux["veSize"])
+		if pragmataAux.get("unkn1") is not None:
+			reMesh.meshBufferHeader.unkn1 = int(pragmataAux["unkn1"])
+
 	currentOffset = getPaddedPos(
 		reMesh.meshBufferHeader.faceBufferOffset + reMesh.meshBufferHeader.faceBufferSize, 16)
-	if version >= VERSION_DD2:
+	# DD2 secondary weights reuse sunbreakSecondUnknown as a byte length. Pragmata/RE9
+	# store (mapOffset, deltaOffset) there; do not overwrite it.
+	if version >= VERSION_DD2 and version not in (VERSION_PRAG, VERSION_RE9):
 		if parsedMesh.bufferHasSecondaryWeight:
 			reMesh.meshBufferHeader.sunbreakOffset = reMesh.meshBufferHeader.vertexBufferOffset + reMesh.meshBufferHeader.totalBufferSize
 
@@ -1905,7 +2339,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 
 	reMesh.fileHeader.contentFlag.setBitFlag(unknFlag16, unknFlag10, hasUnknFlag8=True,
 	                                         hasGroupPivot=reMesh.floatsHeader != None,
-	                                         hasBlendShape=reMesh.blendShapeHeader != None,
+	                                         hasBlendShape=blendPerLodList is not None,
 	                                         hasSkeleton=reMesh.skeletonHeader != None,
 	                                         hasAABB=reMesh.boneBoundingBoxHeader != None)
 	vertexPosBuffer.close()

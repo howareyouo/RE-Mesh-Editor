@@ -753,7 +753,7 @@ class ParsedREMesh:
 			self.boundingBox = reMesh.lodHeader.bbox
 			self.mainMeshLODList = parseLODStructure(reMesh, reMesh.lodHeader.lodGroupList, vertexDictList,
 			                                         faceBufferList, usedVertexOffsetDictList,
-			                                         blendShapeBuffer, wildsBlendShapeDict)
+			                                         blendShapeBuffer, True, wildsBlendShapeDict)
 			for i in range(len(self.mainMeshLODList)):
 				lodOffsetDict[reMesh.lodHeader.lodGroupOffsetList[i]] = self.mainMeshLODList[i]
 		if reMesh.shadowHeader != None and len(vertexDictList) != 0:
