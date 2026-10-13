@@ -562,6 +562,18 @@ class ImportREMesh(Operator, ImportHelper):
 	   name = "Load Shell Fur",
 	   description = "Load shell fur data from sfur file if present",
 	   default = False)
+	sf6CmdIndex : IntProperty(
+	   name = "SF6 Color Index",
+	   description = "CMD color file index. For example, 0 loads cmd_000 and 2 loads cmd_002. Leave to 1 to import SF6 Base Color outfit.",
+	   default = 0,
+	   min = 0,
+	   max = 999)
+	sf6CostumeIndex : IntProperty(
+	   name = "SF6 Costume Index",
+	   description = "Costume folder containing the CMD Files. For example, 1 uses costume folder 001. Shared meshes under folder 000 can use this to load the selected costume colors.",
+	   default = 1,
+	   min = 0,
+	   max = 999)
 	loadUnusedTextures : BoolProperty(
 	   name = "Load Unused Textures",
 	   description = "Loads textures that have no function assigned to them in the material shader graph.\nLeaving this disabled will make materials load faster.\nOnly enable this if you plan on editing the material shader graph",
@@ -669,6 +681,8 @@ class ImportREMesh(Operator, ImportHelper):
 			column2.prop(self, "loadMaterials")
 			column2.prop(self, "loadMDFData")
 			column2.prop(self, "loadShellFur")
+			column2.prop(self, "sf6CmdIndex")
+			column2.prop(self, "sf6CostumeIndex")
 			column2.prop(self, "reloadCachedTextures")
 			column2.prop(self, "loadUnusedTextures")
 			column2.prop(self, "loadUnusedProps")
@@ -702,7 +716,7 @@ class ImportREMesh(Operator, ImportHelper):
 			raiseWarning("Could not create texture cache directory at " + bpy.context.preferences.addons[__name__].preferences.textureCachePath)
 		if self.mergeArmature:
 			self.clearScene = False
-		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"mergeSameMaterialSubmeshes":self.mergeSameMaterialSubmeshes,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
+		options = {"clearScene":self.clearScene,"createCollections":self.createCollections,"loadMaterials":self.loadMaterials,"loadMDFData":self.loadMDFData,"loadShellFur":self.loadShellFur,"sf6CmdIndex":self.sf6CmdIndex,"sf6CostumeIndex":self.sf6CostumeIndex,"loadUnusedTextures":self.loadUnusedTextures,"loadUnusedProps":self.loadUnusedProps,"useBackfaceCulling":self.useBackfaceCulling,"reloadCachedTextures":self.reloadCachedTextures,"mdfPath":self.mdfPath.replace("\"",""),"importAllLODs":self.importAllLODs,"importBlendShapes":self.importBlendShapes,"rotate90":self.rotate90,"mergeArmature":self.mergeArmature,"importArmatureOnly":self.importArmatureOnly,"mergeGroups":self.mergeGroups,"mergeSameMaterialSubmeshes":self.mergeSameMaterialSubmeshes,"importShadowMeshes":self.importShadowMeshes,"importOcclusionMeshes":self.importOcclusionMeshes,"importBoundingBoxes":self.importBoundingBoxes,"hideArmature":self.hideArmature}
 		printEditorHeader(bl_info)
 		
 		toggleConsole()

@@ -4,11 +4,13 @@ import bpy
 import re
 import traceback
 import glob
+import struct
 
 from mathutils import Vector
 from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
+DEBUG_MODE = False#Enables verbose console logging for console import diagnostics
 #RE2 RT frosted glass: a transmission shader with a blur/clear approximation and
 #an optional unscaled FrostMask, replacing the flat principled output (ported from REME v0.73)
 def buildRE2FrostedGlass(matInfo, normalNode):
@@ -105,6 +107,226 @@ def buildRE2FrostedGlass(matInfo, normalNode):
 
 	return surface.outputs[0]
 
+
+SF6_CMD_TYPES = (
+	0xF3356698, # BlendRate
+	0x982FBF08, # Roughness
+	0x2C5538DD, # Metalness
+	0xAC2691C9, # ColorOption
+	0x123A0E06, # CustomizeColorData
+)
+
+def findSF6CMDUserPath(meshPath, cmdIndex=1, costumeIndex=None):
+	if meshPath is None or ".mesh" not in meshPath:
+		return None
+
+	meshRoot = meshPath.split(".mesh", 1)[0]
+	meshDir = os.path.dirname(meshRoot)
+	meshCostumeDir = os.path.dirname(meshDir)
+	characterDir = os.path.dirname(meshCostumeDir)
+	characterName = os.path.basename(characterDir)
+	meshCostumeName = os.path.basename(meshCostumeDir)
+
+	if meshCostumeName == "000" and costumeIndex is not None:
+		costumeName = str(costumeIndex).zfill(3)
+	else:
+		costumeName = meshCostumeName
+
+	cmdNumber = str(cmdIndex).zfill(3)
+	cmdSuffix = f"_cmd_{cmdNumber}.user.2"
+	cmdDir = os.path.join(characterDir, costumeName)
+
+	# Standard SF6 character CMD layout
+	cmdBaseName = f"{characterName}_{costumeName}_cmd_{cmdNumber}.user.2"
+	cmdPath = os.path.join(cmdDir, cmdBaseName)
+
+	if os.path.isfile(cmdPath):
+		return cmdPath
+
+	# Allow alternative filenames, remain inside selected costume
+	try:
+		matches = sorted(entry.path for entry in os.scandir(cmdDir) if entry.is_file() and entry.name.lower().endswith(cmdSuffix.lower()))
+	except OSError:
+		matches = []
+
+	if matches:
+		return matches[0]
+
+	return None
+
+def getSF6CMDMaterialMap(cmdPath):
+	materialMap = {}
+
+	if cmdPath == None or not os.path.isfile(cmdPath):
+		return materialMap
+
+	with open(cmdPath, "rb") as file:
+		data = file.read()
+
+	rszBase = data.find(b"RSZ\x00")
+	if data[:4] != b"USR\x00" or rszBase == -1:
+		return materialMap
+
+	u32 = lambda offset: struct.unpack_from("<I", data, offset)[0]
+	u64 = lambda offset: struct.unpack_from("<Q", data, offset)[0]
+	f32 = lambda offset: struct.unpack_from("<f", data, offset)[0]
+
+	instanceCount = u32(rszBase + 0x0C)
+	instanceInfoOffset = rszBase + u64(rszBase + 0x18)
+	dataOffset = rszBase + u64(rszBase + 0x20)
+
+	instanceTypes = [
+		u32(instanceInfoOffset + index * 8)
+		for index in range(instanceCount)
+	]
+
+	colorRecords = {}
+
+	# Scan for the 5 consecutive type instances that make up one customize color entry
+	for offset in range(dataOffset, len(data) - 47, 4):
+		blendRef = u32(offset + 24)
+		roughRef = u32(offset + 28)
+		metalRef = u32(offset + 32)
+		optionRef = u32(offset + 44)
+		colorRef = optionRef + 1
+
+		refs = (blendRef, roughRef, metalRef, optionRef, colorRef)
+		if not all(0 < ref < instanceCount for ref in refs):
+			continue
+		if refs != tuple(range(blendRef, blendRef + 5)):
+			continue
+		if tuple(instanceTypes[ref] for ref in refs) != SF6_CMD_TYPES:
+			continue
+
+		enableFlags = (u32(offset), u32(offset + 8), u32(offset + 16), u32(offset + 36))
+		if not all(flag in (0, 1) for flag in enableFlags):
+			continue
+
+		colorRecords[colorRef] = {
+			"offset": offset,
+			"colorEnabled": enableFlags[3],
+			"color": tuple(data[offset + 40:offset + 44]),
+			"blendRate": (enableFlags[0], f32(offset + 4)),
+			"roughness": (enableFlags[1], f32(offset + 12)),
+			"metalness": (enableFlags[2], f32(offset + 20)),
+		}
+
+	# Then match material names to their color record arrays
+	for lengthOffset in range(dataOffset, len(data) - 12, 4):
+		charCount = u32(lengthOffset)
+		if not 1 < charCount < 256:
+			continue
+
+		nameOffset = lengthOffset + 4
+		stringEnd = nameOffset + charCount * 2
+		arrayOffset = (stringEnd + 3) & ~3
+
+		if arrayOffset + 4 > len(data):
+			continue
+		if data[stringEnd - 2:stringEnd] != b"\x00\x00":
+			continue
+
+		colorCount = u32(arrayOffset)
+
+		if not 1 <= colorCount <= 8:
+			continue
+		if arrayOffset + 4 + colorCount * 4 > len(data):
+			continue
+
+		try:
+			materialName = data[nameOffset:stringEnd - 2].decode("utf-16le")
+		except UnicodeDecodeError:
+			continue
+
+		if not materialName or not all(32 <= ord(char) <= 126 for char in materialName):
+			continue
+
+		colorRefs = [u32(arrayOffset + 4 + index * 4) for index in range(colorCount)]
+		if all(ref in colorRecords for ref in colorRefs):
+			materialMap[materialName] = [colorRecords[ref] for ref in colorRefs]
+
+	if DEBUG_MODE:
+		print(
+			f"[SF6 CMD] Parsed {len(materialMap)} material clusters, "
+			f"{len(colorRecords)} customize colors."
+		)
+
+	return materialMap
+
+def sf6RGBToLinear(value):
+	value = value / 255.0
+	if value <= 0.04045:
+		return value / 12.92
+	return ((value + 0.055) / 1.055) ** 2.4
+
+def applySF6CMDMaterial(materialName, materialMap, propDict, meshPath=None):
+	colorIndexMap = (0, 1, 2, 3, 4, 5, 6, 7)
+
+	cmdMaterialName = materialName
+	matchType = "exact"
+
+	if cmdMaterialName not in materialMap:
+		caseInsensitiveMaterialMap = {
+			name.casefold(): name for name in materialMap
+		}
+
+		caseMatchedName = caseInsensitiveMaterialMap.get(
+			materialName.casefold()
+		)
+
+		if caseMatchedName is not None:
+			cmdMaterialName = caseMatchedName
+			matchType = "case-insensitive"
+
+	records = materialMap.get(cmdMaterialName, [])
+
+	# C. Viper's scalp is Head00 slot 4, but its intended tint comes from hair slot 0.
+	#Keep this hardcoded patch isolated so it can be reverted when real data says otherwise.
+	meshPathParts = {
+		part.casefold()
+		for part in os.path.normpath(meshPath).split(os.sep)
+	} if meshPath else set()
+	if (
+		"esf030" in meshPathParts
+		and materialName.casefold() == "esf_head00"
+		and len(records) > 4
+	):
+		hairRecords = materialMap.get("esf_hair", [])
+		if hairRecords:
+			records = [record.copy() for record in records]
+			records[4] = records[4].copy()
+			records[4]["color"] = hairRecords[0]["color"]
+			if DEBUG_MODE:
+				print("[SF6 CMD] scalp: esf_Head00 slot 4 <- esf_hair slot 0")
+
+	if records and DEBUG_MODE:
+		print(f"[SF6 CMD] {matchType}: {materialName} -> {cmdMaterialName}")
+	elif any(name.startswith("CustomizeColor_") for name in propDict) and DEBUG_MODE:
+		print(f"[SF6 CMD] no override, using MDF defaults: {materialName}")
+
+	for recordIndex, record in enumerate(records):
+		colorIndex = colorIndexMap[recordIndex]
+		colorProp = f"CustomizeColor_{colorIndex}"
+
+		if colorProp in propDict:
+			r, g, b, a = record["color"]
+			propDict[colorProp].propValue = [
+				sf6RGBToLinear(r),
+				sf6RGBToLinear(g),
+				sf6RGBToLinear(b),
+				a / 255.0,
+			]
+
+		optionProps = (
+			("blendRate", f"CustomizeColor_{colorIndex}_BlendRate"),
+			("roughness", f"CustomizeRoughness_{colorIndex}"),
+			("metalness", f"CustomizeMetal_{colorIndex}"),
+		)
+
+		for recordKey, propName in optionProps:
+			enabled, value = record[recordKey]
+			if enabled and propName in propDict:
+				propDict[propName].propValue = [value]
 
 #Texture types referenced via matInfo["textureNodeDict"] - statically maintained
 #(previously scanned from this file at import time via getUsedTextureNodes).
@@ -541,7 +763,7 @@ def wireDualUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, textureNode,
 	return groupNode
 
 
-def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False):
+def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBackfaceCulling,reloadCachedTextures,chunkPath = "",gameName = None,arrangeNodes = False,meshPath=None,sf6CmdIndex=0,sf6CostumeIndex=1):
 	TEXTURE_CACHE_DIR = bpy.context.preferences.addons[ADDON_NAME].preferences.textureCachePath
 	USE_DDS = bpy.context.preferences.addons[ADDON_NAME].preferences.useDDS == True and bpy.app.version >= (4,2,0)
 	
@@ -557,6 +779,27 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		#raiseWarning("Natives path not found, can't import textures")
 		#raise Exception
 	
+	sf6CMDMaterialMapList = []
+
+	if gameName == "SF6":
+		#The base cmd_000 file holds the default costume colors, the selected cmd overrides them
+		sf6CMDBasePath = findSF6CMDUserPath(meshPath, 0, sf6CostumeIndex)
+
+		if sf6CMDBasePath is not None:
+			print(f"[SF6 CMD] Using base {sf6CMDBasePath}")
+			sf6CMDMaterialMapList.append(getSF6CMDMaterialMap(sf6CMDBasePath))
+		else:
+			print("[SF6 CMD] No base cmd_000 user file found")
+
+		if sf6CmdIndex != 0:
+			sf6CMDSelectedPath = findSF6CMDUserPath(meshPath, sf6CmdIndex, sf6CostumeIndex)
+
+			if sf6CMDSelectedPath is not None:
+				print(f"[SF6 CMD] Using selected {sf6CMDSelectedPath}")
+				sf6CMDMaterialMapList.append(getSF6CMDMaterialMap(sf6CMDSelectedPath))
+			else:
+				print(f"[SF6 CMD] No selected cmd_{sf6CmdIndex:03d} user file found")
+
 	chunkPathList = [chunkPath]
 	chunkPathList.extend(getChunkPathList(gameName))
 	if bpy.context.preferences.addons[ADDON_NAME].preferences.saveChunkPaths == True:
@@ -766,6 +1009,9 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				"gameName":gameName,
 				}
 			#print(gameName)
+			if gameName == "SF6":
+				for sf6CMDMaterialMap in sf6CMDMaterialMapList:
+					applySF6CMDMaterial(materialName, sf6CMDMaterialMap, matInfo["mPropDict"], meshPath)
 			nodes = blenderMaterial.node_tree.nodes
 			links = blenderMaterial.node_tree.links
 			nodeTree = blenderMaterial.node_tree

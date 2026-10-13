@@ -901,7 +901,9 @@ def importREMeshFile(filePath, options):
 					importMDF(mdfFile, materialDict, options["loadUnusedTextures"],
 					          options["loadUnusedProps"], options["useBackfaceCulling"],
 					          options["reloadCachedTextures"], chunkPath=chunkPath, gameName=gameName,
-					          arrangeNodes=True)
+					          arrangeNodes=True, meshPath=filePath,
+					          sf6CmdIndex=options.get("sf6CmdIndex", 0),
+					          sf6CostumeIndex=options.get("sf6CostumeIndex", 1))
 
 					mdfImportEndTime = time.time()
 					mdfImportTime = mdfImportEndTime - mdfImportStartTime
