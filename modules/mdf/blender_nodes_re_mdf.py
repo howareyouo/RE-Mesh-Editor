@@ -1641,6 +1641,330 @@ def newSF6FurNode(nodeTree, textureType, matInfo):
 
 	return imageNode
 
+def newSF6BodyDetailNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6BodyDetailBuilt", False):
+		return imageNode
+
+	maskNode = matInfo["textureNodeDict"].get("Body_DetailBlendMask")
+	if maskNode is None:
+		return imageNode
+	
+	separateMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	nodeTree.links.new(maskNode.outputs["Color"], separateMask.inputs["Color"])
+
+	maskSockets = (
+		separateMask.outputs["Red"],
+		separateMask.outputs["Green"],
+		separateMask.outputs["Blue"],
+		maskNode.outputs["Alpha"],
+	)
+
+	detailNormalSocket = None
+	uniqueNode = matInfo["textureNodeDict"].get("Body_UniqueDetail_NRRC")
+
+	if uniqueNode is not None:
+		uniqueNode.image.colorspace_settings.name = "Non-Color"
+
+		uniqueDecode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(uniqueNode.outputs["Color"], uniqueDecode.inputs["Color"])
+		nodeTree.links.new(uniqueNode.outputs["Alpha"], uniqueDecode.inputs["Alpha"])
+
+		uniqueNormal = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(uniqueDecode.outputs["Color"], uniqueNormal.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get("Body_UniqueDetail_NormalIntensity")
+		if intensityProp is not None:
+			uniqueNormal.inputs["Strength"].default_value = intensityProp.propValue[0]
+
+		detailNormalSocket = uniqueNormal.outputs["Normal"]
+	
+		uniqueRoughnessProp = matInfo["mPropDict"].get("Body_UniqueDetail_Roughness")
+
+		if uniqueRoughnessProp is not None:
+			uniqueRoughnessNode = addPropertyNode(
+				uniqueRoughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(uniqueDecode.outputs["Roughness"], uniqueRoughnessNode.outputs["Value"], mixType="MIX")
+
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+
+	for index, letter in enumerate(("A", "B", "C", "D")):
+		detailNode = matInfo["textureNodeDict"].get(f"Body_DetailMap{letter}")
+		if detailNode is None:
+			continue
+
+		detailNode.image.colorspace_settings.name = "Non-Color"
+
+		tilingProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_Tiling")
+		if uvNode is not None and tilingProp is not None:
+			values = tilingProp.propValue
+			mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+			mappingNode.inputs["Scale"].default_value = (values[0], values[1], 1.0)
+			mappingNode.inputs["Location"].default_value = (values[2], values[3], 0.0)
+			nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
+		
+		decodeNode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(detailNode.outputs["Color"], decodeNode.inputs["Color"])
+		nodeTree.links.new(detailNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+		normalNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(decodeNode.outputs["Color"], normalNode.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_NormalIntensity")
+		if intensityProp is not None:
+			normalNode.inputs["Strength"].default_value = intensityProp.propValue[0]
+		
+		if detailNormalSocket is None:
+			geometryNode = nodeTree.nodes.get("geometryNode")
+			if geometryNode is None:
+				geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+				geometryNode.name = "geometryNode"
+			detailNormalSocket = geometryNode.outputs["Normal"]
+		
+		mixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		nodeTree.links.new(maskSockets[index], mixNode.inputs["Fac"])
+		nodeTree.links.new(detailNormalSocket, mixNode.inputs["Color1"])
+		nodeTree.links.new(normalNode.outputs["Normal"], mixNode.inputs["Color2"])
+
+		normalizeNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeNode.operation = "NORMALIZE"
+		nodeTree.links.new(mixNode.outputs["Color"], normalizeNode.inputs[0])
+		detailNormalSocket = normalizeNode.outputs["Vector"]
+
+		roughnessProp = matInfo["mPropDict"].get(f"Body_DetailMap{letter}_Roughness")
+
+		if roughnessProp is not None:
+			roughnessNode = addPropertyNode(
+				roughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			roughnessFactorNode = nodeTree.nodes.new("ShaderNodeMath")
+			roughnessFactorNode.operation = "MULTIPLY"
+			roughnessFactorNode.use_clamp = True
+
+			nodeTree.links.new(maskSockets[index], roughnessFactorNode.inputs[0])
+			nodeTree.links.new(roughnessNode.outputs["Value"], roughnessFactorNode.inputs[1])
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], roughnessFactorNode.outputs["Value"], mixType="MIX")
+	
+	if detailNormalSocket is not None:
+		matInfo["detailNormalSocket"] = detailNormalSocket
+	
+	matInfo["_sf6BodyDetailBuilt"] = True
+	return imageNode
+
+def newSF6FaceDetailNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if matInfo.get("_sf6FaceDetailBuilt", False):
+		return imageNode
+
+	maskNode = matInfo["textureNodeDict"].get("Face_DetailMapBlendMask")
+	if maskNode is None:
+		return imageNode
+	
+	maskNode.image.colorspace_settings.name = "Non-Color"
+
+	separataMask = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	nodeTree.links.new(maskNode.outputs["Color"], separataMask.inputs["Color"])
+
+	maskSockets = (
+		separataMask.outputs["Red"],
+		separataMask.outputs["Green"],
+		separataMask.outputs["Blue"],
+		maskNode.outputs["Alpha"],
+	)
+
+	geometryNode = nodeTree.nodes.get("geometryNode")
+	if geometryNode is None:
+		geometryNode = nodeTree.nodes.new("ShaderNodeNewGeometry")
+		geometryNode.name = "geometryNode"
+	
+	detailNormalSocket = geometryNode.outputs["Normal"]
+	uvNode = nodeTree.nodes.get("UVMap1Node")
+
+	for index, letter in enumerate(("A", "B", "C", "D")):
+		detailNode = matInfo["textureNodeDict"].get(f"Face_DetailMap{letter}")
+		if detailNode is None:
+			continue
+
+		detailNode.image.colorspace_settings.name = "Non-Color"
+
+		tilingProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_Tilling")
+		if uvNode is not None and tilingProp is not None:
+			values = tilingProp.propValue
+
+			mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+			mappingNode.inputs["Scale"].default_value = (
+				values[0],
+				values[1],
+				1.0
+			)
+			mappingNode.inputs["Location"].default_value = (
+				values[2],
+				values[3],
+				0.0
+			)
+
+			nodeTree.links.new(uvNode.outputs["UV"], mappingNode.inputs["Vector"])
+			nodeTree.links.new(mappingNode.outputs["Vector"], detailNode.inputs["Vector"])
+		
+		decodeNode = getBentNormalNodeGroup(nodeTree)
+		nodeTree.links.new(detailNode.outputs["Color"], decodeNode.inputs["Color"])
+		nodeTree.links.new(detailNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+		normalMapNode = nodeTree.nodes.new("ShaderNodeNormalMap")
+		nodeTree.links.new(decodeNode.outputs["Color"], normalMapNode.inputs["Color"])
+
+		intensityProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_NormalIntensity")
+		if intensityProp is not None:
+			normalMapNode.inputs["Strength"].default_value = (intensityProp.propValue[0])
+
+		mixNode = nodeTree.nodes.new("ShaderNodeMixRGB")
+		nodeTree.links.new(maskSockets[index], mixNode.inputs["Fac"])
+		nodeTree.links.new(detailNormalSocket, mixNode.inputs["Color1"])
+		nodeTree.links.new(normalMapNode.outputs["Normal"], mixNode.inputs["Color2"])
+
+		normalizeNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+		normalizeNode.operation = "NORMALIZE"
+		nodeTree.links.new(mixNode.outputs["Color"], normalizeNode.inputs[0])
+		detailNormalSocket = normalizeNode.outputs["Vector"]
+
+		roughnessProp = matInfo["mPropDict"].get(f"Face_DetailMap{letter}_Roughness")
+		if roughnessProp is not None:
+			roughnessNode = addPropertyNode(
+				roughnessProp,
+				matInfo["currentPropPos"],
+				nodeTree
+			)
+
+			roughnessFactorNode = nodeTree.nodes.new("ShaderNodeMath")
+			roughnessFactorNode.operation = "MULTIPLY"
+			roughnessFactorNode.use_clamp = True
+			nodeTree.links.new(maskSockets[index], roughnessFactorNode.inputs[0])
+			nodeTree.links.new(roughnessNode.outputs["Value"], roughnessFactorNode.inputs[1])
+
+			matInfo["roughnessNodeLayerGroup"].addMixLayer(decodeNode.outputs["Roughness"], roughnessFactorNode.outputs["Value"], mixType="MIX")
+	
+	matInfo["detailNormalSocket"] = detailNormalSocket
+	matInfo["_sf6FaceDetailBuilt"] = True
+	return imageNode
+
+def newSF6FacialWrinkleNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	if (matInfo["gameName"] != "SF6" or matInfo.get("_sf6FacialWrinkleBuilt", False)):
+		return imageNode
+	
+	image = getattr(imageNode, "image", None)
+	if image is None:
+		return imageNode
+	
+	matInfo["_sf6FacialWrinkleBuilt"] = True
+	image.colorspace_settings.name = "Non-Color"
+
+	decodeNode = getBentNormalNodeGroup(nodeTree)
+	decodeNode.location = addLoc(imageNode, (300, 0))
+	nodeTree.links.new(imageNode.outputs["Color"], decodeNode.inputs["Color"])
+	nodeTree.links.new(imageNode.outputs["Alpha"], decodeNode.inputs["Alpha"])
+
+	strengthNode = nodeTree.nodes.new("ShaderNodeValue")
+	strengthNode.name = "SF6 Facial Wrinkle Preview Strength"
+	strengthNode.label = strengthNode.name
+	strengthNode.location = addLoc(imageNode, (300, -220))
+	strengthNode.outputs["Value"].default_value = 0.0
+
+	deltaNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+	deltaNode.operation = "SUBTRACT"
+	deltaNode.location = addLoc(imageNode, (600, 0))
+	deltaNode.inputs[1].default_value = (0.5, 0.5, 1.0)
+	nodeTree.links.new(decodeNode.outputs["Color"], deltaNode.inputs[0])
+
+	normalLayers = matInfo["normalNodeLayerGroup"]
+	if normalLayers.currentOutSocket is None:
+		neutralNode = nodeTree.nodes.new("ShaderNodeRGB")
+		neutralNode.name = "SF6 Neutral Tangent Normal"
+		neutralNode.outputs["Color"].default_value = (0.5, 0.5, 1.0, 1.0)
+		normalLayers.addMixLayer(neutralNode.outputs["Color"])
+	
+	scaledDeltaNode = nodeTree.nodes.new("ShaderNodeVectorMath")
+	scaledDeltaNode.operation = "SCALE"
+	scaledDeltaNode.location = addLoc(imageNode, (900, 0))
+	nodeTree.links.new(deltaNode.outputs["Vector"], scaledDeltaNode.inputs["Vector"])
+	nodeTree.links.new(strengthNode.outputs["Value"], scaledDeltaNode.inputs["Scale"])
+
+	normalLayers.addMixLayer(
+		scaledDeltaNode.outputs["Vector"],
+		mixType="ADD",
+		mixFactor=1.0,
+	)
+
+	roughnessLayers = matInfo["roughnessNodeLayerGroup"]
+	if roughnessLayers.currentOutSocket is not None:
+		roughnessDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
+		roughnessDeltaNode.operation = "SUBTRACT"
+		roughnessDeltaNode.location = addLoc(imageNode, (900, -220))
+		roughnessDeltaNode.inputs[1].default_value = 0.502
+		nodeTree.links.new(decodeNode.outputs["Roughness"], roughnessDeltaNode.inputs[0])
+
+		scaledRoughnessNode = nodeTree.nodes.new("ShaderNodeMath")
+		scaledRoughnessNode.operation = "MULTIPLY"
+		scaledRoughnessNode.location = addLoc(imageNode, (1200, -220))
+		nodeTree.links.new(roughnessDeltaNode.outputs["Value"], scaledRoughnessNode.inputs[0])
+		nodeTree.links.new(strengthNode.outputs["Value"], scaledRoughnessNode.inputs[1])
+		
+		roughnessLayers.addMixLayer(scaledRoughnessNode.outputs["Value"], mixType="ADD", mixFactor=1.0)
+
+	cavityDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
+	cavityDeltaNode.name = "SF6 Facial Wrinkle Cavity Delta"
+	cavityDeltaNode.operation = "SUBTRACT"
+	cavityDeltaNode.location = addLoc(imageNode, (900, -440))
+	cavityDeltaNode.inputs[1].default_value = 1.0
+	nodeTree.links.new(
+		decodeNode.outputs["BlueChannel"],
+		cavityDeltaNode.inputs[0],
+	)
+
+	scaledCavityNode = nodeTree.nodes.new("ShaderNodeMath")
+	scaledCavityNode.name = "SF6 Facial Wrinkle Cavity Scale"
+	scaledCavityNode.operation = "MULTIPLY"
+	scaledCavityNode.location = addLoc(imageNode, (1200, -440))
+	nodeTree.links.new(
+		cavityDeltaNode.outputs["Value"],
+		scaledCavityNode.inputs[0],
+	)
+	nodeTree.links.new(
+		strengthNode.outputs["Value"],
+		scaledCavityNode.inputs[1],
+	)
+
+	wrinkleCavityNode = nodeTree.nodes.new("ShaderNodeMath")
+	wrinkleCavityNode.name = "SF6 Facial Wrinkle Cavity"
+	wrinkleCavityNode.operation = "ADD"
+	wrinkleCavityNode.use_clamp = True
+	wrinkleCavityNode.location = addLoc(imageNode, (1500, -440))
+	wrinkleCavityNode.inputs[1].default_value = 1.0
+	nodeTree.links.new(
+		scaledCavityNode.outputs["Value"],
+		wrinkleCavityNode.inputs[0],
+	)
+
+	matInfo["cavityNodeLayerGroup"].addMixLayer(
+		wrinkleCavityNode.outputs["Value"],
+		mixType="MULTIPLY",
+		mixFactor=1.0,
+	)
+
+	return imageNode
+
 nodeDict = {
 	"ALBD":newALBDNode,
 	"ALBM":newALBMNode,
@@ -1653,6 +1977,9 @@ nodeDict = {
 	"CMASK":newCMASKNode,
 	"SF6DETAIL":newSF6ClothDetailNode,
 	"SF6FUR":newSF6FurNode,
+	"SF6BODYDETAIL":newSF6BodyDetailNode,
+	"SF6FACEDETAIL":newSF6FaceDetailNode,
+	"SF6WRINKLE":newSF6FacialWrinkleNode,
 	"EMI":newEMINode,
 	"ATOS":newATOSNode,
 	"OCTD":newOCTDNode,

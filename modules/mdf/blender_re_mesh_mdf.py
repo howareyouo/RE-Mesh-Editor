@@ -1059,9 +1059,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			
 			try:
 				for (nodeType,textureType,_,_) in textureNodeInfoList:
-					#Loop through node list again once all image nodes are added
-					if nodeType != "UNKN" and textureType in nodes:
+					# Wrinkles must be added after all regular normal layers
+					if nodeType not in {"UNKN", "SF6WRINKLE"} and textureType in nodes:
 						addTextureNode(blenderMaterial.node_tree, nodeType, textureType, matInfo)
+
+				if gameName == "SF6" and "FacialWrinkleMap" in matInfo["textureNodeDict"]:
+					addTextureNode(blenderMaterial.node_tree, "SF6WRINKLE", "FacialWrinkleMap", matInfo)
 			except Exception as err:
 				raiseWarning(f"Material Importing Failed ({str(materialName)}). Error During Texture Node Assignment.\nIf you're on the latest version of RE Mesh Editor, please report this error.")
 				traceback.print_exception(type(err), err, err.__traceback__)
@@ -1898,6 +1901,43 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					#blenderMaterial.blend_method = "CLIP"
 					#blenderMaterial.shadow_method = "CLIP"
 				
+				if (matInfo["gameName"] == "SF6" and "ClothAniso_ColorRate" in matInfo["mPropDict"]):
+					colorRateNode = addPropertyNode(
+						matInfo["mPropDict"]["ClothAniso_ColorRate"],
+						matInfo["currentPropPos"],
+						nodeTree
+					) 
+
+					if "Sheen Weight" in nodeBSDF.inputs:
+						links.new(colorRateNode.outputs["Value"], nodeBSDF.inputs["Sheen Weight"])
+					
+					if ("ClothAniso_PrimalySpecularColor" in matInfo["mPropDict"] and "Sheen Tint" in nodeBSDF.inputs):
+						specularColorNode = addPropertyNode(
+							matInfo["mPropDict"]["ClothAniso_PrimalySpecularColor"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						links.new(specularColorNode.outputs["Color"], nodeBSDF.inputs["Sheen Tint"])
+					
+					if ("ClothAniso_PrimalySpecSharpness" in matInfo["mPropDict"] and "Sheen Roughness" in nodeBSDF.inputs):
+						sharpnessNode = addPropertyNode(
+							matInfo["mPropDict"]["ClothAniso_PrimalySpecSharpness"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						addNode = nodes.new("ShaderNodeMath")
+						addNode.operation = "ADD"
+						addNode.inputs[1].default_value = 1.0
+						links.new(sharpnessNode.outputs["Value"], addNode.inputs[0])
+
+						divideNode = nodes.new("ShaderNodeMath")
+						divideNode.operation = "DIVIDE"
+						divideNode.inputs[0].default_value = 1.0
+						links.new(addNode.outputs["Value"], divideNode.inputs[1])
+						links.new(divideNode.outputs["Value"], nodeBSDF.inputs["Sheen Roughness"])
+
 				if matInfo["sheenSocket"] != None:
 					if bpy.app.version < (4,0,0):
 						links.new(matInfo["sheenSocket"],nodeBSDF.inputs["Sheen"])
@@ -1921,6 +1961,27 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 								links.new(sssParamNode.outputs["Value"],sssMultNode.inputs[1])
 							if "Subsurface Weight" in nodeBSDF.inputs:	
 								links.new(sssMultNode.outputs["Value"],nodeBSDF.inputs["Subsurface Weight"])	
+					elif matInfo["gameName"] == "SF6":
+						mmtrName = matInfo["mmtrName"].lower()
+						isSF6Skin = any(name in mmtrName for name in (
+							"character_face",
+							"character_body",
+						))
+
+						if isSF6Skin and "Subsurface Weight" in nodeBSDF.inputs:
+							sssMultNode = nodes.new("ShaderNodeMath")
+							sssMultNode.label = "SF6 Skin SSS"
+							sssMultNode.location = matInfo["subsurfaceSocket"].node.location + Vector((300, 0))
+							sssMultNode.operation = "MULTIPLY"
+
+							links.new(matInfo["subsurfaceSocket"], sssMultNode.inputs[0])
+							sssMultNode.inputs[1].default_value = 0.18
+							links.new(sssMultNode.outputs["Value"], nodeBSDF.inputs["Subsurface Weight"])
+							if "Subsurface Radius" in nodeBSDF.inputs:
+								nodeBSDF.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
+							
+							if "Subsurface Scale" in nodeBSDF.inputs:
+								nodeBSDF.inputs["Subsurface Scale"].default_value = 0.01
 				#Mix Shaders
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
