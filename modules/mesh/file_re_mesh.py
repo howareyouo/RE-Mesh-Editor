@@ -757,8 +757,8 @@ class FileHeader():
 			self.verticesOffset, self.sf6unkn4 = struct.unpack_from('<QQ', raw, off)
 
 		elif version >= VERSION_ONI2:
-			# Batch read: uint + short×2 + ushort + uint×4 + short + 15×uint64 = 24+120 = 144 bytes
-			raw = file.read(144)
+			# Batch read: uint + short + ushort + short + uint×3 + short + 17×uint64 = 24+136 = 160 bytes
+			raw = file.read(160)
 			off = 0
 			self.wilds_unkn1, = struct.unpack_from('<I', raw, off); off += 4
 			self.nameCount, = struct.unpack_from('<h', raw, off); off += 2
@@ -809,10 +809,10 @@ class FileHeader():
 				file.write(struct.pack('<QQQ', self.nameOffsetsOffset, self.dd2HashOffset, self.streamingInfoOffset))
 			file.write(struct.pack('<QQ', self.verticesOffset, self.sf6unkn4))
 		elif version >= VERSION_ONI2:
-			# Batch write: uint + short×2 + ushort + uint×4 + short + 17×uint64 = 148 bytes
-			raw = struct.pack('<IhHI', self.wilds_unkn1, self.nameCount, self.contentFlag.bitFlag,
-				self.sf6UnknCount, self.wilds_unkn2, self.wilds_unkn3, self.wilds_unkn4)
-			raw += struct.pack('<h', self.wilds_unkn5)
+			# Batch write: uint + short + ushort + short + uint×3 + short + 17×uint64
+			raw = struct.pack('<IhHhIIIh', self.wilds_unkn1, self.nameCount, self.contentFlag.bitFlag,
+				self.sf6UnknCount, self.wilds_unkn2, self.wilds_unkn3, self.wilds_unkn4,
+				self.wilds_unkn5)
 			file.write(raw)
 			file.write(struct.pack('<17Q', self.verticesOffset, self.meshGroupOffset,
 				self.shadowMeshGroupOffset, self.occlusionMeshGroupOffset,
@@ -901,12 +901,12 @@ class BlendShapeData():
 			 self.padding2) = struct.unpack_from('<HHIII', raw, 0)
 			self.dataOffset, self.aabbOffset = struct.unpack_from('<QQ', raw, 16)
 		else:
-			# Batch read: ushort×2 + uint×2 + uint64×4 = 4+8+32 = 44 bytes
-			raw = file.read(44)
+			# Batch read: ushort×2 + uint×3 + uint64×4 = 4+12+32 = 48 bytes
+			raw = file.read(48)
 			(self.targetCount, self.typing, self.unknFlag, self.padding1,
 			 self.padding2) = struct.unpack_from('<HHIII', raw, 0)
 			(self.dataOffset, self.aabbOffset, self.blendSOffset,
-			 self.blendSSOffset) = struct.unpack_from('<QQQQ', raw, 12)
+			 self.blendSSOffset) = struct.unpack_from('<QQQQ', raw, 16)
 		file.seek(self.dataOffset)
 		for i in range(0, self.targetCount):
 			blendTargetEntry = BlendTarget()
