@@ -6,6 +6,8 @@ import numpy as np
 from math import sqrt
 from mathutils import Vector, Matrix
 from .file_re_mesh import readREMesh, meshFileVersionToGameNameDict
+from .file_re_jcns import JCNSParseError, findJCNSPath, readJCNS
+from .blender_re_jcns_drivers import installSF6JCNSDrivers
 from .re_mesh_parse import ParsedREMesh
 from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion, formatREMeshObjectName
 from ..blender_utils import getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix, MESH_COLLECTION_TYPE
@@ -766,6 +768,40 @@ def importREMeshFile(filePath, options):
 	parsedMesh = ParsedREMesh()
 	parsedMesh.ParseREMesh(reMesh)
 	printElapsed("Mesh parsing", meshParseStartTime)
+	# SF6 JCNS blend shape diagnostics (ported from REME v0.73). Parsing only -
+	# the pose-corrective drivers in blender_re_jcns_drivers.py stay dormant.
+	sf6JCNSData = None
+	if gameName == "SF6":
+		meshBlendShapeNames = {
+			blendShape.blendShapeName
+			for lod in parsedMesh.mainMeshLODList
+			for visconGroup in lod.visconGroupList
+			for subMesh in visconGroup.subMeshList
+			for blendShape in subMesh.blendShapeList
+		}
+		if meshBlendShapeNames:
+			jcnsPath = findJCNSPath(filePath)
+			if jcnsPath is None:
+				print("[SF6 JCNS] No matching JCNS file found")
+			else:
+				try:
+					sf6JCNSData = readJCNS(jcnsPath)
+					jcnsOutputNames = {
+						record.outputName
+						for record in sf6JCNSData.recordList
+					}
+					matchedNames = meshBlendShapeNames & jcnsOutputNames
+
+					print(f"[SF6 JCNS] Using {jcnsPath}")
+					print(
+						f"[SF6 JCNS] Parsed "
+						f"{len(sf6JCNSData.recordList)} records, "
+						f"{len(jcnsOutputNames)} unique outputs; "
+						f"matched {len(matchedNames)}/"
+						f"{len(meshBlendShapeNames)} imported blend shapes"
+					)
+				except JCNSParseError as error:
+					print(f"[SF6 JCNS] Could not parse SF6 JCNS file: {error}")
 	armatureObj = None
 	parentCollection = None  # Collection for grouping mesh and mdf
 	if options["createCollections"]:
@@ -882,6 +918,10 @@ def importREMeshFile(filePath, options):
 		else:
 			importBoundingBox(parsedMesh.boundingBox, f"Mesh Bounding Box", boundingBoxCollection,
 			                  rotate90=options["rotate90"])
+
+	# Dormant: SF6 JCNS pose-corrective drivers. Implementation is complete in
+	# blender_re_jcns_drivers.py; enable once verified against in-game pose data.
+	# installSF6JCNSDrivers(sf6JCNSData, [obj for obj in bpy.data.objects if obj.type == "MESH"], armatureObj)
 
 	# Blender hide bones:
 	if options["hideArmature"] and armatureObj != None:
