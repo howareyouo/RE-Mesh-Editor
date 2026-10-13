@@ -564,6 +564,7 @@ class ClusterInfo():
 		self.posDecodeOffset = 0.0  # Pre-computed from bitflag
 
 		self.faceBuffer = bytes()
+		self.weightBuffer = None
 		self.vertexBuffer = bytes()
 
 	def read(self, file, version):
@@ -652,7 +653,17 @@ class ClusterInfo():
 		else:
 			self.colorBuffer = None
 
-	# TODO find something that uses weights
+		# Compressed skinning stores one shared 16 byte record per cluster
+		# Uncompressed skinning stores one 16 byte record per vertex
+		# (ported from REME v0.73; upstream does not decode this into vertex
+		# weights yet, capture it so the stream stays byte-exact)
+		if self.bitFlag.flags.isMeshletUseSkinned:
+			if self.bitFlag.flags.isMeshletCompressedSkinned:
+				self.weightBuffer = file.read(16) * self.vertexCount
+			else:
+				self.weightBuffer = file.read(self.vertexCount * 16)
+		else:
+			self.weightBuffer = None
 
 	def write(self, file):
 		pass
