@@ -1,6 +1,6 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere
-from .mesh_versions import SIX_WEIGHT_MESH_FILE_VERSIONS
+from .mesh_versions import SIX_WEIGHT_MESH_FILE_VERSIONS, VERSION_SF6
 from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
@@ -84,6 +84,16 @@ def readPackedBitsVec3Array(packedIntArray, numBits):
 	return vec3Array
 
 
+def readPackedBitsVec3Array_11_10_11(packedIntArray):
+	# Blend shape byte buffers pack x/y/z as 11/10/11 bits (ported from REME v0.73;
+	# the old uniform 10-bit read misdecoded every component).
+	vec3Array = np.zeros(len(packedIntArray), np.dtype("<3f"))
+	vec3Array[:, 0] = ((packedIntArray >> 0) & 2047) / 2047
+	vec3Array[:, 1] = ((packedIntArray >> 11) & 1023) / 1023
+	vec3Array[:, 2] = ((packedIntArray >> 21) & 2047) / 2047
+	return vec3Array
+
+
 # MPLY
 
 def ReadNorBuffer(norBuffer, tags):
@@ -138,17 +148,21 @@ BufferReadDict = {
 
 def ReadBlendShapeByteBuffer(blendShapeBuffer, tags):
 	blendShapeIntArray = np.frombuffer(blendShapeBuffer, dtype="<I")
-	blendShapeArray = readPackedBitsVec3Array(blendShapeIntArray, 10)
+	blendShapeArray = readPackedBitsVec3Array_11_10_11(blendShapeIntArray)
 	return blendShapeArray
 
 
 def ReadBlendShapeShortBuffer(blendShapeBuffer, tags):
-	blendShapeArray = np.frombuffer(blendShapeBuffer, dtype="<4H", )
+	recordSize = np.dtype("<4H").itemsize
+	usableSize = len(blendShapeBuffer) - (len(blendShapeBuffer) % recordSize)
+	if usableSize != len(blendShapeBuffer):
+		print(f"Blend shape short contains {len(blendShapeBuffer) - usableSize} trailing padding bytes.")
+	blendShapeArray = np.frombuffer(memoryview(blendShapeBuffer)[:usableSize], dtype="<4H")
 	# Remove 4th column using reshape + slice instead of np.delete
 	blendShapeArray = blendShapeArray.reshape(-1, 4)[:, :3].copy()
 	blendShapeArray = blendShapeArray.astype("float32")
-
-	blendShapeArray = np.where(blendShapeArray < 0, blendShapeArray / 32768, blendShapeArray / 32767)
+	# Unsigned 16 bit fixed point, normalized to [0, 1] (ported from REME v0.73)
+	blendShapeArray /= 65535
 	return blendShapeArray
 
 
@@ -265,10 +279,22 @@ class BlendShape:
 		self.deltas = []
 
 
-def rescale_blend_deltas(deltas, aabb_min, aabb_max):
-	deltas[:, 0] = aabb_max.x * deltas[:, 0] + aabb_min.x
-	deltas[:, 1] = aabb_max.y * deltas[:, 1] + aabb_min.y
-	deltas[:, 2] = aabb_max.z * deltas[:, 2] + aabb_min.z
+def remapBlendShapeDeltas(blendShapeDeltas, aabb, zeroIsSentinel=False):
+	# Ported from REME v0.73 (replaces rescale_blend_deltas).
+	# SF6 uses an all 0 encoded record to mean no vertex delta.
+	# Preserve that mask before applying the target AABB remapping
+	if zeroIsSentinel:
+		zeroDeltaMask = np.all(blendShapeDeltas == 0.0, axis=1)
+
+	blendShapeDeltas = blendShapeDeltas.copy()
+	blendShapeDeltas[:, 0] = (aabb.max.x - aabb.min.x) * blendShapeDeltas[:, 0] + aabb.min.x
+	blendShapeDeltas[:, 1] = (aabb.max.y - aabb.min.y) * blendShapeDeltas[:, 1] + aabb.min.y
+	blendShapeDeltas[:, 2] = (aabb.max.z - aabb.min.z) * blendShapeDeltas[:, 2] + aabb.min.z
+
+	if zeroIsSentinel:
+		blendShapeDeltas[zeroDeltaMask] = 0.0
+
+	return blendShapeDeltas
 
 
 def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, usedVertexOffsetDictList,
@@ -330,7 +356,9 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 							blendShapeEntry.deltas = blendShapeDeltas[
 								currentBlendDeltaOffset:currentBlendDeltaOffset + subMeshEntry.vertCount]
 							aabb = blendShapeLODData.aabbList[blendTargetIndex]
-							rescale_blend_deltas(blendShapeEntry.deltas, aabb.min, aabb.max)
+							blendShapeEntry.deltas = remapBlendShapeDeltas(
+								blendShapeEntry.deltas, aabb,
+								zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
 
 							currentBlendDeltaOffset += subMeshEntry.vertCount
 							blendShapeDict.setdefault(subMeshEntry.subMeshVertexStartIndex, []).append(blendShapeEntry)
@@ -341,7 +369,9 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 						blendShapeEntry.deltas = blendShapeDeltas[
 							currentBlendDeltaOffset:currentBlendDeltaOffset + blendTarget.vertCount]
 						aabb = blendShapeLODData.aabbList[blendTargetIndex]
-						rescale_blend_deltas(blendShapeEntry.deltas, aabb.min, aabb.max)
+						blendShapeEntry.deltas = remapBlendShapeDeltas(
+							blendShapeEntry.deltas, aabb,
+							zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
 
 						currentBlendDeltaOffset += blendTarget.vertCount
 						blendShapeDict.setdefault(blendTarget.subMeshVertexStartIndex, []).append(blendShapeEntry)
