@@ -372,6 +372,10 @@ albedoTypeSet = set([
 	#"BaseDielectricMapBase",
 	"BaseAlphaMap",
 	"BaseDielectricMap",
+	"BaseDielectricMap1",
+	"BaseDielectricMap2",
+	"BaseDielectricMapArray",
+	"BaseDielectricMapBase",
 	#Vertex Color
 	#"BaseDielectricMap_B",
 	#"BaseDielectricMap_G",
@@ -385,6 +389,23 @@ albedoTypeSet = set([
 	"Moon_Tex",
 	"Sky_Top_Tex",
 	"RTReflectionBaseMap",
+	"BaseColor",
+	"BaseColorAlphaMap",
+	"BaseColorMap",
+	"BaseColorTexture",
+	"ColorMap",
+	"DetailAlbedoMap",
+	"DetailAlbedoMap2",
+	"FlowMap_ColorMap",
+	"FoamColorMap",
+	"PatternColorMap",
+	"PupilColorMap",
+	"Rec_Mucus_BaseColor",
+	"SecondaryAlbedoMap",
+	"Tex_BaseColor",
+	"WaterColorMap",
+	"WaveColorMap",
+	"UniqueAlbedoOcclusionMap",
 	#"IrisBaseMap"
 	])
 normalTypeSet = set([
@@ -412,12 +433,22 @@ normalTypeSet = set([
 	"NRRTMap",
 	"Tex_Normal",
 	"IrisNormalMap",
+	"NormalOcclusionCavityMap",
 	"NormalOcclusionFilmMap",
 	])
 
 alphaTypeSet = set([
-	"AlphaMap"
+	"AdditionalAlphaMap",
+	"Alpha",
+	"AlphaMap",
+	"AlphaMaskMap",
+	"AlphaMaskTex",
+	"AlphaTex",
 	])
+occlusionTypeSet = set([
+	"OcclusionMap",
+	])
+
 cmmTypeSet = set([
 	"UserColorchangeMap",
 	"ColormaskMap",
@@ -440,6 +471,12 @@ normalVertexColorTypeSet = set([
 	"NormalRoughnessMap_B",
 	"NormalRoughnessMap_G",
 	"NormalRoughnessMap_R",
+	])
+NRMRTypes = set([
+	"NormalReflactionMap",
+	"NormalRoughnessMap",
+	#"NormalRoughnessMap_R",
+	"NormalRoughnessMapArray",
 	])
 NRRTTypes = set([
 	"NormalRoughnessCavityMap",
@@ -499,6 +536,43 @@ re9LeatherDetailTypeSet = set([
 	"DetailMask_Leather",
 ])
 
+sf6DetailMaskTypeSet = set([
+	"Body_DetailBlendMask",
+	"Cloth_DetailMask",
+	"BodyMuscle_Mask",
+	"Face_DetailMapBlendMask",
+])
+
+sf6DetailNormalTypeSet = set([
+	"Body_UniqueDetail_NRRC",
+	"Body_DetailMapA",
+	"Body_DetailMapB",
+	"Body_DetailMapC",
+	"Body_DetailMapD",
+	"Face_DetailMapA",
+	"Face_DetailMapB",
+	"Face_DetailMapC",
+	"Face_DetailMapD",
+	"BodyMuscle_NormalA",
+	"BodyMuscle_NormalB",
+	"BodyMuscle_NormalC",
+	"BodyMuscle_NormalD",
+	"Cloth_DetailMapA",
+	"Cloth_DetailMapB",
+	"Cloth_DetailMapC",
+	"Cloth_DetailMapD",
+	"WrinkledMap",
+])
+
+sf6FurTypeSet = set([
+	"Fur_Map",
+	"Fur_FlowMap",
+])
+
+sf6FacialWrinkleTypeSet = set([
+	"FacialWrinkleMap",
+])
+
 usedTextureSet.update(albedoVertexColorTypeSet)
 usedTextureSet.update(normalVertexColorTypeSet)
 usedTextureSet.update(albedoTypeSet)
@@ -512,6 +586,10 @@ usedTextureSet.update(OCTDTypes)
 usedTextureSet.update(SCOTTypes)
 usedTextureSet.update(NAMTypes)
 usedTextureSet.update(MiscMapTypes)
+usedTextureSet.update(occlusionTypeSet)
+usedTextureSet.update(sf6DetailMaskTypeSet)
+usedTextureSet.update(sf6DetailNormalTypeSet)
+usedTextureSet.update(sf6FurTypeSet)
 
 #print(sorted(list(usedTextureSet)))
 baseUVTilingList = set([#Node types that use UV_Tiling property
@@ -855,7 +933,14 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if "_ALB" in texture:
 						autoDetectedAlbedo = True
 						detectedAlbedo = True
-				if loadUnusedTextures or textureType in usedTextureSet or (gameName == "RE9" and textureType in re9LeatherDetailTypeSet) or autoDetectedAlbedo:
+				isUsedTexture = (
+				textureType in usedTextureSet
+				or (gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet)
+				or (gameName == "RE9" and textureType in re9LeatherDetailTypeSet)
+			)
+			if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo and DEBUG_MODE:
+				print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
+			if loadUnusedTextures or isUsedTexture or autoDetectedAlbedo:
 					baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
 					outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
 					
@@ -890,23 +975,29 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if textureType in albedoVertexColorTypeSet or textureType in normalVertexColorTypeSet:
 						hasVertexColor = True
 					if textureType in albedoTypeSet:
-						if textureType == "BaseDielectricMap" or textureType == "BaseDielectricMapBase":
+						if gameName == "PRAG" and textureType == "UniqueAlbedoOcclusionMap":
+							textureNodeInfoList.append(("PRAGHAIR", textureType, imageList, outputPath))
+						elif textureType in ("BaseDielectricMap", "BaseDielectricMap1", "BaseDielectricMap2", "BaseDielectricMapArray", "BaseDielectricMapBase", "SecondaryAlbedoMap"):
 							textureNodeInfoList.append(("ALBD",textureType,imageList,outputPath))
 						elif textureType == "BaseMetalMap" or textureType == "BaseMetalMapArray":
 							textureNodeInfoList.append(("ALBM",textureType,imageList,outputPath))
-						elif textureType == "BaseAlphaMap":
-							textureNodeInfoList.append(("ALBA",textureType,imageList,outputPath))
-							#hasAlpha = True
-							#Capcom uses this type for things other than alpha :/
+						elif gameName == "RE9" and textureType == "SecondaryBaseColorMap":
+							useSecondaryProp = mdfMaterial.getPropertyDict().get("UseSecondaryBaseColorMap")
+							if useSecondaryProp is not None and useSecondaryProp.propValue[0] <= 0.0:
+								textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
+							else:
+								textureNodeInfoList.append(("ALB", textureType, imageList, outputPath))
+						elif textureType == "DetailAlbedoMap":
+							useDetailAlbedoProperty = mdfMaterial.getPropertyDict().get("Use_DetailAlbedoMap")
+							if useDetailAlbedoProperty is not None and useDetailAlbedoProperty.propValue[0] == 0.0:
+								textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
+							else:
+								textureNodeInfoList.append(("ALBA", textureType, imageList, outputPath))
+						elif textureType in ("BaseAlphaMap", "BaseColorAlphaMap", "PupilColorMap", "Tex_BaseColor"):
+							textureNodeInfoList.append(("ALBA", textureType, imageList, outputPath))
 						else:
 							textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 						detectedAlbedo = True
-					elif gameName == "RE9" and textureType == "SecondaryBaseColorMap":
-						useSecondaryProp = mdfMaterial.getPropertyDict().get("UseSecondaryBaseColorMap")
-						if useSecondaryProp is not None and useSecondaryProp.propValue[0] <= 0.0:
-							textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
-						else:
-							textureNodeInfoList.append(("ALB", textureType, imageList, outputPath))
 					elif textureType in normalTypeSet:
 						if textureType == "NormalRoughnessMap":
 							textureNodeInfoList.append(("NRMR",textureType,imageList,outputPath))
@@ -922,9 +1013,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							textureNodeInfoList.append(("NRM",textureType,imageList,outputPath))
 						else:
 							textureNodeInfoList.append(("NRMR",textureType,imageList,outputPath))
+						detectedNormal = True
 					elif textureType in alphaTypeSet:
 						textureNodeInfoList.append(("ALP",textureType,imageList,outputPath))
 						hasAlpha = True
+					elif textureType in occlusionTypeSet:
+						textureNodeInfoList.append(("OCC", textureType, imageList, outputPath))
 					elif textureType in cmmTypeSet:
 						textureNodeInfoList.append(("CMM",textureType,imageList,outputPath))
 					elif textureType in cmaskTypeSet:
@@ -940,6 +1034,30 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						textureNodeInfoList.append(("OCTD",textureType,imageList,outputPath))
 					elif textureType in SCOTTypes:
 						textureNodeInfoList.append(("SCOT",textureType,imageList,outputPath))
+					elif gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet:
+						textureNodeInfoList.append(("SF6WRINKLE", textureType, imageList, outputPath))
+					elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
+						if textureType == "Cloth_DetailMask":
+							nodeType = "SF6DETAIL"
+						elif textureType == "Body_DetailBlendMask":
+							nodeType = "SF6BODYDETAIL"
+						elif textureType == "Face_DetailMapBlendMask":
+							nodeType = "SF6FACEDETAIL"
+						else:
+							nodeType = "UNKN"
+						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
+					elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
+						if textureType.startswith("Cloth_DetailMap"):
+							nodeType = "SF6DETAIL"
+						elif (textureType == "Body_UniqueDetail_NRRC" or textureType.startswith("Body_DetailMap")):
+							nodeType = "SF6BODYDETAIL"
+						elif textureType.startswith("Face_DetailMap"):
+							nodeType = "SF6FACEDETAIL"
+						else:
+							nodeType = "UNKN"
+						textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
+					elif gameName == "SF6" and textureType in sf6FurTypeSet:
+						textureNodeInfoList.append(("SF6FUR", textureType, imageList, outputPath))
 					elif autoDetectedAlbedo:
 						textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 					
