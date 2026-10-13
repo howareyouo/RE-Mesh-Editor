@@ -489,7 +489,27 @@ class ParsedREMesh:
 		self.materialRemapList = reMesh.materialNameRemapList
 		# Parse Skeleton
 		for remapIndex in reMesh.materialNameRemapList:
-			self.materialNameList.append(reMesh.rawNameList[remapIndex])
+			if remapIndex < len(reMesh.rawNameList):
+				self.materialNameList.append(reMesh.rawNameList[remapIndex])
+			else:
+				self.materialNameList.append(f"INVALID_MATERIAL_{remapIndex}")
+
+		# Empty material remap: derive names from the highest material index used
+		# by any LOD, so corrupt/edge-case files import instead of crashing
+		# (ported from REME v0.73).
+		if not self.materialNameList and reMesh.lodHeader is not None:
+			maxMaterialIndex = -1
+			for lodGroup in reMesh.lodHeader.lodGroupList:
+				for meshGroup in lodGroup.meshGroupList:
+					for meshInfo in meshGroup.vertexInfoList:
+						maxMaterialIndex = max(maxMaterialIndex, meshInfo.materialIndex)
+
+			for materialIndex in range(maxMaterialIndex + 1):
+				if materialIndex < len(reMesh.rawNameList):
+					self.materialNameList.append(reMesh.rawNameList[materialIndex])
+				else:
+					self.materialNameList.append(f"Material_{materialIndex:03d}")
+
 		if reMesh.skeletonHeader != None:
 			self.skeleton = Skeleton()
 			self.skeleton.weightedBones = []
