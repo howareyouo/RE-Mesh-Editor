@@ -606,6 +606,15 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			
 			nodeBSDF.location = (400,0)
 			blenderMaterial.node_tree.links.new(nodeBSDF.outputs[0],nodeMaterialOutput.inputs[0])
+			if "eyetear" in mdfMaterial.mmtrPath.lower():
+				#RE9 eyetear: full blend, no shadow casting, base alpha hidden (ported from REME v0.73)
+				#blend_method/shadow_method were removed in Blender 4.2+, guard both
+				try:
+					blenderMaterial.blend_method = "BLEND"
+					blenderMaterial.shadow_method = "NONE"
+				except:
+					pass
+				nodeBSDF.inputs["Alpha"].default_value = 0.0
 			currentYPos = 800
 			currentXPos = -1900
 			currentPropPos = [-2200,2000]
