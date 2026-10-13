@@ -1,6 +1,6 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere
-from .mesh_versions import SIX_WEIGHT_MESH_FILE_VERSIONS, VERSION_SF6
+from .mesh_versions import (MESH_FILE_VERSION_SF6, SIX_WEIGHT_MESH_FILE_VERSIONS)
 from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
@@ -358,7 +358,7 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 							aabb = blendShapeLODData.aabbList[blendTargetIndex]
 							blendShapeEntry.deltas = remapBlendShapeDeltas(
 								blendShapeEntry.deltas, aabb,
-								zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
+								zeroIsSentinel=reMesh.meshVersion == MESH_FILE_VERSION_SF6)
 
 							currentBlendDeltaOffset += subMeshEntry.vertCount
 							blendShapeDict.setdefault(subMeshEntry.subMeshVertexStartIndex, []).append(blendShapeEntry)
@@ -371,7 +371,7 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 						aabb = blendShapeLODData.aabbList[blendTargetIndex]
 						blendShapeEntry.deltas = remapBlendShapeDeltas(
 							blendShapeEntry.deltas, aabb,
-							zeroIsSentinel=reMesh.meshVersion == VERSION_SF6)
+							zeroIsSentinel=reMesh.meshVersion == MESH_FILE_VERSION_SF6)
 
 						currentBlendDeltaOffset += blendTarget.vertCount
 						blendShapeDict.setdefault(blendTarget.subMeshVertexStartIndex, []).append(blendShapeEntry)
