@@ -29,7 +29,7 @@ GAME_INFO = {
     "MHWILDS": (241111606,   45,   241106027,   130),
     "ONI2":    (240827123,   46,   240701001,   127),
     "MHS3":    (250604100,   49,   251111100,   136),  # mdf2.49 has no dedicated parser yet
-    "PRAG":    (250925211,   51,   250813143,   135),  # demo build, shares file versions w/ RE9
+    "PRAG":    (250925211,   51,   251111100,   135),  # demo mesh/mdf shared w/ RE9; retail tex = MHS3's (REME v0.73)
     "RE9":     (250925211,   51,   250813143,   140),
 }
 
@@ -92,7 +92,7 @@ gameNameToTexVersionDict = {
     "MHWILDS": 241106027,
     "ONI2": 240701001,
     "MHS3": 251111100,
-    "PRAG": 250813143,
+    "PRAG": 251111100,  # retail; demo shipped RE9's 250813143
     "RE9": 250813143,
 }
 
@@ -142,10 +142,18 @@ texVersionDict = {
     20: ".31",
     # 21: ".34",  # unscannable, leave for wildcard search
     23: ".28",
+    31: ".241101895",  # SF6
     32: ".143221013",
     # 40: ".760230703",  # unscannable, leave for wildcard search
     45: ".241106027",
     51: ".250813143",
+}
+
+# Explicit per-game tex version overrides, applied before texVersionDict when
+# the game name is known. PRAG retail shares mdf 51 with RE9 but ships MHS3's
+# tex version, so the mdf-derived lookup would pick RE9's .250813143.
+gameTexVersionDict = {
+    "PRAG": ".251111100",
 }
 
 

@@ -196,7 +196,7 @@ baseUVTilingList = set([#Node types that use UV_Tiling property
 
 
 from ..gen_functions import raiseWarning,getBit,wildCardFileSearch
-from ..game_versions import mdfVersionDict, texVersionDict
+from ..game_versions import mdfVersionDict, texVersionDict, gameTexVersionDict
 from .file_re_mdf import readMDF,getMDFVersionToGameName
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
@@ -339,11 +339,14 @@ def _listTexDir(dirPath):
 	return entry
 
 
-def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
+def getTexPath(baseTexturePath,chunkPathList,mdfVersion,gameName=None):
 	inputPath = None
-	texVersion = texVersionDict.get(mdfVersion,"")
+	texVersion = gameTexVersionDict.get(gameName, texVersionDict.get(mdfVersion,""))
 	exactName = baseTexturePath + f".tex{texVersion}"
 	exactLower = exactName.lower() if IS_WINDOWS else exactName
+	#Fallback prefix: accept any .tex<N> revision when the version-specific name
+	#misses (unknown/unlisted mdf tex version or a different build on disk)
+	anyLower = (baseTexturePath + ".tex").lower() if IS_WINDOWS else baseTexturePath + ".tex"
 	for chunkPath in chunkPathList:
 		#Fast path: exact file name via a single stat, no directory enumeration
 		for relDir in ("streaming",""):
@@ -351,16 +354,17 @@ def getTexPath(baseTexturePath,chunkPathList,mdfVersion):
 			if os.path.isfile(exactPath):
 				return exactPath
 		#Slow path: capcom can append platform/lang extensions - scan a cached directory listing once
+		anyPath = None
 		for relDir in ("streaming",""):
 			dirPath = os.path.join(chunkPath,relDir)
 			for fname in _listTexDir(dirPath):
-				if (fname.lower() if IS_WINDOWS else fname).startswith(exactLower):
-					inputPath = os.path.join(dirPath,fname)
-					break
-			if inputPath != None:
-				break
-		if inputPath != None:
-			break
+				lname = fname.lower() if IS_WINDOWS else fname
+				if lname.startswith(exactLower):
+					return os.path.join(dirPath,fname)
+				if anyPath is None and lname.startswith(anyLower):
+					anyPath = os.path.join(dirPath,fname)
+		if anyPath != None:
+			return anyPath
 		
 		if isLinux():
 			inputPath = resolveLinuxPath(os.path.join(chunkPath,"streaming",exactName))
@@ -512,7 +516,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if baseTexturePath in texPathCache:
 						texPath = texPathCache[baseTexturePath]
 					else:
-						texPath = getTexPath(baseTexturePath,chunkPathList,mdfVersion)
+						texPath = getTexPath(baseTexturePath,chunkPathList,mdfVersion,gameName)
 						texPathCache[baseTexturePath] = texPath
 					if texPath != None:
 						if texPath not in loadedImageDict:
