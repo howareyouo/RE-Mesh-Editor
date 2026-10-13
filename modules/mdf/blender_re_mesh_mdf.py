@@ -2040,6 +2040,64 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 							
 							if "Subsurface Scale" in nodeBSDF.inputs:
 								nodeBSDF.inputs["Subsurface Scale"].default_value = 0.01
+				if matInfo["gameName"] == "SF6":
+					mmtr = matInfo["mmtrName"].lower()
+					isTransparent = any(x in mmtr for x in [
+						"glass",
+						"eye",
+						"seethrough",
+						"see_through",
+					])
+
+					if isTransparent and "SeeThrough_EdgeAlpha" in matInfo["mPropDict"]:
+						edgeAlphaNode = addPropertyNode(
+							matInfo["mPropDict"]["SeeThrough_EdgeAlpha"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						layerWeightNode = nodes.new("ShaderNodeLayerWeight")
+						layerWeightNode.name = "SF6 See Through Facing"
+
+						invertFacingNode = nodes.new("ShaderNodeMath")
+						invertFacingNode.name = "SF6 See Through Edge"
+						invertFacingNode.operation = "SUBTRACT"
+						invertFacingNode.inputs[0].default_value = 1.0
+						links.new(layerWeightNode.outputs["Facing"], invertFacingNode.inputs[1])
+
+						edgePowerNode = nodes.new("ShaderNodeMath")
+						edgePowerNode.name = "SF6 See Through Edge Power"
+						edgePowerNode.operation = "POWER"
+						links.new(invertFacingNode.outputs["Value"], edgePowerNode.inputs[0])
+
+						if "SeeThrough_EdgePow" in matInfo["mPropDict"]:
+							edgePowNode = addPropertyNode(
+								matInfo["mPropDict"]["SeeThrough_EdgePow"],
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+							links.new(edgePowNode.outputs["Value"], edgePowerNode.inputs[1])
+
+						edgeMixNode = nodes.new("ShaderNodeMixRGB")
+						edgeMixNode.name = "SF6 See Through Opacity"
+						edgeMixNode.inputs["Color2"].default_value = (1.0, 1.0, 1.0, 1.0)
+						links.new(edgePowerNode.outputs["Value"], edgeMixNode.inputs["Fac"])
+
+						invertEdgeAlphaNode = nodes.new("ShaderNodeMath")
+						invertEdgeAlphaNode.name = "SF6 See Through Base Opacity"
+						invertEdgeAlphaNode.operation = "SUBTRACT"
+						invertEdgeAlphaNode.inputs[0].default_value = 1.0
+						links.new(edgeAlphaNode.outputs["Value"], invertEdgeAlphaNode.inputs[1])
+
+						links.new(invertEdgeAlphaNode.outputs["Value"], edgeMixNode.inputs[1])
+
+						finalAlphaNode = nodes.new("ShaderNodeMath")
+						finalAlphaNode.name = "SF6 See Through Final Alpha"
+						finalAlphaNode.operation = "MULTIPLY"
+						links.new(matInfo["alphaSocket"], finalAlphaNode.inputs[0])
+						links.new(edgeMixNode.outputs["Color"], finalAlphaNode.inputs[1])
+
+						matInfo["alphaSocket"] = finalAlphaNode.outputs["Value"]
 				#Mix Shaders
 				
 				currentPos = [nodeBSDF.location[0]+300,nodeBSDF.location[1]]
