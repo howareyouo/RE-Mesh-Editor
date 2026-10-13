@@ -381,6 +381,7 @@ albedoTypeSet = set([
 	"CloudMap_1",
 	"FaceBaseMap",
 	"Face_BaseDielectricMap",
+	"Fur_DepthColorMap",
 	"Moon_Tex",
 	"Sky_Top_Tex",
 	"RTReflectionBaseMap",
@@ -492,6 +493,11 @@ MiscMapTypes = set([
 	#"Detail_NRRH_B",
 	#"Detail_NRRH_A",
 	])
+
+re9LeatherDetailTypeSet = set([
+	"DetailMapArray",
+	"DetailMask_Leather",
+])
 
 usedTextureSet.update(albedoVertexColorTypeSet)
 usedTextureSet.update(normalVertexColorTypeSet)
@@ -849,7 +855,7 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					if "_ALB" in texture:
 						autoDetectedAlbedo = True
 						detectedAlbedo = True
-				if loadUnusedTextures or textureType in usedTextureSet or autoDetectedAlbedo:
+				if loadUnusedTextures or textureType in usedTextureSet or (gameName == "RE9" and textureType in re9LeatherDetailTypeSet) or autoDetectedAlbedo:
 					baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
 					outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
 					
@@ -895,6 +901,12 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 						else:
 							textureNodeInfoList.append(("ALB",textureType,imageList,outputPath))
 						detectedAlbedo = True
+					elif gameName == "RE9" and textureType == "SecondaryBaseColorMap":
+						useSecondaryProp = mdfMaterial.getPropertyDict().get("UseSecondaryBaseColorMap")
+						if useSecondaryProp is not None and useSecondaryProp.propValue[0] <= 0.0:
+							textureNodeInfoList.append(("UNKN", textureType, imageList, outputPath))
+						else:
+							textureNodeInfoList.append(("ALB", textureType, imageList, outputPath))
 					elif textureType in normalTypeSet:
 						if textureType == "NormalRoughnessMap":
 							textureNodeInfoList.append(("NRMR",textureType,imageList,outputPath))
@@ -1025,6 +1037,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 			UVMap2Node.name = "UVMap2Node"
 			UVMap2Node.location = (-800,600)
 			UVMap2Node.uv_map = "UVMap1"
+			UV3MapNode = nodes.new("ShaderNodeUVMap")
+			UV3MapNode.name = "UVMap3Node"
+			UV3MapNode.location = (-800, 300)
+			UV3MapNode.uv_map = "UVMap2"
 			
 			blenderMaterial.use_backface_culling = useBackfaceCulling and not (matInfo["flags"].BaseTwoSideEnable == 1 or matInfo["flags"].TwoSideEnable == 1)
 			
@@ -1309,9 +1325,28 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				if matInfo["gameName"] == "RE9":
 					if "ch_hair" in matInfo["mmtrName"]:
 						matInfo["disableAO"] = True#TODO Figure out what's wrong with secondary UV hair AO
-					if "SecondaryBaseColorMap" in matInfo["textureNodeDict"]:
+					useSecondaryProp = matInfo["mPropDict"].get("UseSecondaryBaseColorMap")
+					if "SecondaryBaseColorMap" in matInfo["textureNodeDict"] and (useSecondaryProp is None or useSecondaryProp.propValue[0] > 0.0):
 						secondaryBaseColorNode = matInfo["textureNodeDict"]["SecondaryBaseColorMap"]
+
+						useTertiaryUVProp = matInfo["mPropDict"].get("Use_TertiaryUV")
+						if useTertiaryUVProp is not None and useTertiaryUVProp.propValue[0] > 0.0:
+							links.new(UV3MapNode.outputs["UV"], secondaryBaseColorNode.inputs["Vector"])
+
 						matInfo["albedoNodeLayerGroup"].addMixLayer(secondaryBaseColorNode.outputs["Color"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
+
+					if "ch_shellfur" in matInfo["mmtrName"]:
+						furDepthColorProp = matInfo["mPropDict"].get("Fur_DepthColor")
+						furDepthColorMapEnabledProp = matInfo["mPropDict"].get("Fur_DepthColorMap_Enable")
+
+						if furDepthColorProp is not None and (furDepthColorMapEnabledProp is None or furDepthColorMapEnabledProp.propValue[0] <= 0.0):
+							furDepthColorNode = addPropertyNode(
+								furDepthColorProp,
+								matInfo["currentPropPos"],
+								nodeTree
+							)
+
+							matInfo["albedoNodeLayerGroup"].addMixLayer(furDepthColorNode.outputs["Color"], factorOutSocket=None, mixType="MULTIPLY", mixFactor=1.0)
 				#MHWilds detail map
 				#TODO - will come back to this
 				
@@ -1503,8 +1538,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 				if "eye" in matInfo["blenderMaterial"].name or "eye" in matInfo["mmtrName"] or matInfo["mmtrName"].endswith("_ao.mmtr"):
 					#Tearline mat setup
 					if "FakeSpecular" in matInfo["textureNodeDict"]:
-							matInfo["alphaSocket"] = nodes["FakeSpecular"].outputs["Color"]#RE9 TODO Figure out eye shell rendering properly
-							
+						if matInfo["gameName"] == "RE9":
+							eyeShellAlphaNode = nodes.new("ShaderNodeMath")
+							eyeShellAlphaNode.label = "RE9 Eye Shell Alpha"
+							eyeShellAlphaNode.operation = "GREATER_THAN"
+							eyeShellAlphaNode.location = nodes["FakeSpecular"].location + Vector((300, -200))
+							eyeShellAlphaNode.inputs[1].default_value = 0.5
+							links.new(nodes["FakeSpecular"].outputs["Color"], eyeShellAlphaNode.inputs[0])
+							matInfo["alphaSocket"] = eyeShellAlphaNode.outputs["Value"]
+						else:
+							matInfo["alphaSocket"] = nodes["FakeSpecular"].outputs["Color"]
+
+						matInfo["isAlphaBlend"] = True
 					if "TearColor" in matInfo["mPropDict"]:  
 						baseColorNode = addPropertyNode(matInfo["mPropDict"]["TearColor"], matInfo["currentPropPos"], nodeTree)
 						matInfo["albedoNodeLayerGroup"].addMixLayer(baseColorNode.outputs["Color"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 1.0)
@@ -1807,6 +1852,55 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 					clampNode.location = (matInfo["roughnessNodeLayerGroup"].currentOutSocket.node.location[0]+300,matInfo["roughnessNodeLayerGroup"].currentOutSocket.node.location[1])
 					links.new(matInfo["roughnessNodeLayerGroup"].currentOutSocket,clampNode.inputs["Value"])
 					links.new(clampNode.outputs["Result"],nodeBSDF.inputs["Roughness"])
+
+				# Pragmata primary hair highlight approximation
+				if matInfo["gameName"] == "PRAG" and "hair" in matInfo["mmtrName"].lower() and "Aniso1_PrimalyAnisotropy" in matInfo["mPropDict"]:
+					hairTangentNode = nodes.new("ShaderNodeTangent")
+					hairTangentNode.name = "PRAG Hair Tangent"
+					hairTangentNode.direction_type = "UV_MAP"
+					hairTangentNode.uv_map = "UVMap0"
+
+					links.new(hairTangentNode.outputs["Tangent"], nodeBSDF.inputs["Tangent"])
+
+					hairAnisotropyNode = addPropertyNode(
+						matInfo["mPropDict"]["Aniso1_PrimalyAnisotropy"],
+						matInfo["currentPropPos"],
+						nodeTree
+					)
+
+					links.new(hairAnisotropyNode.outputs["Value"], nodeBSDF.inputs["Anisotropic"])
+
+					if "AnisoSpecular1_Intensity" in matInfo["mPropDict"]:
+						hairSpecularNode = addPropertyNode(
+							matInfo["mPropDict"]["AnisoSpecular1_Intensity"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						links.new(hairSpecularNode.outputs["Value"], nodeBSDF.inputs["Specular IOR Level"])
+
+					if "AnisoSpecular1_Sharpness" in matInfo["mPropDict"]:
+						hairSharpnessNode = addPropertyNode(
+							matInfo["mPropDict"]["AnisoSpecular1_Sharpness"],
+							matInfo["currentPropPos"],
+							nodeTree
+						)
+
+						hairSharpnessAddNode = nodes.new("ShaderNodeMath")
+						hairSharpnessAddNode.name = "PRAG Hair Sharpness Plus One"
+						hairSharpnessAddNode.operation = "ADD"
+						hairSharpnessAddNode.inputs[1].default_value = 1.0
+
+						links.new(hairSharpnessNode.outputs["Value"], hairSharpnessAddNode.inputs[0])
+
+						hairRoughnessNode = nodes.new("ShaderNodeMath")
+						hairRoughnessNode.name = "PRAG Hair Highlight Roughness"
+						hairRoughnessNode.operation = "POWER"
+						hairRoughnessNode.inputs[1].default_value = -0.2
+						hairRoughnessNode.use_clamp = True
+
+						links.new(hairSharpnessAddNode.outputs["Value"], hairRoughnessNode.inputs[0])
+						links.new(hairRoughnessNode.outputs["Value"], nodeBSDF.inputs["Roughness"])
 				
 				if matInfo["metallicNodeLayerGroup"].currentOutSocket != None:
 					clampNode = nodes.new("ShaderNodeClamp")

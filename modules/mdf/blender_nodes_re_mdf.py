@@ -591,6 +591,13 @@ def newALBANode (nodeTree,textureType,matInfo):
 		matInfo["alphaSocket"] = imageNode.outputs["Alpha"]
 
 	return imageNode
+def newPRAGHairUniqueNode(nodeTree, textureType, matInfo):
+	imageNode = nodeTree.nodes[textureType]
+
+	# Pragmata's unique hair albedo is coupled to its parallax shader
+	# Applying it directly to flat hair cards exposes the texture cells
+
+	return imageNode
 def newALBNode (nodeTree,textureType,matInfo):
 	imageNode = _newALB(nodeTree,textureType,matInfo,False,False)
 	
@@ -2033,6 +2040,7 @@ nodeDict = {
 	"NAM":newNAMNode,
 	"SRM":newSRMNode,
 	"NRM":newNRMNode,
+	"PRAGHAIR":newPRAGHairUniqueNode,
 }
 
 def addTextureNode(nodeTree,nodeType,textureType,matInfo):
