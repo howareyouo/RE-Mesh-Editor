@@ -475,8 +475,18 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
 		if mdfMaterial != None:
-			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable or mdfMaterial.flags.flagValues.AlphaMaskUsed
-			if mdfMaterial.ver32Unkn0 == 1:
+			# Three-point alpha gating (ported from REME v0.73): AlphaMaskUsed in
+			# the flags word is only reliable below MDF v31 - v31+ (SF6+) reports
+			# alpha through flagsB.AlphaUsed instead.
+			hasAlpha = mdfMaterial.flags.flagValues.BaseAlphaTestEnable or mdfMaterial.flags.flagValues.AlphaTestEnable
+			if mdfVersion < 31:
+				hasAlpha = hasAlpha or mdfMaterial.flags.flagValues.AlphaMaskUsed
+			else:
+				try:
+					hasAlpha = hasAlpha or mdfMaterial.flagsB.flagValues.AlphaUsed
+				except AttributeError:
+					pass
+			if mdfMaterial.ver32Unkn0 == 1:  # vestigial: ver32Unkn0 is never parsed, upstream REME keeps the same dead check
 				hasAlpha = True
 			hasVertexColor = False
 			#Get paths/convert textures
