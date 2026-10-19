@@ -657,14 +657,16 @@ class ImportREMesh(Operator, ImportHelper):
 	   default = True)
 
 	def isSF6Import(self):
-		"""Whether the pending import targets SF6, based on the .mesh.<version>
-		extension of each queued file. Files with an unknown version keep the
-		SF6 options visible to preserve the previous behavior."""
+		"""Whether the pending import targets SF6, based on the mesh version in
+		each queued file's name. Handles both the .mesh.<version> and the
+		.mesh_.<version> (underscore, streaming chunk) naming conventions.
+		Files with an unknown version keep the SF6 options visible to preserve
+		the previous behavior."""
 		if not self.files:
 			return True
 		for file in self.files:
-			version = file.name.rsplit(".mesh.", 1)[-1]
-			gameName = meshFileVersionToGameNameDict.get(int(version)) if version.isdigit() else None
+			version = parseFileVersion(file.name, None)
+			gameName = meshFileVersionToGameNameDict.get(version) if version != None else None
 			if gameName != None and gameName != "SF6":
 				return False
 		return True
