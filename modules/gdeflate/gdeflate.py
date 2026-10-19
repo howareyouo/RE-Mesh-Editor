@@ -207,7 +207,7 @@ class GDeflate:
         if not success:
             raise GDeflateError("Decompression failed")
 
-        return ctypes.string_at(output_array, output_size)
+        return ctypes.string_at(output_array, output_size.value)
     
     def compress(self, 
                 data: Union[bytes, bytearray], 

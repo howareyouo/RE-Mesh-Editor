@@ -6,11 +6,11 @@ Feel free to fork the project if you want to.
 
 ---
 
-# PSA - Blender 5.1 is currently bugged
+# PSA - Use Blender 5.2.2 LTS (Blender 5.1 is currently bugged)
 
 Blender 5.1 currently has an issue that makes importing and exporting meshes extremely slow.
 
-Stay on Blender 5.0 or lower until this issue is fixed.
+Blender 5.2.2 LTS is verified working. The slowdown does not occur there and the full addon test suite (mesh/MDF import and export) passes on it. Stay on Blender 5.0 or update to Blender 5.2.2 LTS until this issue is fixed in a 5.1 patch.
 
 See here for details: https://projects.blender.org/blender/blender/issues/155858
 
@@ -89,7 +89,7 @@ This addon allows for importing and exporting of RE Engine mesh and mdf2 (materi
 Support for more games may be added in the future.
 
 ## Requirements
-* [Blender 4.3.2 or higher](https://www.blender.org/download/)
+* [Blender 4.3.2 or higher](https://www.blender.org/download/) (Blender 5.2.2 LTS recommended and tested)
 
   
 **Not required but strongly recommended:**

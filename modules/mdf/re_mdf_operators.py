@@ -109,7 +109,9 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 					if materialName not in meshMaterialDict:
 						if materialName:
 							newMat = bpy.data.materials.new(name=materialName)
-							newMat.use_nodes = True
+							#Deprecated no-op on Blender 5.0+, still required on 4.x
+							if bpy.app.version < (5, 0, 0):
+								newMat.use_nodes = True
 							obj.data.materials.append(newMat)
 							meshMaterialDict[materialName] = newMat
 						else:

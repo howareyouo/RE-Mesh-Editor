@@ -376,7 +376,7 @@ def restoreRenderSettings(settingsDict, scene=None):
     if scene.render.engine == 'CYCLES' and "cycles" in settingsDict:
         applyDictToRNA(scene.cycles, settingsDict["cycles"])
 
-    if scene.render.engine == 'BLENDER_EEVEE' and "eevee" in settingsDict:
+    if scene.render.engine in ('BLENDER_EEVEE', 'BLENDER_EEVEE_NEXT') and "eevee" in settingsDict:
         applyDictToRNA(scene.eevee, settingsDict["eevee"])
 
     applyDictToRNA(scene.view_settings, settingsDict.get("view_settings", {}))
