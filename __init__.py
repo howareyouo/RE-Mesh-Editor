@@ -655,6 +655,19 @@ class ImportREMesh(Operator, ImportHelper):
 	showMaterialOptions : BoolProperty(
 	   name = "Show Material Options",
 	   default = True)
+
+	def isSF6Import(self):
+		"""Whether the pending import targets SF6, based on the .mesh.<version>
+		extension of each queued file. Files with an unknown version keep the
+		SF6 options visible to preserve the previous behavior."""
+		if not self.files:
+			return True
+		for file in self.files:
+			version = file.name.rsplit(".mesh.", 1)[-1]
+			gameName = meshFileVersionToGameNameDict.get(int(version)) if version.isdigit() else None
+			if gameName != None and gameName != "SF6":
+				return False
+		return True
 	
 	def draw(self, context):
 		layout = self.layout
@@ -681,8 +694,9 @@ class ImportREMesh(Operator, ImportHelper):
 			column2.prop(self, "loadMaterials")
 			column2.prop(self, "loadMDFData")
 			column2.prop(self, "loadShellFur")
-			column2.prop(self, "sf6CmdIndex")
-			column2.prop(self, "sf6CostumeIndex")
+			if self.isSF6Import():
+				column2.prop(self, "sf6CmdIndex")
+				column2.prop(self, "sf6CostumeIndex")
 			column2.prop(self, "reloadCachedTextures")
 			column2.prop(self, "loadUnusedTextures")
 			column2.prop(self, "loadUnusedProps")
