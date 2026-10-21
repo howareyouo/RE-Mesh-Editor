@@ -452,6 +452,8 @@ class MDFFile():
 		#but duplicates are still serialized and occupy table space.
 		#StringTableBuilder.add_shared_alloc captures that exactly; material names
 		#always get a fresh slot (add_always).
+		#This makes exports larger than tools that dedupe the table (e.g. REE-Content-
+		#Editor) - intentional, keeps output byte-identical to vanilla. See docs/MDF2.md.
 		stringTable = StringTableBuilder(write_duplicates=True)
 		#Get all material names and mmtr paths first
 		for material in self.materialList:
