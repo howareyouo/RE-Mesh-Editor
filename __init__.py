@@ -23,7 +23,6 @@ from .modules.blender_utils import printEditorHeader, isMDFCollection, isMeshCol
 from .modules.game_versions import mdfVersionDict
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
-from .modules.re_scene import ImportRESCN
 from .modules.mesh.blender_re_mesh import importREMeshFile,exportREMeshFile
 from .modules.mesh.re_mesh_propertyGroups import (
 	ExporterNodePropertyGroup,
@@ -1387,8 +1386,6 @@ classes = [
 	#sfur
 	ImportRESFur,
 	ExportRESFur,
-	#scene
-	ImportRESCN,
 	#operators
 	WM_OT_NewSFurHeader,
 	WM_OT_ReindexEntries,
@@ -1478,7 +1475,6 @@ class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
         layout.operator(ImportREMDF.bl_idname, text="RE MDF (.mdf2.x) (Materials)",icon = "MATERIAL")
         layout.operator(ImportREFBXSkel.bl_idname, text="RE FBXSkel (.fbxskel.x) (Skeleton)",icon = "ARMATURE_DATA")
         layout.operator(ImportRESFur.bl_idname, text="RE SFur (.sfur.x) (Shell Fur)",icon = "CURVES_DATA")
-        layout.operator(ImportRESCN.bl_idname, text="RE2 RT Scene (.scn.20)", icon="OUTLINER_COLLECTION")
 
 def re_mesh_editor_import(self, context):
 	self.layout.menu("IMPORT_MT_re_mesh_editor",icon = "MOD_LINEART")
