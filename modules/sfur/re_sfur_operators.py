@@ -5,7 +5,8 @@ import os
 from bpy.types import Operator
 
 from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection,checkNameUsage
-from ..gen_functions import formatREMaterialObjectName
+from ..naming import formatREMaterialObjectName
+from ..blender_utils import MDF_MATERIAL_TYPE
 from .ui_re_sfur_panels import tag_redraw
 
 class WM_OT_NewSFurHeader(Operator):
@@ -58,7 +59,7 @@ class WM_OT_AddFurEntry(Operator):
 		tag_redraw(bpy.context)
 		if sFurCollection != None:
 			materialName = None
-			if bpy.context.active_object != None and bpy.context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
+			if bpy.context.active_object != None and bpy.context.active_object.get("~TYPE") == MDF_MATERIAL_TYPE:
 				materialName = bpy.context.active_object.re_mdf_material.materialName
 			
 			currentIndex = 0
@@ -90,8 +91,6 @@ class WM_OT_ApplySFurToMeshCollection(Operator):
 		#reindexMaterials()
 		sFurCollection = bpy.context.scene.re_mdf_toolpanel.sFurCollection
 		meshCollection = bpy.context.scene.re_mdf_toolpanel.meshCollection
-		
-		#TODO
 		
 		if sFurCollection != None and meshCollection != None:
 			

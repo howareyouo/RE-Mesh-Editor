@@ -9,16 +9,18 @@ from mathutils import Vector
 from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton, BlendShape
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
-from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, parseREMeshGroupID, parseREMeshObjectMaterialName, resolveREMeshMaterialName, stripBlenderUserSuffix, ENABLE_EXPORT_WARNINGS
+from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, ENABLE_EXPORT_WARNINGS
+from ..naming import parseREMeshGroupID, parseREMeshObjectMaterialName, resolveREMeshMaterialName, stripBlenderUserSuffix
 from ..blender_utils import (showMessageBox, showErrorMessageBox, findMDFCollectionForMesh, getMDFMaterialNames, rotateNeg90Matrix,
                              iterMeshLODCollections, iterCollectionMeshObjects)
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath
-from .blender_re_mesh_utils import triangulateMesh, bounding_sphere_ritter, getCollection, _game_settings, _resolve_symmetry_bone_index, applyPragmataExportOrderAndStreams, assemblePragmataBlendAux
+from .blender_re_mesh_utils import (SHAPEKEY_PREFIX, triangulateMesh, bounding_sphere_ritter, getCollection,
+                                    _game_settings, _resolve_symmetry_bone_index,
+                                    applyPragmataExportOrderAndStreams, assemblePragmataBlendAux)
 
 
 MIN_WEIGHT = 0.002
-
 MAX_VERTICES = 65536
 MAX_VERTICES_EXTENDED = 4294967295
 MAX_FACES = 4294967295
@@ -253,8 +255,8 @@ def _gatherSubMesh(task, profile, maxFaces, armatureBoneNameSet):
 		#Precompute per-group name facts once instead of per vertex: the same few
 		#groups are visited by nearly every vertex, so startswith/slicing per
 		#vertex is wasted work (500k verts x 8 groups = millions of string ops)
-		bare_name_list = [n[9:] if n.startswith("SHAPEKEY_") else n for n in vg_name_list]
-		is_shapekey_list = [n.startswith("SHAPEKEY_") for n in vg_name_list]
+		bare_name_list = [n[len(SHAPEKEY_PREFIX):] if n.startswith(SHAPEKEY_PREFIX) else n for n in vg_name_list]
+		is_shapekey_list = [n.startswith(SHAPEKEY_PREFIX) for n in vg_name_list]
 		# Only the unique verts are actually processed; their positions are read
 		# directly from the float32 vert_positions array when building the bone bbox.
 		# Resolve UV-rebuild remap ONCE outside the loop: when UV solve split
@@ -457,6 +459,135 @@ def _export_read_bounding_boxes(boundingBoxCollection, armatureObj, parsedMesh, 
 	return importedBoneBoundingBoxes
 
 
+def _cloneLODSubMeshObjects(lod, options, dg, meshVersion, cloneMeshNameDict, deleteCopiedMeshList, warningDict):
+	#Groups every exportable mesh object of one LOD collection by viscon group id and creates
+	#the evaluated working clones (shape keys muted for Pragmata blend-shape export, restored
+	#after evaluation). Flags meshes with doubled UVs / sharp edges for the data-layer solve,
+	#registers clones for cleanup, and returns (visconDict, doubledUVList, sharpEdgeSplitList,
+	#subMeshCount).
+	# Store all groups as a key in dictionary with submesh list as value
+	visconDict = dict()
+	# Get all meshes inside the collection
+	doubledUVList = []
+	sharpEdgeSplitList = []
+	clonedMeshCollection = getCollection("clonedMeshes")
+	# iterCollectionMeshObjects is the shared definition of "the export contains
+	# this object" (getMeshMaterialNames uses it too), so the materials collected
+	# here can never drift from the exclude-unused filter.
+	subMeshCount = 0
+	for obj in iterCollectionMeshObjects(lod, options["selectedOnly"]):
+		subMeshCount += 1
+		cloneObj = obj.copy()
+		# Get copy of sub mesh with modifiers applied
+		# Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
+		cloneObj.name = "CLN_" + obj.name
+		# Evaluate with shape key values muted when exporting Pragmata blend shapes, so the
+		# exported positions and normals are the rest basis, not whatever morph mix the shape
+		# key sliders are set to. Only the Pragmata blend-shape path does this.
+		mutedShapeKeyValues = None
+		if (meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+				and obj.data.shape_keys is not None
+				and any(kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks)):
+			mutedShapeKeyValues = [kb.value for kb in obj.data.shape_keys.key_blocks]
+			for kb in obj.data.shape_keys.key_blocks:
+				kb.value = 0.0
+			dg.update()
+		cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
+		if mutedShapeKeyValues is not None:
+			for kb, v in zip(obj.data.shape_keys.key_blocks, mutedShapeKeyValues):
+				kb.value = v
+			dg.update()
+		clonedMeshCollection.objects.link(cloneObj)
+
+		print(f"Created temporary clone of {obj.name}: {cloneObj.name}")
+		cloneMeshNameDict[obj.name] = cloneObj.name
+		deleteCopiedMeshList.append(cloneObj)
+		if options["autoSolveRepeatedUVs"]:
+			hasUVDoubling = checkObjForUVDoubling(cloneObj)
+			if hasUVDoubling:
+				doubledUVList.append(cloneObj)
+
+		if options["preserveSharpEdges"]:
+			use_smooth = np.zeros(len(cloneObj.data.polygons), dtype=bool)
+			cloneObj.data.polygons.foreach_get("use_smooth", use_smooth)
+			if not np.all(use_smooth):
+				sharpEdgeSplitList.append(cloneObj)
+
+		groupID = parseREMeshGroupID(obj.name)
+		# Warn when the name doesn't follow the RE naming scheme since the viscon
+		# group and material name both fall back to defaults then
+		if "Group_" not in obj.name or ("__" not in obj.name and not options["useBlenderMaterialName"]):
+			addErrorToDict(warningDict, "InvalidMeshNamingScheme", obj.name)
+
+		if not visconDict.get(groupID):
+			visconDict[groupID] = [obj]
+		else:
+			visconDict[groupID].append(obj)
+	return visconDict, doubledUVList, sharpEdgeSplitList, subMeshCount
+
+def _solveUVAndSharpEdgeData(doubledUVList, sharpEdgeSplitList):
+	#Runs the data-layer fixes on the flagged clones: repeated-UV solve (returns a CLN-name ->
+	#vertex-remap dict consumed during extraction) and sharp-edge splitting. Both blocks juggle
+	#object selection, so they run before any parallel work.
+	uvRemapDict = dict()  # CLN name -> new-vertex->original-vertex mapping (data-layer UV solve)
+	if doubledUVList != []:
+		uvSolveStart = time.time()
+		previousSelection = bpy.context.selected_objects
+		bpy.ops.object.select_all(action='DESELECT')
+		for obj in doubledUVList:
+			obj.select_set(True)
+
+		try:
+			remaps = solveRepeatedUVs(selection=bpy.context.selected_objects)
+			if remaps:
+				uvRemapDict.update(remaps)
+		except Exception as err:
+			raiseWarning(f"Failed to solve repeated UVs. {str(err)}")
+		printElapsed("Solve repeated UVs", uvSolveStart, suffix=f" ({len(doubledUVList)} meshes).")
+
+		for obj in previousSelection:
+			obj.select_set(True)
+
+	if sharpEdgeSplitList != []:
+		previousSelection = bpy.context.selected_objects
+		bpy.ops.object.select_all(action='DESELECT')
+		for obj in sharpEdgeSplitList:
+			obj.select_set(True)
+		try:
+			splitSharpEdges()
+		except Exception as err:
+			raiseWarning(f"Failed to split sharp edges. {str(err)}")
+
+		bpy.ops.object.select_all(action='DESELECT')
+		for obj in previousSelection:
+			obj.select_set(True)
+	return uvRemapDict
+
+def _resolveExportedMaterialNames(visconSubMeshes, options, cloneMeshNameDict, errorDict):
+	# Resolve each submesh's exported material name ONCE, from the same evaluated
+	# clone the exporter writes (not the original object's mesh), so the submesh
+	# sort below derives from the exact names written into the file and can never
+	# diverge from them. Resolution also reports missing materials, so it must run
+	# exactly once per submesh, before sorting.
+	exportedMaterialNames = {}
+	for obj in visconSubMeshes:
+		cloneMeshData = bpy.data.objects[cloneMeshNameDict[obj.name]].data
+		cloneMaterialName = stripBlenderUserSuffix(
+			cloneMeshData.materials[0].name).strip() if len(cloneMeshData.materials) > 0 else ""
+		objectMaterialName = parseREMeshObjectMaterialName(obj.name)
+		exportedMaterialNames[obj.name] = resolveREMeshMaterialName(
+			obj.name, cloneMaterialName, options["useBlenderMaterialName"], fallback="NO_ASSIGNED_MATERIAL")
+		if options["useBlenderMaterialName"]:  # Material name from slot: error only if neither source is set
+			if cloneMaterialName == "" and objectMaterialName == "":
+				addErrorToDict(errorDict, "NoMaterialOnSubMesh", obj.name)
+		elif objectMaterialName == "":  # No usable "__" suffix: fall back to slot, or report a missing material
+			if cloneMaterialName != "":
+				print(f"Couldn't split material name on {obj.name}, using blender material name instead")
+			else:
+				addErrorToDict(errorDict, "NoMaterialOnSubMesh", obj.name)
+	return exportedMaterialNames
+
+
 def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, errorDict, warningDict, dg,
                           armatureObj, armatureBoneNameSet, deleteCopiedMeshList, cloneMeshNameDict,
                           meshVersion):
@@ -469,6 +600,8 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 	meshDataStartTime = time.time()
 	isFirstLOD = True
 	remapDict = dict()
+	boneMin = None
+	boneMax = None
 	pragmataChunks = []  # (weight16, extra16, aux16, map4, src) per submesh, joined in finalize
 	# Aggregated across the parallel submesh extraction for the current LOD:
 	all_used_names = set()      # unprefixed group names actually referenced -> builds weightedBones/remap
@@ -481,96 +614,11 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 						lodIndex + 1)  # Player model LOD distance, maybe calculate from a bounding box instead
 		parsedLODLevel.lodDistance = lod["LOD Distance"]
 
-		# Store all groups as a key in dictionary with submesh list as value
-		visconDict = dict()
-		# Get all meshes inside the collection
-		doubledUVList = []
-		sharpEdgeSplitList = []
-		uvRemapDict = dict()  # CLN name -> new-vertex->original-vertex mapping (data-layer UV solve)
-		clonedMeshCollection = getCollection("clonedMeshes")
-		# iterCollectionMeshObjects is the shared definition of "the export contains
-		# this object" (getMeshMaterialNames uses it too), so the materials collected
-		# here can never drift from the exclude-unused filter.
-		for obj in iterCollectionMeshObjects(lod, options["selectedOnly"]):
-			subMeshCount += 1
-			cloneObj = obj.copy()
-			# Get copy of sub mesh with modifiers applied
-			# Creates copy of object so that solve repeated uvs and sharp edge splitting can be done and not affect the original mesh
-			cloneObj.name = "CLN_" + obj.name
-			# Evaluate with shape key values muted when exporting Pragmata blend shapes, so the
-			# exported positions and normals are the rest basis, not whatever morph mix the shape
-			# key sliders are set to. Only the Pragmata blend-shape path does this.
-			mutedShapeKeyValues = None
-			if (meshVersion in PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
-					and obj.data.shape_keys is not None
-					and any(kb.value != 0.0 for kb in obj.data.shape_keys.key_blocks)):
-				mutedShapeKeyValues = [kb.value for kb in obj.data.shape_keys.key_blocks]
-				for kb in obj.data.shape_keys.key_blocks:
-					kb.value = 0.0
-				dg.update()
-			cloneObj.data = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
-			if mutedShapeKeyValues is not None:
-				for kb, v in zip(obj.data.shape_keys.key_blocks, mutedShapeKeyValues):
-					kb.value = v
-				dg.update()
-			clonedMeshCollection.objects.link(cloneObj)
+		visconDict, doubledUVList, sharpEdgeSplitList, lodSubMeshCount = _cloneLODSubMeshObjects(
+			lod, options, dg, meshVersion, cloneMeshNameDict, deleteCopiedMeshList, warningDict)
+		subMeshCount += lodSubMeshCount
 
-			print(f"Created temporary clone of {obj.name}: {cloneObj.name}")
-			cloneMeshNameDict[obj.name] = cloneObj.name
-			deleteCopiedMeshList.append(cloneObj)
-			if options["autoSolveRepeatedUVs"]:
-				hasUVDoubling = checkObjForUVDoubling(cloneObj)
-				if hasUVDoubling:
-					doubledUVList.append(cloneObj)
-
-			if options["preserveSharpEdges"]:
-				use_smooth = np.zeros(len(cloneObj.data.polygons), dtype=bool)
-				cloneObj.data.polygons.foreach_get("use_smooth", use_smooth)
-				if not np.all(use_smooth):
-					sharpEdgeSplitList.append(cloneObj)
-
-			groupID = parseREMeshGroupID(obj.name)
-			# Warn when the name doesn't follow the RE naming scheme since the viscon
-			# group and material name both fall back to defaults then
-			if "Group_" not in obj.name or ("__" not in obj.name and not options["useBlenderMaterialName"]):
-				addErrorToDict(warningDict, "InvalidMeshNamingScheme", obj.name)
-
-			if not visconDict.get(groupID):
-				visconDict[groupID] = [obj]
-			else:
-				visconDict[groupID].append(obj)
-
-		if doubledUVList != []:
-			uvSolveStart = time.time()
-			previousSelection = bpy.context.selected_objects
-			bpy.ops.object.select_all(action='DESELECT')
-			for obj in doubledUVList:
-				obj.select_set(True)
-
-			try:
-				remaps = solveRepeatedUVs(selection=bpy.context.selected_objects)
-				if remaps:
-					uvRemapDict.update(remaps)
-			except Exception as err:
-				raiseWarning(f"Failed to solve repeated UVs. {str(err)}")
-			printElapsed("Solve repeated UVs", uvSolveStart, suffix=f" ({len(doubledUVList)} meshes).")
-
-			for obj in previousSelection:
-				obj.select_set(True)
-
-		if sharpEdgeSplitList != []:
-			previousSelection = bpy.context.selected_objects
-			bpy.ops.object.select_all(action='DESELECT')
-			for obj in sharpEdgeSplitList:
-				obj.select_set(True)
-			try:
-				splitSharpEdges()
-			except Exception as err:
-				raiseWarning(f"Failed to split sharp edges. {str(err)}")
-
-			bpy.ops.object.select_all(action='DESELECT')
-			for obj in previousSelection:
-				obj.select_set(True)
+		uvRemapDict = _solveUVAndSharpEdgeData(doubledUVList, sharpEdgeSplitList)
 
 		# The weighted bones / remap table is now built AFTER the parallel submesh extraction
 		# (from the group names each worker reports back), so no serial vertex scan is needed.
@@ -581,13 +629,9 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 			visconGroup = VisconGroup()
 			visconGroup.visconGroupNum = visconGroupID
 			subMeshTasks = []  # heavy (read-only) extraction tasks, run in a thread pool after prep
-			# Resolve each submesh's exported material name ONCE, from the same evaluated
-			# clone the exporter writes (not the original object's mesh), so the submesh
-			# sort below derives from the exact names written into the file and can never
-			# diverge from them. Resolution also reports missing materials, so it must run
-			# exactly once per submesh, before sorting.
 			visconSubMeshes = visconDict[visconGroupID]
-			exportedMaterialNames = {}
+			exportedMaterialNames = _resolveExportedMaterialNames(
+				visconSubMeshes, options, cloneMeshNameDict, errorDict)
 			for obj in visconSubMeshes:
 				cloneMeshData = bpy.data.objects[cloneMeshNameDict[obj.name]].data
 				cloneMaterialName = stripBlenderUserSuffix(
@@ -669,7 +713,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 
 				# DD2 shape key vertex group indices
 				shapeKeyGroupIndices = set(
-					idx for idx, name in enumerate(vgNameList) if name.startswith("SHAPEKEY_"))
+					idx for idx, name in enumerate(vgNameList) if name.startswith(SHAPEKEY_PREFIX))
 				if len(shapeKeyGroupIndices) != 0:
 					parsedMesh.bufferHasSecondaryWeight = True
 
@@ -835,7 +879,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 				for ps, vgNames, bb in all_submesh_vg:
 					n = len(vgNames)
 					lookup = np.asarray([
-						remapDict.get(vgNames[i][9:] if vgNames[i].startswith("SHAPEKEY_") else vgNames[i], 0)
+						remapDict.get(vgNames[i][len(SHAPEKEY_PREFIX):] if vgNames[i].startswith(SHAPEKEY_PREFIX) else vgNames[i], 0)
 						for i in range(n)], dtype=np.int32)
 					weightIdx = ps.weightIndicesList
 					if weightIdx is not None and len(weightIdx):
@@ -868,9 +912,6 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 		parsedMesh.mainMeshLODList.append(parsedLODLevel)
 		isFirstLOD = False
 	# End LOD
-	if armatureObj == None:
-		boneMin = None
-		boneMax = None
 	printElapsed("Gathering mesh data", meshDataStartTime)
 	if armatureObj != None:
 		printElapsed("Generating bone remap dictionary", boneRemapStartTime)
@@ -879,7 +920,7 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 def _export_build_bone_bboxes(parsedMesh, armatureObj, options, transform, importedBoneBoundingBoxes,
                                boneMin, boneMax):
 	weightStartTime = time.time()
-	if armatureObj:
+	if armatureObj and boneMin is not None and boneMax is not None:
 		boneBBoxDict = dict()
 		for boneName in parsedMesh.skeleton.weightedBones:
 			bonePos = transform @ armatureObj.data.bones[boneName].head_local
@@ -1018,24 +1059,16 @@ def _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollecti
 		reMesh.fileHeader.lodGroupNameHash = int(targetCollection.get("LODGroupNameHash", "0"))
 	writeREMesh(reMesh, filePath)
 	printElapsed("Converting to RE Mesh", meshWriteStartTime)
-	vertexBufferString = ""
-	if parsedMesh.bufferHasPosition:
-		vertexBufferString += "[Position] "
-	if parsedMesh.bufferHasNorTan:
-		vertexBufferString += "[Normals] "
-
-	if parsedMesh.bufferHasUV:
-		vertexBufferString += "[UV1] "
-
-	if parsedMesh.bufferHasUV2:
-		vertexBufferString += "[UV2] "
-
-	if parsedMesh.bufferHasWeight:
-		vertexBufferString += "[Weight] "
-	if parsedMesh.bufferHasColor:
-		vertexBufferString += "[Color] "
-	if parsedMesh.bufferHasExtraWeight:
-		vertexBufferString += "[Extra Weight] "
+	# parsedMesh buffer flag -> report label, in vertex buffer declaration order
+	vertexBufferString = "".join(label for flag, label in (
+		("bufferHasPosition", "[Position] "),
+		("bufferHasNorTan", "[Normals] "),
+		("bufferHasUV", "[UV1] "),
+		("bufferHasUV2", "[UV2] "),
+		("bufferHasWeight", "[Weight] "),
+		("bufferHasColor", "[Color] "),
+		("bufferHasExtraWeight", "[Extra Weight] "),
+	) if getattr(parsedMesh, flag))
 
 	meshExportEndTime = time.time()
 	meshExportTime = meshExportEndTime - meshExportStartTime
@@ -1180,3 +1213,4 @@ def exportREMeshFile(filePath, options):
 	return _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollection,
 	                        hashedBoneNameDict, subMeshCount, vertexCount, faceCount,
 	                        maxWeightedBones, meshExportStartTime, warningDict, pragmataChunks)
+

@@ -7,7 +7,8 @@ import json
 import platform
 from bpy.types import Operator
 from zlib import crc32
-from ..gen_functions import slugify,openFolder,raiseWarning,PRESET_DIR,formatREMeshObjectName
+from ..gen_functions import slugify,openFolder,raiseWarning,PRESET_DIR
+from ..naming import formatREMeshObjectName
 popup_regions = set()
 
 from ..mesh.blender_re_mesh import joinObjects,getCollection

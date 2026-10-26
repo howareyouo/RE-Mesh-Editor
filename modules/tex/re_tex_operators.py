@@ -2,8 +2,7 @@
 import bpy
 import os
 
-
-from ..blender_utils import showErrorMessageBox,showMessageBox,getAddonPreferences
+from ..blender_utils import showErrorMessageBox,showMessageBox,getAddonPreferences,MDF_MATERIAL_TYPE
 from bpy.types import Operator,OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty,CollectionProperty
@@ -15,7 +14,6 @@ from .re_tex_utils import DDSToTex,ImageListToDDS,getStreamingTexturePath
 
 import shutil
 #from .re_tex_utils import
-
 
 
 class WM_OT_ConvertDDSTexFile(Operator,ImportHelper):
@@ -267,7 +265,7 @@ class WM_OT_CopyConvertedTextures(Operator):
 		totalTextureCount = 0
 		if mdfCollection != None and os.path.exists(modDir):
 		   for obj in mdfCollection.all_objects:
-			   if obj.get("~TYPE") == "RE_MDF_MATERIAL":
+			   if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
 				   for textureBinding in obj.re_mdf_material.textureBindingList_items:
 					   pathDict[os.path.split(textureBinding.path)[1]] = textureBinding.path
 		if os.path.isdir(convertedDir):
@@ -294,4 +292,3 @@ class WM_OT_CopyConvertedTextures(Operator):
 			self.report({"ERROR"},f"Texture directory does not exist")
 		
 		return {"FINISHED"}
-

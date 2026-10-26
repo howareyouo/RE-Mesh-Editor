@@ -6,7 +6,8 @@ from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollec
 	normalizeMaterialNameFilter,
 	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,normalizeREMaterialName,getREMeshMaterialName,formatREMaterialObjectName,ENABLE_EXPORT_WARNINGS
+from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,ENABLE_EXPORT_WARNINGS
+from ..naming import normalizeREMaterialName,getREMeshMaterialName,formatREMaterialObjectName
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
 from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
 from .ui_re_mdf_panels import tag_redraw

@@ -25,6 +25,12 @@ VERSION_PRAG = 135  # file:251121828,internal:250707828
 VERSION_MHS3 = 136  # file:250604100,internal:250203152
 VERSION_RE9 = 140  # file:250925211,internal:250904410
 
+# Container magics and special internal versions (single source of truth; shared by
+# file_re_mesh.py, file_re_mesh_mply.py and re_mesh_parse.py).
+MESH_FILE_MAGIC = 1213416781  # ".mesh" container magic
+MPLY_FILE_MAGIC = 1498173517  # MPLY meshlet container magic (stage meshes)
+PRAGMATA_INTERNAL_MESH_VERSION = 250707828  # fileHeader.version of Pragmata meshes (6-weight layout)
+
 SIX_WEIGHT_GAMES = frozenset([
 	VERSION_SF6,
 	VERSION_MHWILDS,
@@ -68,7 +74,7 @@ newVersionToMeshFileVersion = {
 	VERSION_KG: 240306278,
 	VERSION_DD2NEW: 240423143,
 	VERSION_DR: 240424828,
-	VERSION_ONI2: 240820143,
+	VERSION_ONI2: 240827123,
 	VERSION_MHWILDS: 241111606,
 	VERSION_MHS3: 250604100,
 	VERSION_PRAG: 251121828,
@@ -108,8 +114,10 @@ internalVersionToMeshFileVersionDict = {
 	230517984: 240423143,  # VERSION_DD2NEW
 	240423829: 240424828,  # VERSION_DR
 	# 240704828:240820143,#VERSION_MHWILDSBETA
-	240704828: 240820143,  # VERSION_ONI2
-	240704828: 241111606,  # VERSION_MHWILDS
+	# MHWILDS_BETA (240820143), ONI2 (240827123) and MHWILDS (241111606) all share the
+	# internal version 240704828; the header alone cannot tell them apart, so the reverse
+	# mapping (kept last-wins) resolves to MHWILDS.
+	240704828: 241111606,  # VERSION_MHWILDS (shared with MHWILDS_BETA / ONI2)
 	250203152: 250604100,  # VERSION_MHS3
 	250707828: 251121828,  # VERSION_PRAG
 	250904410: 250925211,  # VERSION_RE9

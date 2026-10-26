@@ -7,6 +7,9 @@ import numpy as np
 from .file_re_mesh import SIX_WEIGHT_MESH_FILE_VERSIONS, validatePragmataSourceIndices
 from ..gen_functions import raiseError, raiseWarning
 
+# Vertex group / shape key name prefix used to tag imported blend shapes.
+SHAPEKEY_PREFIX = "SHAPEKEY_"
+
 
 # Game-specific weight packing settings, keyed by game name.
 # Tuple layout: (maxWeightsPerVertex, maxWeightsPerVertexExtended, maxWeightedBones,

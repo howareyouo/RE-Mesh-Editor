@@ -5,9 +5,10 @@ import json
 
 from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
-from ..gen_functions import raiseWarning,openFolder,PRESET_DIR,parseREMeshObjectMaterialName,stripBlenderUserSuffix
-from ..blender_utils import showErrorMessageBox,createEmpty
-from .blender_re_mdf import reindexMaterials,createMDFCollection,checkNameUsage,buildMDF,fixTexPath,iterMDFMaterialObjects
+from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
+from ..naming import parseREMeshObjectMaterialName,stripBlenderUserSuffix
+from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE
+from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,fixTexPath,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
@@ -171,13 +172,13 @@ def update_findReplaceCount(self, context):
 		return
 	if frp.replaceAllMaterials:
 		for obj in bpy.data.objects:
-			if obj.get("~TYPE") == "RE_MDF_MATERIAL":
+			if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
 				mat = obj.re_mdf_material
 				for entry in mat.textureBindingList_items:
 					for fv in findValues:
 						replaceCount += entry.path.count(fv)
 	else:
-		if context.active_object and context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
+		if context.active_object and context.active_object.get("~TYPE") == MDF_MATERIAL_TYPE:
 			material = context.active_object.re_mdf_material
 			for entry in material.textureBindingList_items:
 				for fv in findValues:
@@ -212,14 +213,14 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 			return {'CANCELLED'}
 		if frp.replaceAllMaterials:
 			for obj in bpy.data.objects:
-				if obj.get("~TYPE") == "RE_MDF_MATERIAL":
+				if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
 					material = obj.re_mdf_material
 					for entry in material.textureBindingList_items:
 						for findVal, replaceVal in findReplacePairs:
 							old_count = entry.path.count(findVal)
 							entry.path = entry.path.replace(findVal, replaceVal)
 							replaceCount += old_count
-		elif context.active_object and context.active_object.get("~TYPE") == "RE_MDF_MATERIAL":
+		elif context.active_object and context.active_object.get("~TYPE") == MDF_MATERIAL_TYPE:
 			material = context.active_object.re_mdf_material
 			for entry in material.textureBindingList_items:
 				for findVal, replaceVal in findReplacePairs:
@@ -301,7 +302,7 @@ class WM_OT_NullifyTextureBindings(Operator):
 			print(f"Failed to load {jsonPath} - {err}")
 		replaceCount = 0
 		for obj in bpy.context.selected_objects:
-			if obj.get("~TYPE") == "RE_MDF_MATERIAL":
+			if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
 				material = obj.re_mdf_material
 				if material.gameName != "":
 					gameName = material.gameName

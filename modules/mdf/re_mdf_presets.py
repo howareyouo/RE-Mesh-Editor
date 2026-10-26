@@ -4,8 +4,9 @@ import os
 import re
 import bpy
 
-from ..gen_functions import textColors,raiseWarning,PRESET_DIR,formatREMaterialObjectName
-from ..blender_utils import showErrorMessageBox,createEmpty
+from ..gen_functions import textColors,raiseWarning,PRESET_DIR
+from ..naming import formatREMaterialObjectName
+from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
 
@@ -37,10 +38,10 @@ def saveAsPreset(activeObj,presetName,gameName):
 		if not re.search(r'^[\w,\s-]+\.[A-Za-z]{3}$',presetName) and not ".." in presetName:#Check that the preset name contains no invalid characters for a file name
 			presetDict = {}
 			materialJSONDict = {}
-			if MDFObjType == "RE_MDF_MATERIAL":
+			if MDFObjType == MDF_MATERIAL_TYPE:
 				mat = activeObj.re_mdf_material
 				flags = mat.flags
-				materialJSONDict["presetType"] = "RE_MDF_MATERIAL"
+				materialJSONDict["presetType"] = MDF_MATERIAL_TYPE
 				materialJSONDict["MDFVersion"] = bpy.context.scene.re_mdf_toolpanel.activeGame
 				materialJSONDict["presetVersion"] = PRESET_VERSION
 
@@ -111,7 +112,7 @@ def readPresetJSON(filepath,targetCollection = None):
 			showErrorMessageBox("Failed to read json file. \n" + str(err))
 			return False
 		
-		if materialJSONDict["presetType"] != "RE_MDF_MATERIAL":
+		if materialJSONDict["presetType"] != MDF_MATERIAL_TYPE:
 			showErrorMessageBox("Preset type is not supported")
 			return False
 		
@@ -124,7 +125,7 @@ def readPresetJSON(filepath,targetCollection = None):
 			currentIndex +=1
 			subName = "Material " + str(currentIndex).zfill(2)
 		name = formatREMaterialObjectName("Material", currentIndex, materialJSONDict["Material Header"]["Material Name"])
-		materialObj = createEmpty(name,[("~TYPE","RE_MDF_MATERIAL")],None,mdfCollection)
+		materialObj = createEmpty(name,[("~TYPE",MDF_MATERIAL_TYPE)],None,mdfCollection)
 		
 		if "MDFVersion" in materialJSONDict:
 			if str(materialJSONDict["MDFVersion"]).isdigit():#Pre Version 4 Presets

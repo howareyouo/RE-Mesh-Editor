@@ -3,8 +3,8 @@ import bpy
 from math import radians
 from mathutils import Matrix
 
-from .gen_functions import (textColors, splitNativesPath, raiseWarning, getREMeshMaterialName,
-                            parseMDFObjectNameMaterialName)
+from .gen_functions import textColors, splitNativesPath, raiseWarning
+from .naming import getREMeshMaterialName, parseMDFObjectNameMaterialName
 import os
 from collections import OrderedDict
 from itertools import repeat

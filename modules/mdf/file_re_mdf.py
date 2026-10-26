@@ -2,7 +2,7 @@
 import os
 import struct
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_float,read_unicode_string,write_uint,write_int,write_uint64,write_float,write_unicode_string
+from ..gen_functions import raiseWarning,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_unicode_string,write_uint,write_int,write_uint64,write_unicode_string
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
 from ..binary_struct import BinaryStruct,u32,u16,u64,i32,skip

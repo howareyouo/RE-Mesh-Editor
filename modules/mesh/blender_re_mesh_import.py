@@ -9,13 +9,15 @@ from .file_re_mesh import readREMesh, meshFileVersionToGameNameDict
 from .file_re_jcns import JCNSParseError, findJCNSPath, readJCNS
 from .blender_re_jcns_drivers import installSF6JCNSDrivers
 from .re_mesh_parse import ParsedREMesh
-from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion, formatREMeshObjectName
+from ..gen_functions import splitNativesPath, raiseWarning, y, printElapsed, formatMs, parseFileVersion
+from ..naming import formatREMeshObjectName
 from ..blender_utils import getBlenderSafeBoneName, setAssetPathFromFilePath, createEmpty, rotate90Matrix, rotateNeg90Matrix, MESH_COLLECTION_TYPE
 from ..mdf.file_re_mdf import readMDF
 from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath, importMDF
 from ..mdf.blender_re_mdf import importMDFFile
 from ..sfur.blender_re_sfur import importSFurFile, findSFurPathFromMeshPath
-from .blender_re_mesh_utils import (joinObjects, createMaterialDict, getCollection, findArmatureObjFromData,
+from .blender_re_mesh_utils import (SHAPEKEY_PREFIX, joinObjects, createMaterialDict, getCollection,
+                                    findArmatureObjFromData,
                                     _IMPORT_PHASES, _phase_switch, _phase_reset,
                                     writePragmataVertAttrs, writePragmataCollectionProps)
 
@@ -184,7 +186,7 @@ def buildBoneNameMaps(boneNameList):
 		boneNameMap[idx] = getBlenderSafeBoneName(name)[0]
 		
 		# Secondary (shapekey) bone name
-		secName = "SHAPEKEY_" + name
+		secName = SHAPEKEY_PREFIX + name
 		secBoneNameMap[idx] = getBlenderSafeBoneName(secName)[0]
 	
 	return boneNameMap, secBoneNameMap
@@ -485,19 +487,19 @@ def _importMergedSubMeshes(subMeshList, materialName, LODNum, groupNum, boneName
 	)
 
 
+# meshType display name -> (collection short name, parsedMesh LOD-list attribute)
+_LOD_MESH_SOURCES = {
+	"Main Mesh": ("Main", "mainMeshLODList"),
+	"Occlusion Mesh": ("Occlusion", "occlusionMeshLODList"),
+}
+
+
 def importLODGroup(parsedMesh, meshType, meshCollection, materialDict, armatureObj, hiddenCollectionSet,
                    meshOffsetDict, importAllLODs=False, createCollections=True, importShadowMeshes=False,
                    rotate90=True, mergeGroups=False, importBoundingBoxes=False,
                    mergeSameMaterialSubmeshes=False):
-	if meshType == "Main Mesh":
-		shortName = "Main"
-		targetLODList = parsedMesh.mainMeshLODList
-	elif meshType == "Shadow Mesh":
-		shortName = "Shadow"
-		targetLODList = parsedMesh.shadowMeshLODList
-	elif meshType == "Occlusion Mesh":
-		shortName = "Occlusion"
-		targetLODList = parsedMesh.occlusionMeshLODList
+	shortName, lodListAttr = _LOD_MESH_SOURCES[meshType]
+	targetLODList = getattr(parsedMesh, lodListAttr)
 	firstLOD = True
 
 	if parsedMesh.skeleton != None:
@@ -742,7 +744,6 @@ def resolveMeshGameNameConflict(gameName, filePath):
 
 def importREMeshFile(filePath, options):
 	meshImportStartTime = time.time()
-	fileName = os.path.split(filePath)[1].split(".mesh")[0]
 	meshVersion = parseFileVersion(filePath, None)
 	if meshVersion is None:
 		print("Unable to parse mesh version number in file path.")

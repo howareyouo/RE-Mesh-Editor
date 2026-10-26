@@ -15,7 +15,7 @@ from ..gen_functions import (getPaddedPos, raiseWarning, read_float, read_null_t
 
 # Games using MPLY - version values come from mesh_versions.py (single source of
 # truth; mply previously carried a stale copy where VERSION_RE9 conflicted).
-from .mesh_versions import (VERSION_DD2, VERSION_KG, VERSION_DD2NEW,
+from .mesh_versions import (MPLY_FILE_MAGIC, VERSION_DD2, VERSION_KG, VERSION_DD2NEW,
                             VERSION_MHWILDS, VERSION_RE9)
 
 c_uint64 = ctypes.c_uint64
@@ -33,7 +33,6 @@ class ContentFlagsA_bits(ctypes.LittleEndianStructure):
 		("streamingBVH", c_uint8, 1),
 		("hasTertiaryUV", c_uint8, 1),
 		("hasVertexColor", c_uint8, 1),
-
 	]
 
 
@@ -52,7 +51,6 @@ class ContentFlagsB_bits(ctypes.LittleEndianStructure):
 		("useRayTracingVertexAnimation", c_uint8, 1),
 		("useSDF", c_uint8, 1),
 		("enableRebraiding", c_uint8, 2),
-
 	]
 
 
@@ -102,7 +100,6 @@ class ClusterFlagsMHWILDS_bits(ctypes.LittleEndianStructure):
 		("scaleBit14", c_uint8, 1),  # Setting to 1 makes model disappear
 		("scaleBit15", c_uint8, 1),  # Setting to 1 makes model disappear
 		("scaleBit16", c_uint8, 1),  # Setting to 0 makes model disappear
-
 	]
 
 
@@ -152,7 +149,6 @@ class ClusterFlagsRE9_bits(ctypes.LittleEndianStructure):
 		("scaleBit14", c_uint8, 1),  # Setting to 1 makes model disappear
 		("scaleBit15", c_uint8, 1),  # Setting to 1 makes model disappear
 		("scaleBit16", c_uint8, 1),  # Setting to 0 makes model disappear
-
 	]
 
 
@@ -166,7 +162,7 @@ class ClusterFlagsRE9(ctypes.Union):
 
 class FileHeader():
 	def __init__(self):
-		self.magic = 1498173517
+		self.magic = MPLY_FILE_MAGIC
 		self.version = 0
 		self.fileSize = 0
 		self.lodGroupNameHash = 0
@@ -435,13 +431,13 @@ class MeshletBVH():
 				file.seek(self.clusterOffsetList[index] + self.gpuClusterHeadersOffset)
 				# Batch read all cluster headers (16 bytes each) into a single buffer
 				header_data = file.read(entry.headerCount * 16)
+				header_arr = np.frombuffer(header_data, dtype=[('asUInt64', '<u8'), ('vertexOffsetBytes', '<u4'), ('indexOffsetBytes', '<u4')])
 				lodList = []
-				for i in range(entry.headerCount):
-					offset = i * 16
+				for row in header_arr:
 					headerEntry = MeshletCompactedClusterHeader()
-					headerEntry.bitfield.asUInt64 = struct.unpack_from('<Q', header_data, offset)[0]
-					headerEntry.vertexOffsetBytes = struct.unpack_from('<I', header_data, offset + 8)[0]
-					headerEntry.indexOffsetBytes = struct.unpack_from('<I', header_data, offset + 12)[0]
+					headerEntry.bitfield.asUInt64 = int(row['asUInt64'])
+					headerEntry.vertexOffsetBytes = int(row['vertexOffsetBytes'])
+					headerEntry.indexOffsetBytes = int(row['indexOffsetBytes'])
 					lodList.append(headerEntry)
 				self.clusterHeaderLODList.append(lodList)
 
@@ -451,13 +447,13 @@ class MeshletBVH():
 				if entry.headerCount != 0:
 					# Batch read all quantize AABB centers (6 bytes each: 3 ushort)
 					aabb_data = file.read(entry.headerCount * 6)
+					aabb_arr = np.frombuffer(aabb_data, dtype=[('X', '<u2'), ('Y', '<u2'), ('Z', '<u2')])
 					lodList = []
-					for i in range(entry.headerCount):
-						offset = i * 6
+					for row in aabb_arr:
 						aabbCenterEntry = QuantizeAABBCenter()
-						aabbCenterEntry.X, aabbCenterEntry.Y, aabbCenterEntry.Z = struct.unpack_from('<3H',
-						                                                                             aabb_data,
-						                                                                             offset)
+						aabbCenterEntry.X = int(row['X'])
+						aabbCenterEntry.Y = int(row['Y'])
+						aabbCenterEntry.Z = int(row['Z'])
 						lodList.append(aabbCenterEntry)
 					self.quantizeAABBLODList.append(lodList)
 		file.seek(currentPos)
@@ -544,8 +540,6 @@ def computePosDecode(bitFlagValue):
 	return scale, offset
 
 
-COMPRESSED_POS_DATA_STRIDE = 6
-NORTAN_STRIDE = 8
 UV_STRIDE = 4
 COLOR_STRIDE = 4
 

@@ -3,7 +3,8 @@ import bpy
 import glob
 from ..blender_utils import createRECollection,setAssetPathFromFilePath,checkNameUsage
 from ..game_versions import sfurVersionDict
-from ..gen_functions import textColors,parseFileVersion,parseMDFObjectNameMaterialName,formatREMaterialObjectName
+from ..gen_functions import textColors,parseFileVersion
+from ..naming import parseMDFObjectNameMaterialName,formatREMaterialObjectName
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
 def createSFurCollection(collectionName,parentCollection = None):
@@ -31,8 +32,6 @@ def createCurveEmpty(name,propertyList,parent = None,collection = None):
 		collection = bpy.context.scene.collection
 		
 	collection.objects.link(obj)
-		
-		
 	return obj
 
 def reindexEntries(sFurCollection):

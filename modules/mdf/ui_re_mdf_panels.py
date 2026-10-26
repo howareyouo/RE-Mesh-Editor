@@ -6,7 +6,7 @@ from bpy.types import (
 	Operator,
 	PropertyGroup,
 )
-from ..blender_utils import tag_redraw
+from ..blender_utils import MDF_MATERIAL_TYPE, tag_redraw
 from .file_re_mdf import getMDFVersionToGameName
 
 
@@ -131,7 +131,7 @@ class OBJECT_PT_MDFMaterialPanel(Panel):
 	def poll(self,context):
 		
 		obj = context.active_object if context else None
-		return (obj is not None and obj.mode == "OBJECT" and obj.get("~TYPE",None) == "RE_MDF_MATERIAL" and not "HIDE_RE_MDF_EDITOR_PANEL" in context.scene)
+		return (obj is not None and obj.mode == "OBJECT" and obj.get("~TYPE",None) == MDF_MATERIAL_TYPE and not "HIDE_RE_MDF_EDITOR_PANEL" in context.scene)
 
 	def draw(self, context):
 		layout = self.layout

@@ -16,10 +16,7 @@ from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
 from ..blender_utils import isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName
-from ..gen_functions import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
-
-
-
+from ..naming import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
 
 
 #Property names made editable in the material UI - statically maintained

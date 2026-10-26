@@ -2,6 +2,7 @@ import bpy
 import os
 from .mdf_value import is_color_prop,flipSF6CustomizeValues
 from .blender_re_mesh_mdf import albedoTypeSet
+from .node_factories import addMathNode, addSeparateColor
 
 from mathutils import Vector
 # Hair meshes use ambient occlusion with the second UV map
@@ -11,7 +12,7 @@ def addLoc(node,delta):#Just to shorten what would otherwise be a long line
 	return (node.location[0] + delta[0],node.location[1] + delta[1])
 
 def getMaskChannelSockets(nodeTree, maskNode, name=""):
-	separateNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
+	separateNode = addSeparateColor(nodeTree.nodes, nodeTree.links)
 	if name:
 		separateNode.name = name
 	nodeTree.links.new(maskNode.outputs["Color"], separateNode.inputs["Color"])
@@ -29,9 +30,7 @@ def addDecodedNormal(nodeTree, srcNode, name=""):
 	return decodeNode, normalNode
 
 def makeMaskRateFactor(nodeTree, maskSocket, rateSocket, name=""):
-	factorNode = nodeTree.nodes.new("ShaderNodeMath")
-	factorNode.operation = "MULTIPLY"
-	factorNode.use_clamp = True
+	factorNode = addMathNode(nodeTree.nodes, "MULTIPLY", clamp = True)
 	if name:
 		factorNode.name = name
 	nodeTree.links.new(maskSocket, factorNode.inputs[0])
@@ -106,8 +105,7 @@ def getBentNormalNodeGroup(nodeTree):
 			[("Color","NodeSocketColor"),("Roughness","NodeSocketFloat"),("BlueChannel","NodeSocketFloat")])
 		inNode = nodes.new('NodeGroupInput')
 		currentLoc = [300,0]
-		separateRGBNode = nodes.new("ShaderNodeSeparateColor")
-		separateRGBNode.location = currentLoc
+		separateRGBNode = addSeparateColor(nodes, links, location = currentLoc)
 		currentLoc[0] += 300
 		links.new(inNode.outputs["Color"],separateRGBNode.inputs["Color"])
 		
@@ -122,57 +120,43 @@ def getBentNormalNodeGroup(nodeTree):
 		
 		currentLoc[0] += 300
 		
-		multNode0Y = nodes.new("ShaderNodeMath")
-		multNode0Y.location = currentLoc
-		multNode0Y.operation = "MULTIPLY"
+		multNode0Y = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(mapRangeYNode.outputs["Result"],multNode0Y.inputs[0])
 		links.new(mapRangeYNode.outputs["Result"],multNode0Y.inputs[1])
 		
-		signNodeY = nodes.new("ShaderNodeMath")
-		signNodeY.location = (currentLoc[0],currentLoc[1] - 300)
-		signNodeY.operation = "SIGN"
+		signNodeY = addMathNode(nodes, "SIGN", location = (currentLoc[0],currentLoc[1] - 300))
 		links.new(mapRangeYNode.outputs["Result"],signNodeY.inputs[0])
 		
 		currentLoc[0] += 300
 		
-		multNode1Y = nodes.new("ShaderNodeMath")
-		multNode1Y.location = currentLoc
-		multNode1Y.operation = "MULTIPLY"
+		multNode1Y = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(multNode0Y.outputs["Value"],multNode1Y.inputs[0])
 		links.new(signNodeY.outputs["Value"],multNode1Y.inputs[1])
 		
 		currentLoc[0] += 300
 		
-		multNode2Y = nodes.new("ShaderNodeMath")
-		multNode2Y.location = currentLoc
-		multNode2Y.operation = "MULTIPLY"
+		multNode2Y = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(multNode1Y.outputs["Value"],multNode2Y.inputs[0])
 		links.new(multNode1Y.outputs["Value"],multNode2Y.inputs[1])
 		
 		currentLoc[0] += 300
 		
-		addXYNode = nodes.new("ShaderNodeMath")
-		addXYNode.location = currentLoc
-		addXYNode.operation = "ADD"
+		addXYNode = addMathNode(nodes, "ADD", location = currentLoc)
 		
 		links.new(multNode2Y.outputs["Value"],addXYNode.inputs[0])
 		
 		currentLoc[0] += 300
 		
-		subNode = nodes.new("ShaderNodeMath")
-		subNode.location = currentLoc
-		subNode.operation = "SUBTRACT"
+		subNode = addMathNode(nodes, "SUBTRACT", location = currentLoc)
 		subNode.inputs[0].default_value = 1.0
 		links.new(addXYNode.outputs["Value"],subNode.inputs[1])
 		
 		currentLoc[0] += 300
 		
-		sqrRootNode = nodes.new("ShaderNodeMath")
-		sqrRootNode.location = currentLoc
-		sqrRootNode.operation = "SQRT"
+		sqrRootNode = addMathNode(nodes, "SQRT", location = currentLoc)
 		links.new(subNode.outputs["Value"],sqrRootNode.inputs[0])
 		
 		currentLoc[0] += 300
@@ -213,23 +197,17 @@ def getBentNormalNodeGroup(nodeTree):
 		links.new(inNode.outputs["Alpha"],mapRangeXNode.inputs["Value"])
 		currentLoc[0] += 300
 		
-		multNode0X = nodes.new("ShaderNodeMath")
-		multNode0X.location = currentLoc
-		multNode0X.operation = "MULTIPLY"
+		multNode0X = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(mapRangeXNode.outputs["Result"],multNode0X.inputs[0])
 		links.new(mapRangeXNode.outputs["Result"],multNode0X.inputs[1])
 		
-		signNodeX = nodes.new("ShaderNodeMath")
-		signNodeX.location = (currentLoc[0],currentLoc[1] - 300)
-		signNodeX.operation = "SIGN"
+		signNodeX = addMathNode(nodes, "SIGN", location = (currentLoc[0],currentLoc[1] - 300))
 		links.new(mapRangeXNode.outputs["Result"],signNodeX.inputs[0])
 		
 		currentLoc[0] += 300
 		
-		multNode1X = nodes.new("ShaderNodeMath")
-		multNode1X.location = currentLoc
-		multNode1X.operation = "MULTIPLY"
+		multNode1X = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(multNode0X.outputs["Value"],multNode1X.inputs[0])
 		links.new(signNodeX.outputs["Value"],multNode1X.inputs[1])
@@ -238,9 +216,7 @@ def getBentNormalNodeGroup(nodeTree):
 		
 		currentLoc[0] += 300
 		
-		multNode2X = nodes.new("ShaderNodeMath")
-		multNode2X.location = currentLoc
-		multNode2X.operation = "MULTIPLY"
+		multNode2X = addMathNode(nodes, "MULTIPLY", location = currentLoc)
 		
 		links.new(multNode1X.outputs["Value"],multNode2X.inputs[0])
 		links.new(multNode1X.outputs["Value"],multNode2X.inputs[1])
@@ -340,15 +316,11 @@ def getMHWildsSkinMappingNodeGroup(nodeTree):
 
 		currentLoc = [300,0]
 		#Multiply node input values to give finer control since min and max inputs can't be set any more.
-		multXNode = nodes.new("ShaderNodeMath")
-		multXNode.location = [currentLoc[0],currentLoc[1]+300]
-		multXNode.operation = "MULTIPLY"
+		multXNode = addMathNode(nodes, "MULTIPLY", location = [currentLoc[0],currentLoc[1]+300])
 		links.new(inNode.outputs["X"],multXNode.inputs[0])
 		multXNode.inputs[1].default_value = 0.01
 		
-		multYNode = nodes.new("ShaderNodeMath")
-		multYNode.location = [currentLoc[0],currentLoc[1]-300]
-		multYNode.operation = "MULTIPLY"
+		multYNode = addMathNode(nodes, "MULTIPLY", location = [currentLoc[0],currentLoc[1]-300])
 		links.new(inNode.outputs["Y"],multYNode.inputs[0])
 		multYNode.inputs[1].default_value = 0.01
 		
@@ -478,8 +450,7 @@ class dynamicArrayTextureSelectorNodeGroup():
 		if self.currentOutSocket == None:#For the first layer added, just store the out socket since it's not being mixed with anything
 			self.currentOutSocket = colorOutSocket
 			self.currentOutAlphaSocket = alphaOutSocket
-			selectorNode = self.node_tree.nodes.new('ShaderNodeMath')
-			selectorNode.operation = "ROUND"
+			selectorNode = addMathNode(self.node_tree.nodes, "ROUND")
 			selectorNode.inputs[0].default_value = 0.0
 			selectorNode.name = colorOutSocket.node.name.rsplit("_",1)[0]+"_SELECTOR"
 			selectorNode.label = selectorNode.name
@@ -487,8 +458,7 @@ class dynamicArrayTextureSelectorNodeGroup():
 			self.selectorNode = selectorNode
 		else:
 			
-			compareNode = self.node_tree.nodes.new('ShaderNodeMath')
-			compareNode.operation = "COMPARE"
+			compareNode = addMathNode(self.node_tree.nodes, "COMPARE")
 			
 			self.node_tree.links.new(self.selectorNode.outputs["Value"],compareNode.inputs[0])
 			compareNode.inputs[1].default_value = index#Compare value	
@@ -691,10 +661,7 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 	if stitchOnProp is not None and float(stitchOnProp.propValue[0]) <= 0.0:
 		return imageNode
 
-	separateNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
-	separateNode.name = "SF6 Stitch Channels"
-	separateNode.location = addLoc(imageNode, (300, 0))
-	nodeTree.links.new(imageNode.outputs["Color"], separateNode.inputs["Color"])
+	separateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, sourceSocket = imageNode.outputs["Color"], location = addLoc(imageNode, (300, 0)), name = "SF6 Stitch Channels")
 
 	# alpha channel defines where the stitch pattern is present
 	stitchMaskSocket = imageNode.outputs["Alpha"]
@@ -743,21 +710,15 @@ def newSF6StitchNode(nodeTree, imageNode, matInfo):
 			nodeTree
 		)
 
-		centerNode = nodeTree.nodes.new("ShaderNodeMath")
-		centerNode.name = "SF6 Stitch AO Center"
-		centerNode.operation = "SUBTRACT"
+		centerNode = addMathNode(nodeTree.nodes, "SUBTRACT", name = "SF6 Stitch AO Center")
 		centerNode.inputs[1].default_value = 0.5
 		nodeTree.links.new(stitchAOSocket, centerNode.inputs[0])
 
-		contrastMultiplyNode = nodeTree.nodes.new("ShaderNodeMath")
-		contrastMultiplyNode.name = "SF6 Stitch AO Contrast"
-		contrastMultiplyNode.operation = "MULTIPLY"
+		contrastMultiplyNode = addMathNode(nodeTree.nodes, "MULTIPLY", name = "SF6 Stitch AO Contrast")
 		nodeTree.links.new(centerNode.outputs["Value"], contrastMultiplyNode.inputs[0])
 		nodeTree.links.new(contrastNode.outputs["Value"], contrastMultiplyNode.inputs[1])
 
-		uncenterNode = nodeTree.nodes.new("ShaderNodeMath")
-		uncenterNode.name = "SF6 Stitch AO Result"
-		uncenterNode.operation = "ADD"
+		uncenterNode = addMathNode(nodeTree.nodes, "ADD", name = "SF6 Stitch AO Result")
 		uncenterNode.inputs[1].default_value = 0.5
 		uncenterNode.use_clamp = True
 		nodeTree.links.new(contrastMultiplyNode.outputs["Value"], uncenterNode.inputs[0])
@@ -850,9 +811,7 @@ def newNAMNode (nodeTree,textureType,matInfo):
 
 	currentPos = [imageNode.location[0]-300,imageNode.location[1]]
 	
-	separateRGBNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
-	separateRGBNode.location = currentPos
-	nodeTree.links.new(imageNode.outputs["Color"],separateRGBNode.inputs["Color"])
+	separateRGBNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, sourceSocket = imageNode.outputs["Color"])
 	
 	currentPos[0] += 300
 	
@@ -914,15 +873,11 @@ def newNAMNode (nodeTree,textureType,matInfo):
 		brightConstrastNode = nodeTree.nodes.new("ShaderNodeBrightContrast")
 		brightConstrastNode.location = (matInfo["albedoNodeLayerGroup"].nodeLoc[0]+200,matInfo["albedoNodeLayerGroup"].nodeLoc[1] - 200)
 		stitchBrightnessNode = addPropertyNode(matInfo["mPropDict"]["Stitch_Brightness"], matInfo["currentPropPos"], nodeTree)
-		brightnessAdjustNode = nodeTree.nodes.new("ShaderNodeMath")
-		brightnessAdjustNode.location = addLoc(stitchBrightnessNode,(300,0))
-		brightnessAdjustNode.operation = "ADD"
+		brightnessAdjustNode = addMathNode(nodeTree.nodes, "ADD", location = addLoc(stitchBrightnessNode,(300,0)))
 		nodeTree.links.new(stitchBrightnessNode.outputs["Value"],brightnessAdjustNode.inputs[0])
 		brightnessAdjustNode.inputs[1].default_value = 0.0
 		stitchConstrastNode = addPropertyNode(matInfo["mPropDict"]["Stitch_Contrast"], matInfo["currentPropPos"], nodeTree)
-		contrastAdjustNode = nodeTree.nodes.new("ShaderNodeMath")
-		contrastAdjustNode.location = addLoc(stitchConstrastNode,(300,0))
-		contrastAdjustNode.operation = "ADD"
+		contrastAdjustNode = addMathNode(nodeTree.nodes, "ADD", location = addLoc(stitchConstrastNode,(300,0)))
 		nodeTree.links.new(stitchConstrastNode.outputs["Value"],contrastAdjustNode.inputs[0])
 		brightnessAdjustNode.inputs[1].default_value = 0.0
 		
@@ -1024,9 +979,7 @@ def newNRRTNode (nodeTree,textureType,matInfo):
 				nodeTree.links.new(uvMappingGroupNode.outputs["Vector"],imageNodeUV2.inputs["Vector"])
 				currentPos[0] += 300
 				
-				separateNodeUV2 = nodeTree.nodes.new('ShaderNodeSeparateColor')
-				separateNodeUV2.location = currentPos
-				nodeTree.links.new(imageNodeUV2.outputs["Color"],separateNodeUV2.inputs["Color"])
+				separateNodeUV2 = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, sourceSocket = imageNodeUV2.outputs["Color"])
 				currentPos[0] += 300
 				matInfo["aoNodeLayerGroup"].addMixLayer(separateNodeUV2.outputs["Blue"])
 		else:
@@ -1036,9 +989,7 @@ def newNRRTNode (nodeTree,textureType,matInfo):
 	elif textureType == "NormalRoughnessHeightMap":
 		pass
 		#TODO Add height map support
-	else:
-		matInfo["translucentSocket"] = nodeGroupNode.outputs["BlueChannel"]
-		
+
 	return imageNode
 	
 def newALPNode (nodeTree,textureType,matInfo):
@@ -1079,18 +1030,14 @@ def newEMINode (nodeTree,textureType,matInfo):
 		
 		currentPos[0]+=300
 		
-		reduceEMIMultNode = nodeTree.nodes.new('ShaderNodeMath')
-		reduceEMIMultNode.location = currentPos
-		reduceEMIMultNode.operation = "MULTIPLY"
+		reduceEMIMultNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = currentPos)
 		nodeTree.links.new(emiIntensityNode.outputs["Value"],reduceEMIMultNode.inputs[0])
 		reduceEMIMultNode.inputs[1].default_value = EMISSION_MULTIPLIER
 		
 		currentPos[0]+=300
 		nodeTree.links.new(imageNode.outputs["Color"],bwNode.inputs[0])
 		
-		baseEMIMultNode = nodeTree.nodes.new('ShaderNodeMath')
-		baseEMIMultNode.location = currentPos
-		baseEMIMultNode.operation = "MULTIPLY"
+		baseEMIMultNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = currentPos)
 		nodeTree.links.new(bwNode.outputs[0],baseEMIMultNode.inputs[0])
 		nodeTree.links.new(reduceEMIMultNode.outputs["Value"],baseEMIMultNode.inputs[1])
 		
@@ -1105,21 +1052,16 @@ def newEMINode (nodeTree,textureType,matInfo):
 		if "CMMSepNode" in nodeTree.nodes:
 			CMMSeparateNode = nodeTree.nodes["CMMSepNode"]
 		else:
-			CMMSeparateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-			CMMSeparateNode.location = currentPos
-			CMMSeparateNode.name = "CMMSepNode"
+			CMMSeparateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, name = "CMMSepNode")
 			
-		RMultNode = nodeTree.nodes.new("ShaderNodeMath")
-		RMultNode.operation = "MULTIPLY"
+		RMultNode = addMathNode(nodeTree.nodes, "MULTIPLY")
 		
 		nodeTree.links.new(RColorEmiIntensityNode.outputs["Value"],RMultNode.inputs[0])
 		nodeTree.links.new(CMMSeparateNode.outputs["Red"],RMultNode.inputs[1])
 		
-		GMultNode = nodeTree.nodes.new("ShaderNodeMath")
-		GMultNode.operation = "MULTIPLY"
+		GMultNode = addMathNode(nodeTree.nodes, "MULTIPLY")
 		
-		StrengthAddNode = nodeTree.nodes.new("ShaderNodeMath")
-		StrengthAddNode.operation = "ADD"
+		StrengthAddNode = addMathNode(nodeTree.nodes, "ADD")
 		
 		nodeTree.links.new(RMultNode.outputs["Value"],StrengthAddNode.inputs[0])
 		nodeTree.links.new(GMultNode.outputs["Value"],StrengthAddNode.inputs[1])
@@ -1153,9 +1095,7 @@ def newCMMNode (nodeTree,textureType,matInfo):
 	if "CMMSepNode" in nodeTree.nodes:
 		CMMSeparateNode = nodeTree.nodes["CMMSepNode"]
 	else:
-		CMMSeparateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-		CMMSeparateNode.location = currentPos
-		CMMSeparateNode.name = "CMMSepNode"
+		CMMSeparateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, name = "CMMSepNode")
 	
 	nodeTree.links.new(imageNode.outputs["Color"],CMMSeparateNode.inputs["Color"])
 	if "S_col_R" in matInfo["mPropDict"] and "S_col_G" in matInfo["mPropDict"]:
@@ -1177,9 +1117,7 @@ def newCMMNode (nodeTree,textureType,matInfo):
 			colorNode = addPropertyNode(matInfo["mPropDict"][colorProp], matInfo["currentPropPos"], nodeTree)
 			if useProp in matInfo["mPropDict"]:
 				useNode = addPropertyNode(matInfo["mPropDict"][useProp], matInfo["currentPropPos"], nodeTree)
-				multNode = nodeTree.nodes.new("ShaderNodeMath")
-				multNode.location = useNode.location + Vector((300,0))
-				multNode.operation = "MULTIPLY"
+				multNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = useNode.location + Vector((300,0)))
 				nodeTree.links.new(useNode.outputs["Value"], multNode.inputs[0])
 				nodeTree.links.new(sourceNode.outputs[channel], multNode.inputs[1])
 				factorSocket = multNode.outputs["Value"]
@@ -1269,8 +1207,7 @@ def newSF6MaskNode(nodeTree, textureType, matInfo):
 
 					valueSocket = valueNode.outputs["Value"]
 					if prefix == "CustomizeMetal" and matInfo["isDielectric"]:
-						negateNode = nodeTree.nodes.new("ShaderNodeMath")
-						negateNode.operation = "MULTIPLY"
+						negateNode = addMathNode(nodeTree.nodes, "MULTIPLY")
 						negateNode.inputs[1].default_value = -1.0
 						nodeTree.links.new(valueSocket, negateNode.inputs[0])
 						valueSocket = negateNode.outputs["Value"]
@@ -1290,20 +1227,13 @@ def newCMASKNode (nodeTree,textureType,matInfo):
 	
 	
 	
-	CMaskSeparateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-	CMaskSeparateNode.location = currentPos
+	CMaskSeparateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos)
 	
 	nodeTree.links.new(imageNode.outputs["Color"],CMaskSeparateNode.inputs["Color"])
 	
 	#Fix for imported SF6 materials, this shouldn't matter in game since it gets overriden by the cmd files
 	if matInfo["gameName"] != "SF6":
-		for prop in matInfo["mPropDict"].values():
-			if "CustomizeRoughness" in prop.propName or "CustomizeMetal" in prop.propName:
-				if prop.propValue[0] == 0.0:
-					prop.propValue = [1.0]
-			elif "CustomizeColor"  in prop.propName:
-				if prop.propValue == [0.501960813999176, 0.501960813999176, 0.501960813999176, 1.0]:
-					prop.propValue = [1.0,1.0,1.0,1.0]
+		flipSF6CustomizeValues(list(matInfo["mPropDict"].values()), toGame=False)
 	customizeEntries = [
 		("CustomizeColor_0",   "CustomizeColor",    "albedoNodeLayerGroup",   "Color"),
 		("CustomizeMetal_0",   "CustomizeRoughness", "roughnessNodeLayerGroup", "Value"),
@@ -1334,8 +1264,7 @@ def newATOSNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
 	
-	separateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-	separateNode.location = currentPos
+	separateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos)
 	useLegacyHairUV2Occlusion = (matInfo["gameName"] in legacyUV2HairOcclusionList and "hair" in matInfo["mmtrName"])
 	
 	#RE2 puts other masks in the alpha channel sometimes
@@ -1383,13 +1312,9 @@ def newATOSNode (nodeTree,textureType,matInfo):
 		nodeTree.links.new(mappingNode.outputs["Vector"],imageNodeUV2.inputs["Vector"])
 		currentPos[0] += 300
 		
-		separateNodeUV2 = nodeTree.nodes.new('ShaderNodeSeparateColor')
-		separateNodeUV2.location = currentPos
-		nodeTree.links.new(imageNodeUV2.outputs["Color"],separateNodeUV2.inputs["Color"])
+		separateNodeUV2 = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, sourceSocket = imageNodeUV2.outputs["Color"])
 		currentPos[0] += 300
-		
-		matInfo["translucentSocket"] = separateNode.outputs["Green"]
-			
+
 		if alphaUV2Node != None:
 			mixUVAlphaNode = nodeTree.nodes.new('ShaderNodeMixRGB')
 			mixUVAlphaNode.location = currentPos
@@ -1433,7 +1358,6 @@ def newATOSNode (nodeTree,textureType,matInfo):
 	else:
 		if not isMTOS and not isMaskAlpha and not "StitchMap" in matInfo["textureNodeDict"]:
 			matInfo["alphaSocket"] = separateNode.outputs["Red"]
-		matInfo["translucentSocket"] = separateNode.outputs["Green"]
 		if matInfo["gameName"] != "SF6" and not useLegacyHairUV2Occlusion:#SF6 uses occlusion channel for something else
 			matInfo["aoNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"])
 		
@@ -1442,7 +1366,6 @@ def newATOSNode (nodeTree,textureType,matInfo):
 		
 		elif textureType == "AlphaCavityOcclusionTranslucentMap":
 			matInfo["cavityNodeLayerGroup"].addMixLayer(separateNode.outputs["Green"])
-			matInfo["translucentSocket"] = imageNode.outputs["Alpha"]
 		
 		else:
 			matInfo["subsurfaceSocket"] = imageNode.outputs["Alpha"]
@@ -1452,18 +1375,13 @@ def newATOSNode (nodeTree,textureType,matInfo):
 def newOCTDNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
-	separateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-	separateNode.location = currentPos
+	separateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos)
 	currentPos[0] += 300
 	nodeTree.links.new(imageNode.outputs["Color"],separateNode.inputs["Color"])
 	
-	if textureType == "OcclusionCavityTranslucentDetailMap":
-		matInfo["translucentSocket"] = separateNode.outputs["Blue"]
-	
-	elif textureType == "OcclusionCavitySSSDetailMap":
+	if textureType == "OcclusionCavitySSSDetailMap":
 		matInfo["subsurfaceSocket"] = separateNode.outputs["Blue"]
 	elif textureType == "OcclusionCavityMaskAnisoMap":
-		matInfo["anisoSocket"] = imageNode.outputs["Alpha"]
 		if "Emissive_MaskStrength" in matInfo["mPropDict"]:
 			maskStrengthNode = addPropertyNode(matInfo["mPropDict"]["Emissive_MaskStrength"], matInfo["currentPropPos"], nodeTree)
 			matInfo["emissionStrengthNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"],mixType = "MULTIPLY",mixFactor = 1.0,factorOutSocket = maskStrengthNode.outputs["Value"])
@@ -1475,25 +1393,21 @@ def newSCOTNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
 	currentPos = [imageNode.location[0]+300,imageNode.location[1]]
 	
-	separateNode = nodeTree.nodes.new('ShaderNodeSeparateColor')
-	separateNode.location = currentPos
+	separateNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos)
 	currentPos[0] += 300
 	nodeTree.links.new(imageNode.outputs["Color"],separateNode.inputs["Color"])
 	
 	matInfo["subsurfaceSocket"] = separateNode.outputs["Red"]
 	matInfo["cavityNodeLayerGroup"].addMixLayer(separateNode.outputs["Green"])
 	matInfo["aoNodeLayerGroup"].addMixLayer(separateNode.outputs["Blue"])
-	matInfo["translucentSocket"] = imageNode.outputs["Alpha"]
-	
+
 	return imageNode
 
 def newSRMNode (nodeTree,textureType,matInfo):
 	imageNode = nodeTree.nodes[textureType]
 	currentPos = [imageNode.location[0]-300,imageNode.location[1]]
 	
-	separateRGBNode = nodeTree.nodes.new("ShaderNodeSeparateColor")
-	separateRGBNode.location = currentPos
-	nodeTree.links.new(imageNode.outputs["Color"],separateRGBNode.inputs["Color"])
+	separateRGBNode = addSeparateColor(nodeTree.nodes, nodeTree.links, location = currentPos, sourceSocket = imageNode.outputs["Color"])
 	matInfo["roughnessNodeLayerGroup"].addMixLayer(separateRGBNode.outputs["Green"])
 	matInfo["metallicNodeLayerGroup"].addMixLayer(separateRGBNode.outputs["Blue"])
 	return imageNode
@@ -1897,34 +1811,24 @@ def newSF6FacialWrinkleNode(nodeTree, textureType, matInfo):
 
 	roughnessLayers = matInfo["roughnessNodeLayerGroup"]
 	if roughnessLayers.currentOutSocket is not None:
-		roughnessDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
-		roughnessDeltaNode.operation = "SUBTRACT"
-		roughnessDeltaNode.location = addLoc(imageNode, (900, -220))
+		roughnessDeltaNode = addMathNode(nodeTree.nodes, "SUBTRACT", location = addLoc(imageNode, (900, -220)))
 		roughnessDeltaNode.inputs[1].default_value = 0.502
 		nodeTree.links.new(decodeNode.outputs["Roughness"], roughnessDeltaNode.inputs[0])
 
-		scaledRoughnessNode = nodeTree.nodes.new("ShaderNodeMath")
-		scaledRoughnessNode.operation = "MULTIPLY"
-		scaledRoughnessNode.location = addLoc(imageNode, (1200, -220))
+		scaledRoughnessNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = addLoc(imageNode, (1200, -220)))
 		nodeTree.links.new(roughnessDeltaNode.outputs["Value"], scaledRoughnessNode.inputs[0])
 		nodeTree.links.new(strengthNode.outputs["Value"], scaledRoughnessNode.inputs[1])
 		
 		roughnessLayers.addMixLayer(scaledRoughnessNode.outputs["Value"], mixType="ADD", mixFactor=1.0)
 
-	cavityDeltaNode = nodeTree.nodes.new("ShaderNodeMath")
-	cavityDeltaNode.name = "SF6 Facial Wrinkle Cavity Delta"
-	cavityDeltaNode.operation = "SUBTRACT"
-	cavityDeltaNode.location = addLoc(imageNode, (900, -440))
+	cavityDeltaNode = addMathNode(nodeTree.nodes, "SUBTRACT", location = addLoc(imageNode, (900, -440)), name = "SF6 Facial Wrinkle Cavity Delta")
 	cavityDeltaNode.inputs[1].default_value = 1.0
 	nodeTree.links.new(
 		decodeNode.outputs["BlueChannel"],
 		cavityDeltaNode.inputs[0],
 	)
 
-	scaledCavityNode = nodeTree.nodes.new("ShaderNodeMath")
-	scaledCavityNode.name = "SF6 Facial Wrinkle Cavity Scale"
-	scaledCavityNode.operation = "MULTIPLY"
-	scaledCavityNode.location = addLoc(imageNode, (1200, -440))
+	scaledCavityNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = addLoc(imageNode, (1200, -440)), name = "SF6 Facial Wrinkle Cavity Scale")
 	nodeTree.links.new(
 		cavityDeltaNode.outputs["Value"],
 		scaledCavityNode.inputs[0],
@@ -1934,11 +1838,7 @@ def newSF6FacialWrinkleNode(nodeTree, textureType, matInfo):
 		scaledCavityNode.inputs[1],
 	)
 
-	wrinkleCavityNode = nodeTree.nodes.new("ShaderNodeMath")
-	wrinkleCavityNode.name = "SF6 Facial Wrinkle Cavity"
-	wrinkleCavityNode.operation = "ADD"
-	wrinkleCavityNode.use_clamp = True
-	wrinkleCavityNode.location = addLoc(imageNode, (1500, -440))
+	wrinkleCavityNode = addMathNode(nodeTree.nodes, "ADD", location = addLoc(imageNode, (1500, -440)), name = "SF6 Facial Wrinkle Cavity", clamp = True)
 	wrinkleCavityNode.inputs[1].default_value = 1.0
 	nodeTree.links.new(
 		scaledCavityNode.outputs["Value"],

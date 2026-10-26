@@ -1,6 +1,7 @@
 import numpy as np
 from .file_re_mesh import Matrix4x4, AABB, Sphere, capturePragmataBlendHeader
-from .mesh_versions import (MESH_FILE_VERSION_SF6, SIX_WEIGHT_MESH_FILE_VERSIONS, isPragmataMeshFileVersion)
+from .mesh_versions import (MESH_FILE_VERSION_SF6, PRAGMATA_INTERNAL_MESH_VERSION,
+                            SIX_WEIGHT_MESH_FILE_VERSIONS, isPragmataMeshFileVersion)
 from .file_re_mesh_mply import computePosDecode
 
 typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
@@ -73,15 +74,6 @@ def ReadFaceBuffer(faceBuffer):
 
 def ReadIntFaceBuffer(faceBuffer):
 	return np.frombuffer(faceBuffer, dtype="<3I")
-
-
-def readPackedBitsVec3Array(packedIntArray, numBits):
-	limit = 2 ** numBits - 1
-	vec3Array = np.empty((len(packedIntArray), 3), dtype=np.float32)
-	vec3Array[:, 0] = ((packedIntArray >> 0) & limit) / limit
-	vec3Array[:, 1] = ((packedIntArray >> (numBits * 1)) & limit) / limit
-	vec3Array[:, 2] = ((packedIntArray >> (numBits * 2)) & limit) / limit
-	return vec3Array
 
 
 def readPackedBitsVec3Array_11_10_11(packedIntArray):
@@ -432,21 +424,6 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 			# TODO - Blend shape vertex count can span across meshes, add list of vertex ranges for every sub mesh
 			for blendTargetIndex, blendTarget in enumerate(blendShapeLODData.blendTargetList):
 
-				if blendShapeLODData.typing == 0:
-					step_size_x = (blendShapeLODData.aabbList[blendTargetIndex].max.x -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.x) / (2 ** 11 - 1)
-					step_size_y = (blendShapeLODData.aabbList[blendTargetIndex].max.y -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.y) / (2 ** 10 - 1)
-					step_size_z = (blendShapeLODData.aabbList[blendTargetIndex].max.z -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.z) / (2 ** 11 - 1)
-				else:
-					step_size_x = (blendShapeLODData.aabbList[blendTargetIndex].max.x -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.x) / (2 ** 16 - 1)
-					step_size_y = (blendShapeLODData.aabbList[blendTargetIndex].max.y -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.y) / (2 ** 16 - 1)
-					step_size_z = (blendShapeLODData.aabbList[blendTargetIndex].max.z -
-					               blendShapeLODData.aabbList[blendTargetIndex].min.z) / (2 ** 16 - 1)
-
 				for blendNameIndex in range(0, blendTarget.blendShapeNum):
 					blendShapeName = reMesh.rawNameList[
 						reMesh.blendShapeNameRemapList[currentBlendShapeNameIndex + blendNameIndex]]
@@ -593,7 +570,6 @@ class ParsedREMesh:
 		lodOffsetDict = dict()  # Used for linking shadow mesh lods to main mesh lods
 		self.nameList = reMesh.rawNameList
 		self.boneNameRemapList = reMesh.boneNameRemapList
-		self.materialRemapList = reMesh.materialNameRemapList
 		# Parse Skeleton
 		for remapIndex in reMesh.materialNameRemapList:
 			if remapIndex < len(reMesh.rawNameList):
@@ -658,7 +634,7 @@ class ParsedREMesh:
 		# Parse Vertex Buffer
 		if reMesh.meshBufferHeader != None:
 			tags = set()
-			if reMesh.meshVersion in SIX_WEIGHT_MESH_FILE_VERSIONS or reMesh.fileHeader.version == 250707828:  # Street Fighter 6 mesh version + MH Wilds, #Pragmata internal mesh version uses 6 weight but RE9 uses 8
+			if reMesh.meshVersion in SIX_WEIGHT_MESH_FILE_VERSIONS or reMesh.fileHeader.version == PRAGMATA_INTERNAL_MESH_VERSION:  # Street Fighter 6 mesh version + MH Wilds, #Pragmata internal mesh version uses 6 weight but RE9 uses 8
 				tags.add("SixWeightCompressed")  # Add tag to parse compressed weights
 			# if duplicate in vertexelementlist, add shadowLOD tag
 
@@ -841,8 +817,6 @@ class ParsedREMesh:
 					submesh.uvList = ReadUVBuffer(meshEntry.uvBuffer, tags)
 					if meshEntry.uv2Buffer is not None:
 						submesh.uv2List = ReadUVBuffer(meshEntry.uv2Buffer, tags)
-					if meshEntry.uv3Buffer is not None:
-						submesh.uv3List = ReadUVBuffer(meshEntry.uv3Buffer, tags)
 					if meshEntry.colorBuffer is not None:
 						submesh.colorList = ReadColorBuffer(meshEntry.colorBuffer, tags)
 					if reMesh.streamingBuffer is not None:

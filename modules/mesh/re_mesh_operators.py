@@ -12,7 +12,8 @@ from bpy.props import (StringProperty,
                        )
 from .blender_re_mesh import solveRepeatedUVs
 from .re_mesh_propertyGroups import ExporterNodePropertyGroup, MESH_UL_REExporterList
-from ..gen_functions import splitNativesPath, parseREMeshGroupID, getREMeshMaterialName, normalizeREMaterialName, formatREMeshObjectName
+from ..gen_functions import splitNativesPath
+from ..naming import parseREMeshGroupID, getREMeshMaterialName, normalizeREMaterialName, formatREMeshObjectName
 from ..blender_utils import (showErrorMessageBox, findMDFCollectionForMesh, resolveSourcePath, setMDFMaterialName,
                              isMDFCollection, isMeshCollection, iterMDFMaterialObjects)
 from ..mdf.blender_re_mdf import reindexMaterials
@@ -338,50 +339,28 @@ def checkForChildRECollectionsRecursive(collection):
 	return False
 
 
+# Scene-key parts per export type: the version key is "{prefix}Last{Exported|Imported}{name}Version".
+# The suffix prefers the last exported version and falls back to the last imported one.
+_FILE_VERSION_KEY_PARTS = {
+	"MESH": ("REMesh", "Mesh"),
+	"MDF": ("REMesh", "MDF"),
+	"FBXSKEL": ("REMesh", "FBXSkel"),
+	"SFUR": ("REMesh", "SFUR"),
+	"CHAIN": ("REChain", "Chain"),
+	"CHAIN2": ("REChain", "Chain2"),
+	"CLSP": ("REChain", "CLSP"),
+}
+
+
 def getFileVersionSuffix(exportType, scene):
-	fileVersion = ""
-	if exportType == "MESH":
-		if "REMeshLastExportedMeshVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastExportedMeshVersion"])
-		elif "REMeshLastImportedMeshVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastImportedMeshVersion"])
-
-	elif exportType == "MDF":
-		if "REMeshLastExportedMDFVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastExportedMDFVersion"])
-		elif "REMeshLastImportedMDFVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastImportedMDFVersion"])
-
-	elif exportType == "FBXSKEL":
-		if "REMeshLastExportedFBXSkelVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastExportedFBXSkelVersion"])
-		elif "REMeshLastImportedFBXSkelVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastImportedFBXSkelVersion"])
-
-	elif exportType == "SFUR":
-		if "REMeshLastExportedSFURVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastExportedSFURVersion"])
-		elif "REMeshLastImportedSFURVersion" in scene:
-			fileVersion = "." + str(scene["REMeshLastImportedSFURVersion"])
-
-	elif exportType == "CHAIN":
-		if "REChainLastExportedChainVersion" in scene:
-			fileVersion = "." + str(scene["REChainLastExportedChainVersion"])
-		elif "REChainLastImportedChainVersion" in scene:
-			fileVersion = "." + str(scene["REChainLastImportedChainVersion"])
-
-	elif exportType == "CHAIN2":
-		if "REChainLastExportedChain2Version" in scene:
-			fileVersion = "." + str(scene["REChainLastExportedChain2Version"])
-		elif "REChainLastImportedChain2Version" in scene:
-			fileVersion = "." + str(scene["REChainLastImportedChain2Version"])
-
-	elif exportType == "CLSP":
-		if "REChainLastExportedCLSPVersion" in scene:
-			fileVersion = "." + str(scene["REChainLastExportedCLSPVersion"])
-		elif "REChainLastImportedChain2Version" in scene:
-			fileVersion = "." + str(scene["REChainLastImportedCLSPVersion"])
-	return fileVersion
+	parts = _FILE_VERSION_KEY_PARTS.get(exportType)
+	if parts is None:
+		return ""
+	for state in ("Exported", "Imported"):
+		key = parts[0] + "Last" + state + parts[1] + "Version"
+		if key in scene:
+			return "." + str(scene[key])
+	return ""
 
 
 def determineExportPath(modDirectory, exportType, assetPath, scene):

@@ -351,7 +351,7 @@ def test_export_mdf_object_name_wins(tmpDir):
     parentheses the same way reindexMaterials does."""
     import modules.mesh.blender_re_mesh_export as mex
     from modules.mdf.file_re_mdf import readMDF
-    from modules.gen_functions import parseMDFObjectNameMaterialName
+    from modules.naming import parseMDFObjectNameMaterialName
     mex.showMessageBox = lambda *a, **k: None
 
     weird = "material 00 (Body_00_C001_Inst_Mesh_00_EyeUpdate)"
@@ -440,10 +440,10 @@ def test_naming_helpers_and_mdf_order(tmpDir):
     uses for its submeshes/material list - so the game's index-based mesh->MDF
     material binding lines up (previously buildMDF sorted case-sensitively)."""
     import modules.mesh.blender_re_mesh_export as mex
-    from modules.gen_functions import (stripBlenderUserSuffix, parseREMeshObjectMaterialName,
-                                       getREMeshMaterialName, resolveREMeshMaterialName,
-                                       formatREMeshObjectName, formatREMaterialObjectName,
-                                       parseMDFObjectNameMaterialName)
+    from modules.naming import (stripBlenderUserSuffix, parseREMeshObjectMaterialName,
+                                getREMeshMaterialName, resolveREMeshMaterialName,
+                                formatREMeshObjectName, formatREMaterialObjectName,
+                                parseMDFObjectNameMaterialName)
     from modules.mdf.file_re_mdf import readMDF
     from modules.mesh.file_re_mesh import readREMesh
     from modules.mesh.re_mesh_parse import ParsedREMesh

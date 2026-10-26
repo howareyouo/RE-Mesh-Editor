@@ -43,7 +43,8 @@ from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
 # gen_functions' old star export (fixed 2026-09) and prevented static analysis.
 # meshFileVersionToGameNameDict + SIX_WEIGHT_MESH_FILE_VERSIONS are re-exported
 # for blender_re_mesh_import/export/utils which import them FROM this module.
-from .mesh_versions import (PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, SIX_WEIGHT_GAMES,
+from .mesh_versions import (MESH_FILE_MAGIC, MPLY_FILE_MAGIC, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS,
+                            SIX_WEIGHT_GAMES,
                             SIX_WEIGHT_MESH_FILE_VERSIONS,
                             VERSION_DD2, VERSION_DD2NEW, VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
                             VERSION_PRAG, VERSION_RE8, VERSION_RE9, VERSION_SF6,
@@ -55,6 +56,14 @@ from .mesh_versions import (PRAGMATA_BLEND_SHAPE_FILE_VERSIONS, SIX_WEIGHT_GAMES
 # Vertex element layout (u16 typing + u16 stride + u32 offset) - shared by every
 # batched read/write of vertex element tables (previously a hardcoded literal x6)
 VERTEX_ELEMENT_DTYPE = np.dtype([('typing', '<u2'), ('stride', '<u2'), ('posStartOffset', '<u4')])
+
+# MainMeshHeader.skinWeightCount per internal mesh version; everything else (incl. RE9) uses 18.
+# The MHWILDS value empirically fixes monsters crashing and dead hitbox issues.
+SKIN_WEIGHT_COUNT_BY_VERSION = {
+	VERSION_SF6: 9,
+	VERSION_MHWILDS: 25,
+	VERSION_PRAG: 27,
+}
 
 # Pragmata typing-2 blend metadata structs (serializePragmataBlendShapeRegion). Layouts
 # mirror the SF6+ readers in BlendShapeHeader/BlendShapeData/BlendTarget.
@@ -76,9 +85,6 @@ class Vec3():
 		self.y = read_float(file)
 		self.z = read_float(file)
 
-	def write(self, file):
-		file.write(np.array([self.x, self.y, self.z], dtype="<f").tobytes())
-
 
 class Vec4():
 	def __init__(self):
@@ -92,9 +98,6 @@ class Vec4():
 		self.y = read_float(file)
 		self.z = read_float(file)
 		self.w = read_float(file)
-
-	def write(self, file):
-		file.write(np.array([self.x, self.y, self.z, self.w], dtype="<f").tobytes())
 
 
 class Sphere():
@@ -110,9 +113,6 @@ class Sphere():
 		self.z = read_float(file)
 		self.r = read_float(file)
 
-	def write(self, file):
-		file.write(np.array([self.x, self.y, self.z, self.r], dtype="<f").tobytes())
-
 
 class Matrix4x4():
 	def __init__(self):
@@ -120,9 +120,6 @@ class Matrix4x4():
 
 	def read(self, file):
 		self.matrix = np.frombuffer(file.read(64), dtype='<4f').tolist()
-
-	def write(self, file):
-		file.write(np.asarray(self.matrix, dtype=np.float32).tobytes())
 
 
 class AABB():
@@ -133,10 +130,6 @@ class AABB():
 	def read(self, file):
 		self.min.read(file)
 		self.max.read(file)
-
-	def write(self, file):
-		self.min.write(file)
-		self.max.write(file)
 
 
 class MaterialSubdivision():
@@ -483,8 +476,6 @@ class MeshBufferHeader():
 			self.faceBufferOffset, = struct.unpack_from('<Q', raw2, off); off += 8
 			if version > VERSION_RE8:
 				self.sunbreakOffset, = struct.unpack_from('<Q', raw2, off); off += 8
-			else:
-				off -= 0  # no sunbreak
 			self.vertexBufferSize, self.faceBufferSize = struct.unpack_from('<II', raw2, off); off += 8
 			self.mainVertexElementCount, self.vertexElementCount = struct.unpack_from('<HH', raw2, off); off += 4
 			self.block2FaceBufferOffset, self.NULL = struct.unpack_from('<II', raw2, off); off += 8
@@ -621,6 +612,18 @@ class MeshBufferHeader():
 			file.write(self.secondaryWeightBuffer)
 
 
+# Content flag bit layout shared by parseBitFlag/setBitFlag: attribute name -> bit index.
+_CONTENT_FLAG_BITS = (
+	("hasAABB", 0),
+	("hasSkeleton", 1),
+	("hasBlendShape", 2),
+	("hasGroupPivot", 3),
+	("hasUnknFlag8", 7),
+	("hasUnknFlag10", 9),
+	("hasUnknFlag16", 15),
+)
+
+
 class ContentFlag():  # Short bitflag in header that determines what content the mesh has Ex: Blend shapes, skeleton, etc.
 	def __init__(self):
 		self.bitFlag = 0
@@ -633,13 +636,8 @@ class ContentFlag():  # Short bitflag in header that determines what content the
 		self.hasAABB = False
 
 	def parseBitFlag(self):
-		self.hasAABB = bool(getBit(self.bitFlag, 0))
-		self.hasSkeleton = bool(getBit(self.bitFlag, 1))
-		self.hasBlendShape = bool(getBit(self.bitFlag, 2))
-		self.hasGroupPivot = bool(getBit(self.bitFlag, 3))
-		self.hasUnknFlag8 = bool(getBit(self.bitFlag, 7))
-		self.hasUnknFlag10 = bool(getBit(self.bitFlag, 9))
-		self.hasUnknFlag16 = bool(getBit(self.bitFlag, 15))
+		for attr, bit in _CONTENT_FLAG_BITS:
+			setattr(self, attr, bool(getBit(self.bitFlag, bit)))
 
 	# print(f"aabb:{self.hasAABB}")
 	# print(f"skeleton:{self.hasSkeleton}")
@@ -647,21 +645,13 @@ class ContentFlag():  # Short bitflag in header that determines what content the
 	# print(f"grouppivot:{self.hasGroupPivot}")
 	def setBitFlag(self, hasUnknFlag16, hasUnknFlag10, hasUnknFlag8, hasGroupPivot, hasBlendShape,
 	               hasSkeleton, hasAABB):
+		flags = {"hasUnknFlag16": hasUnknFlag16, "hasUnknFlag10": hasUnknFlag10,
+		         "hasUnknFlag8": hasUnknFlag8, "hasGroupPivot": hasGroupPivot,
+		         "hasBlendShape": hasBlendShape, "hasSkeleton": hasSkeleton, "hasAABB": hasAABB}
 		self.bitFlag = 0
-		if hasAABB:
-			self.bitFlag = setBit(self.bitFlag, 0)
-		if hasSkeleton:
-			self.bitFlag = setBit(self.bitFlag, 1)
-		if hasBlendShape:
-			self.bitFlag = setBit(self.bitFlag, 2)
-		if hasGroupPivot:
-			self.bitFlag = setBit(self.bitFlag, 3)
-		if hasUnknFlag8:
-			self.bitFlag = setBit(self.bitFlag, 7)
-		if hasUnknFlag10:
-			self.bitFlag = setBit(self.bitFlag, 9)
-		if hasUnknFlag16:
-			self.bitFlag = setBit(self.bitFlag, 15)
+		for attr, bit in _CONTENT_FLAG_BITS:
+			if flags[attr]:
+				self.bitFlag = setBit(self.bitFlag, bit)
 		self.parseBitFlag()
 
 	def read(self, file):
@@ -674,7 +664,7 @@ class ContentFlag():  # Short bitflag in header that determines what content the
 
 class FileHeader():
 	def __init__(self):
-		self.magic = 1213416781
+		self.magic = MESH_FILE_MAGIC
 		self.version = 0
 		self.fileSize = 0
 		self.lodGroupNameHash = 0  # This determines what LOD distance scaling to use based on category of object
@@ -719,8 +709,8 @@ class FileHeader():
 
 	def read(self, file, version):
 		self.magic = read_uint(file)
-		if self.magic != 1213416781:
-			if self.magic == 1498173517:  # MPLY
+		if self.magic != MESH_FILE_MAGIC:
+			if self.magic == MPLY_FILE_MAGIC:  # MPLY
 				raise Exception("MPLY formatted mesh files (stage meshes mostly) are not supported yet.")
 			else:
 				raise Exception("File is not an RE mesh file.")
@@ -1564,6 +1554,7 @@ class Skeleton():
 
 class FloatData():
 	def __init__(self):
+		self.count = 0
 		self.bufferSize = 0
 		self.offset = 0
 		self.unknDataList = []
@@ -1900,13 +1891,25 @@ def WriteToIntFaceBuffer(bufferStream, faceList):
 	bufferStream.write(faceArray.tobytes())
 
 
+# Version-range table for sizeData overrides: (minVersionInclusive, maxVersionExclusive,
+# {field: size}). The first matching row wins; None bounds are open-ended. Adding a new game
+# usually means adding one row here instead of another threshold branch.
+_SIZE_DATA_ROWS = (
+	(None,             VERSION_RE8,      {'LOD_HEADER_OFFSET_LIST_OFFSET': 72, 'MATERIAL_SUBDIVISION_SIZE': 16, 'VERTEX_ELEMENT_OFFSET': 48}),
+	(VERSION_RE8,      VERSION_RE8 + 1,  {'VERTEX_ELEMENT_OFFSET': 48}),
+	(VERSION_SF6,      VERSION_DD2,      {'MESH_HEADER_SIZE': 168, 'VERTEX_ELEMENT_OFFSET': 80}),
+	(VERSION_DD2,      VERSION_DD2NEW,   {'MESH_HEADER_SIZE': 176, 'VERTEX_ELEMENT_OFFSET': 80}),
+	(VERSION_DD2NEW,   VERSION_DR,       {'MESH_HEADER_SIZE': 176, 'VERTEX_ELEMENT_OFFSET': 80, 'MATERIAL_SUBDIVISION_SIZE': 28}),
+	(VERSION_DR,       VERSION_PRAG,     {'MESH_HEADER_SIZE': 176, 'VERTEX_ELEMENT_OFFSET': 80, 'MATERIAL_SUBDIVISION_SIZE': 32}),
+	(VERSION_PRAG,     None,             {'MESH_HEADER_SIZE': 176, 'VERTEX_ELEMENT_OFFSET': 96, 'MATERIAL_SUBDIVISION_SIZE': 32}),
+)
+
+
 class sizeData:
+	#Struct sizes for the .mesh layout. Base defaults below, overridden by the first matching
+	#_SIZE_DATA_ROWS entry for the remapped version.
 	def __init__(self, version):
 		self.MESH_HEADER_SIZE = 128
-		if version >= VERSION_SF6:
-			self.MESH_HEADER_SIZE = 168
-		if version >= VERSION_DD2:
-			self.MESH_HEADER_SIZE = 176
 		self.LOD_HEADER_OFFSET_LIST_OFFSET = 64  # Offset from start of lod header to offset list
 		self.LOD_GROUP_HEADER_OFFSET_LIST_OFFSET = 16  # Offset from start of lod group to offset list
 		self.MESH_GROUP_SIZE = 16
@@ -1917,197 +1920,149 @@ class sizeData:
 		self.AABB_OFFSET = 16
 		self.AABB_SIZE = 32
 		self.VERTEX_ELEMENT_OFFSET = 64
-		self.STREAMING_HEADER_SIZE = 16  # WILDS
-		if version < VERSION_RE8:
-			self.LOD_HEADER_OFFSET_LIST_OFFSET = 72
-			self.MATERIAL_SUBDIVISION_SIZE = 16
-
-		if version <= VERSION_RE8:
-			self.VERTEX_ELEMENT_OFFSET = 48
-		if version >= VERSION_SF6:
-			self.VERTEX_ELEMENT_OFFSET = 80
-
-		if version >= VERSION_DD2NEW:
-			self.MATERIAL_SUBDIVISION_SIZE = 28
-
-		if version >= VERSION_DR:
-			self.MATERIAL_SUBDIVISION_SIZE = 32
-
-		if version >= VERSION_PRAG:
-			self.VERTEX_ELEMENT_OFFSET = 96
-
 		self.VERTEX_ELEMENT_SIZE = 8
+		for minVersion, maxVersion, overrides in _SIZE_DATA_ROWS:
+			if (minVersion is None or version >= minVersion) and (maxVersion is None or version < maxVersion):
+				for name, value in overrides.items():
+					setattr(self, name, value)
+				break
 
 
-def ParsedREMeshToREMesh(parsedMesh, meshVersion):
-	print(f"Mesh Version:{meshVersion}")
-	version = meshFileVersionToNewVersionDict.get(meshVersion, getNearestRemapVersion(meshVersion))
-	print(f"Remapped Version:{version}")
-	sd = sizeData(version)
-	currentOffset = 0
-	currentVertexIndex = 0
-	currentFaceIndex = 0
+def writeMainMeshLODs(parsedMesh, reMesh, sd, version, currentOffset, currentVertexIndex, currentFaceIndex, parsedSubMeshToSubMeshDataDict, buffers):
+	#Writes every main-mesh LOD group: layout offsets, vertex/face/weight/UV/color streams and
+	#the per-submesh MaterialSubdivision records. Mutates reMesh, the shared write buffers and
+	#parsedSubMeshToSubMeshDataDict, and returns the advanced offsets plus the accumulated
+	#tangent-generation time.
+	# SF6 uses six weights with higher possible bone index values
+	isSixWeight = version in SIX_WEIGHT_GAMES
+	# Retail Pragmata sets the 2-bit pads in the 6-weight index pack to 0b11.
+	weightIndexPad = 3 if version == VERSION_PRAG else 0
+	vertexPosBuffer, norTanBuffer, UVBuffer, UV2Buffer, weightBuffer, colorBuffer, faceBuffer, extraWeightBuffer, secondaryWeightBuffer = buffers
+	totalTangentGenerationTime = 0.0
+	reMesh.fileHeader.meshGroupOffset = sd.MESH_HEADER_SIZE
+	reMesh.lodHeader = MainMeshHeader()
+	reMesh.lodHeader.lodGroupCount = len(parsedMesh.mainMeshLODList)
+	reMesh.lodHeader.materialCount = len(parsedMesh.materialNameList)
+	reMesh.lodHeader.bbox = parsedMesh.boundingBox
+	reMesh.lodHeader.sphere = parsedMesh.boundingSphere
+	for viscon in parsedMesh.mainMeshLODList[0].visconGroupList:
+		reMesh.lodHeader.totalMeshCount += len(viscon.subMeshList)
+	reMesh.lodHeader.skinWeightCount = SKIN_WEIGHT_COUNT_BY_VERSION.get(version, 18)
+	if parsedMesh.bufferHasUV2:  # This is wrong, uv count is determined by something else. However uv count is unused by the game so it doesn't really matter
+		reMesh.lodHeader.uvCount = 2
+	else:
+		reMesh.lodHeader.uvCount = 1
+	if parsedMesh.bufferHasIntFaces:
+		reMesh.lodHeader.has32BitIndexBuffer = 1
+	reMesh.lodHeader.offsetOffset = sd.MESH_HEADER_SIZE + sd.LOD_HEADER_OFFSET_LIST_OFFSET
 
-	totalTangentGenerationTime = 0.0 # For benchmarking the time it takes tangents to calculate
-
-	# Buffers
-	vertexPosBuffer = BytesIO()
-	norTanBuffer = BytesIO()
-	UVBuffer = BytesIO()
-	UV2Buffer = BytesIO()
-	weightBuffer = BytesIO()
-	colorBuffer = BytesIO()
-	faceBuffer = BytesIO()
-	extraWeightBuffer = BytesIO()  # MH Wilds extended weight buffer
-	secondaryWeightBuffer = BytesIO()  # DD2 shapekey
-
-	parsedSubMeshToSubMeshDataDict = dict()
-
-	reMesh = REMesh()
-
-	reMesh.fileHeader.version = meshFileVersionToInternalVersionDict.get(
-		meshVersion,
-		getNearestRemapVersion(meshVersion)
-	)
-	# TODO Fix shadow mesh export, causes game to crash. It seems shadow meshes can't have unique lods, even if the sub mesh offsets are still shared. They might only be able to use the existing full lods from the main mesh
-	# parsedMesh.shadowMeshLODList.clear()
+	# currentOffset = LOD Group 0 offset
+	currentOffset = reMesh.lodHeader.offsetOffset + 8 * reMesh.lodHeader.lodGroupCount + getPaddingAmount(
+		reMesh.lodHeader.offsetOffset + (8 * reMesh.lodHeader.lodGroupCount), 16)
 
 	# Main Meshes
-	if parsedMesh.mainMeshLODList != []:
-		reMesh.fileHeader.meshGroupOffset = sd.MESH_HEADER_SIZE
-		reMesh.lodHeader = MainMeshHeader()
-		reMesh.lodHeader.lodGroupCount = len(parsedMesh.mainMeshLODList)
-		reMesh.lodHeader.materialCount = len(parsedMesh.materialNameList)
-		reMesh.lodHeader.bbox = parsedMesh.boundingBox
-		reMesh.lodHeader.sphere = parsedMesh.boundingSphere
-		for viscon in parsedMesh.mainMeshLODList[0].visconGroupList:
-			reMesh.lodHeader.totalMeshCount += len(viscon.subMeshList)
-		reMesh.lodHeader.skinWeightCount = 18
-		if version == VERSION_SF6:
-			reMesh.lodHeader.skinWeightCount = 9
-		elif version == VERSION_MHWILDS:
-			reMesh.lodHeader.skinWeightCount = 25  # Not sure why but this fixes monsters causing crashes and dead hitbox issues
-		elif version == VERSION_PRAG:
-			reMesh.lodHeader.skinWeightCount = 27  #
-		elif version == VERSION_RE9:
-			reMesh.lodHeader.skinWeightCount = 18  #
-		if parsedMesh.bufferHasUV2:  # This is wrong, uv count is determined by something else. However uv count is unused by the game so it doesn't really matter
-			reMesh.lodHeader.uvCount = 2
-		else:
-			reMesh.lodHeader.uvCount = 1
-		if parsedMesh.bufferHasIntFaces:
-			reMesh.lodHeader.has32BitIndexBuffer = 1
-		reMesh.lodHeader.offsetOffset = sd.MESH_HEADER_SIZE + sd.LOD_HEADER_OFFSET_LIST_OFFSET
+	# TODO Move lod parsing into a function and call it for both main and shadow mesh
+	for lod in parsedMesh.mainMeshLODList:
+		reMesh.lodHeader.lodGroupOffsetList.append(currentOffset)
+		lodGroupHeader = LODGroupHeader()
+		lodGroupHeader.count = len(lod.visconGroupList)
+		lodGroupHeader.distance = lod.lodDistance
+		currentOffset += sd.LOD_GROUP_HEADER_OFFSET_LIST_OFFSET
+		lodGroupHeader.offsetOffset = currentOffset
+		# Viscon 0 Offset
+		currentOffset = lodGroupHeader.offsetOffset + 8 * lodGroupHeader.count + getPaddingAmount(
+			lodGroupHeader.offsetOffset + (8 * lodGroupHeader.count), 16)
+		for viscon in lod.visconGroupList:
+			lodGroupHeader.meshGroupOffsetList.append(currentOffset)
+			# print(f"viscon {viscon.visconGroupNum} offset: {str(currentOffset)}")
+			meshGroup = MeshGroup()
+			meshGroup.visconGroupID = viscon.visconGroupNum
+			meshGroup.meshCount = len(viscon.subMeshList)
+			for parsedSubMesh in viscon.subMeshList:
+				subMesh = MaterialSubdivision()
+				subMesh.materialIndex = parsedSubMesh.materialIndex
+				subMesh.faceCount = len(parsedSubMesh.faceList) * 3
+				if parsedMesh.bufferHasIntFaces:
+					paddedFaceCount = subMesh.faceCount
+				else:
+					paddedFaceCount = getPaddedPos(subMesh.faceCount, 2)
+				meshGroup.faceCount += paddedFaceCount
 
-		# currentOffset = LOD Group 0 offset
-		currentOffset = reMesh.lodHeader.offsetOffset + 8 * reMesh.lodHeader.lodGroupCount + getPaddingAmount(
-			reMesh.lodHeader.offsetOffset + (8 * reMesh.lodHeader.lodGroupCount), 16)
+				vertCount = len(parsedSubMesh.vertexPosList)
+				meshGroup.vertexCount += vertCount
+				parsedSubMeshToSubMeshDataDict[parsedSubMesh] = subMesh
+				if not parsedSubMesh.isReusedMesh:
+					subMesh.faceStartIndex = currentFaceIndex
+					subMesh.vertexStartIndex = currentVertexIndex
+					currentVertexIndex += vertCount
+					currentFaceIndex += paddedFaceCount
+					# TODO Add vertices and faces to buffers
+					WriteToVertexPosBuffer(vertexPosBuffer, parsedSubMesh.vertexPosList)
 
-		# SF6 uses six weights with higher possible bone index values
-		isSixWeight = version in SIX_WEIGHT_GAMES
-		# Retail Pragmata sets the 2-bit pads in the 6-weight index pack to 0b11.
-		weightIndexPad = 3 if version == VERSION_PRAG else 0
+					tangentGenerationStartTime = time.time()
+					WriteToNorTanBuffer(norTanBuffer, parsedSubMesh.normalList, parsedSubMesh.tangentList)
+					totalTangentGenerationTime +=  (time.time() - tangentGenerationStartTime)
 
-		# Main Meshes
-		# TODO Move lod parsing into a function and call it for both main and shadow mesh
-		for lod in parsedMesh.mainMeshLODList:
-			reMesh.lodHeader.lodGroupOffsetList.append(currentOffset)
-			lodGroupHeader = LODGroupHeader()
-			lodGroupHeader.count = len(lod.visconGroupList)
-			lodGroupHeader.distance = lod.lodDistance
-			currentOffset += sd.LOD_GROUP_HEADER_OFFSET_LIST_OFFSET
-			lodGroupHeader.offsetOffset = currentOffset
-			# Viscon 0 Offset
-			currentOffset = lodGroupHeader.offsetOffset + 8 * lodGroupHeader.count + getPaddingAmount(
-				lodGroupHeader.offsetOffset + (8 * lodGroupHeader.count), 16)
-			for viscon in lod.visconGroupList:
-				lodGroupHeader.meshGroupOffsetList.append(currentOffset)
-				# print(f"viscon {viscon.visconGroupNum} offset: {str(currentOffset)}")
-				meshGroup = MeshGroup()
-				meshGroup.visconGroupID = viscon.visconGroupNum
-				meshGroup.meshCount = len(viscon.subMeshList)
-				for parsedSubMesh in viscon.subMeshList:
-					subMesh = MaterialSubdivision()
-					subMesh.materialIndex = parsedSubMesh.materialIndex
-					subMesh.faceCount = len(parsedSubMesh.faceList) * 3
-					if parsedMesh.bufferHasIntFaces:
-						paddedFaceCount = subMesh.faceCount
-					else:
-						paddedFaceCount = getPaddedPos(subMesh.faceCount, 2)
-					meshGroup.faceCount += paddedFaceCount
+					# Copy uv1 to uv2 if buffer has uv2, but the mesh only has 1 uv
+					if parsedMesh.bufferHasUV2 and parsedSubMesh.uv2List is None:
+						parsedSubMesh.uv2List = parsedSubMesh.uvList
 
-					vertCount = len(parsedSubMesh.vertexPosList)
-					meshGroup.vertexCount += vertCount
-					parsedSubMeshToSubMeshDataDict[parsedSubMesh] = subMesh
-					if not parsedSubMesh.isReusedMesh:
-						subMesh.faceStartIndex = currentFaceIndex
-						subMesh.vertexStartIndex = currentVertexIndex
-						currentVertexIndex += vertCount
-						currentFaceIndex += paddedFaceCount
-						# TODO Add vertices and faces to buffers
-						WriteToVertexPosBuffer(vertexPosBuffer, parsedSubMesh.vertexPosList)
+					WriteToUVBuffer(UVBuffer, parsedSubMesh.uvList)
+					if parsedSubMesh.uv2List is not None:
+						WriteToUVBuffer(UV2Buffer, parsedSubMesh.uv2List)
 
-						tangentGenerationStartTime = time.time()
-						WriteToNorTanBuffer(norTanBuffer, parsedSubMesh.normalList, parsedSubMesh.tangentList)
-						totalTangentGenerationTime +=  (time.time() - tangentGenerationStartTime)
-
-						# Copy uv1 to uv2 if buffer has uv2, but the mesh only has 1 uv
-						if parsedMesh.bufferHasUV2 and parsedSubMesh.uv2List is None:
-							parsedSubMesh.uv2List = parsedSubMesh.uvList
-
-						WriteToUVBuffer(UVBuffer, parsedSubMesh.uvList)
-						if parsedSubMesh.uv2List is not None:
-							WriteToUVBuffer(UV2Buffer, parsedSubMesh.uv2List)
-
-						if len(parsedSubMesh.weightIndicesList) != 0 and len(
-								parsedSubMesh.weightIndicesList) == len(parsedSubMesh.weightList):
-							if parsedMesh.bufferHasExtraWeight and len(
-									parsedSubMesh.extraWeightIndicesList) != 0 and len(
-									parsedSubMesh.extraWeightIndicesList) == len(
-									parsedSubMesh.extraWeightList):
-								WriteToWeightBufferExtended(weightBuffer, parsedSubMesh.weightList,
-								                            parsedSubMesh.weightIndicesList,
-								                            extraWeightBuffer, parsedSubMesh.extraWeightList,
-								                            parsedSubMesh.extraWeightIndicesList, isSixWeight,
-								                            indexPad=weightIndexPad)
-							else:
-								WriteToWeightBuffer(weightBuffer, parsedSubMesh.weightList,
-								                    parsedSubMesh.weightIndicesList, isSixWeight,
-								                    indexPad=weightIndexPad)
-
-						# DD2 shapekeys
-						if len(parsedSubMesh.secondaryWeightIndicesList) != 0 and len(
-								parsedSubMesh.secondaryWeightIndicesList) == len(
-								parsedSubMesh.secondaryWeightList):
-							WriteToWeightBuffer(secondaryWeightBuffer, parsedSubMesh.secondaryWeightList,
-							                    parsedSubMesh.secondaryWeightIndicesList, isSixWeight)
-
-						# Add vertex color if it's missing and other meshes have it (vectorized)
-						if parsedMesh.bufferHasColor and parsedSubMesh.colorList is None:
-							n_v = len(parsedSubMesh.vertexPosList)
-							parsedSubMesh.colorList = np.full((n_v, 4), 255, dtype=np.float32)
-
-						if parsedSubMesh.colorList is not None:
-							WriteToColorBuffer(colorBuffer, parsedSubMesh.colorList)
-						if parsedMesh.bufferHasIntFaces:
-							WriteToIntFaceBuffer(faceBuffer, parsedSubMesh.faceList)
+					if len(parsedSubMesh.weightIndicesList) != 0 and len(
+							parsedSubMesh.weightIndicesList) == len(parsedSubMesh.weightList):
+						if parsedMesh.bufferHasExtraWeight and len(
+								parsedSubMesh.extraWeightIndicesList) != 0 and len(
+								parsedSubMesh.extraWeightIndicesList) == len(
+								parsedSubMesh.extraWeightList):
+							WriteToWeightBufferExtended(weightBuffer, parsedSubMesh.weightList,
+							                            parsedSubMesh.weightIndicesList,
+							                            extraWeightBuffer, parsedSubMesh.extraWeightList,
+							                            parsedSubMesh.extraWeightIndicesList, isSixWeight,
+							                            indexPad=weightIndexPad)
 						else:
-							WriteToFaceBuffer(faceBuffer, parsedSubMesh.faceList)
+							WriteToWeightBuffer(weightBuffer, parsedSubMesh.weightList,
+							                    parsedSubMesh.weightIndicesList, isSixWeight,
+							                    indexPad=weightIndexPad)
+
+					# DD2 shapekeys
+					if len(parsedSubMesh.secondaryWeightIndicesList) != 0 and len(
+							parsedSubMesh.secondaryWeightIndicesList) == len(
+							parsedSubMesh.secondaryWeightList):
+						WriteToWeightBuffer(secondaryWeightBuffer, parsedSubMesh.secondaryWeightList,
+						                    parsedSubMesh.secondaryWeightIndicesList, isSixWeight)
+
+					# Add vertex color if it's missing and other meshes have it (vectorized)
+					if parsedMesh.bufferHasColor and parsedSubMesh.colorList is None:
+						n_v = len(parsedSubMesh.vertexPosList)
+						parsedSubMesh.colorList = np.full((n_v, 4), 255, dtype=np.float32)
+
+					if parsedSubMesh.colorList is not None:
+						WriteToColorBuffer(colorBuffer, parsedSubMesh.colorList)
+					if parsedMesh.bufferHasIntFaces:
+						WriteToIntFaceBuffer(faceBuffer, parsedSubMesh.faceList)
 					else:
-						linkedMeshData = parsedSubMeshToSubMeshDataDict[parsedSubMesh.linkedSubMesh]
-						subMesh.faceStartIndex = linkedMeshData.faceStartIndex
-						subMesh.vertexStartIndex = linkedMeshData.vertexStartIndex
-					# TODO Get linked mesh offset for reused meshes
-					# Make dict of offset key to tuple of vertexstartindex and facestartindex
-					# meshOffsetDict[parsedSubMesh.linkedMesh][0]
-					meshGroup.vertexInfoList.append(subMesh)
-				currentOffset += sd.MESH_GROUP_SIZE + meshGroup.meshCount * sd.MATERIAL_SUBDIVISION_SIZE
+						WriteToFaceBuffer(faceBuffer, parsedSubMesh.faceList)
+				else:
+					linkedMeshData = parsedSubMeshToSubMeshDataDict[parsedSubMesh.linkedSubMesh]
+					subMesh.faceStartIndex = linkedMeshData.faceStartIndex
+					subMesh.vertexStartIndex = linkedMeshData.vertexStartIndex
+				# TODO Get linked mesh offset for reused meshes
+				# Make dict of offset key to tuple of vertexstartindex and facestartindex
+				# meshOffsetDict[parsedSubMesh.linkedMesh][0]
+				meshGroup.vertexInfoList.append(subMesh)
+			currentOffset += sd.MESH_GROUP_SIZE + meshGroup.meshCount * sd.MATERIAL_SUBDIVISION_SIZE
 
-				lodGroupHeader.meshGroupList.append(meshGroup)
-			reMesh.lodHeader.lodGroupList.append(lodGroupHeader)
-	print(f"Tangent calculation took {formatMs(totalTangentGenerationTime)} ms.")
-	# Shadow Meshes
+			lodGroupHeader.meshGroupList.append(meshGroup)
+		reMesh.lodHeader.lodGroupList.append(lodGroupHeader)
+	return currentOffset, currentVertexIndex, currentFaceIndex, totalTangentGenerationTime
 
+def writeShadowMeshes(parsedMesh, reMesh, sd, currentOffset):
+	#Lays out the shadow-mesh header and its per-LOD offset list. Shadow meshes reuse the main
+	#mesh LOD groups (writing unique shadow LODs crashes the game), so no vertex data is written
+	#here. Returns the advanced currentOffset.
 	if parsedMesh.shadowMeshLinkedLODList != []:
 		reMesh.fileHeader.shadowMeshGroupOffset = currentOffset
 		reMesh.shadowHeader = ShadowHeader()
@@ -2115,28 +2070,31 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		reMesh.shadowHeader.lodGroupCount = len(parsedMesh.shadowMeshLinkedLODList)
 		reMesh.shadowHeader.materialCount = reMesh.lodHeader.materialCount
 		reMesh.shadowHeader.totalMeshCount = reMesh.lodHeader.totalMeshCount
-
+		
 		if parsedMesh.bufferHasUV2:
 			reMesh.shadowHeader.uvCount = 2
 		else:
 			reMesh.shadowHeader.uvCount = 1
 		reMesh.shadowHeader.offsetOffset = reMesh.fileHeader.shadowMeshGroupOffset + sd.LOD_HEADER_OFFSET_LIST_OFFSET
-
+		
 		for linkedLOD in parsedMesh.shadowMeshLinkedLODList:
 			mainMeshLODIndex = parsedMesh.mainMeshLODList.index(linkedLOD)
 			reMesh.shadowHeader.lodGroupOffsetList.append(
 				reMesh.lodHeader.lodGroupOffsetList[mainMeshLODIndex])
-
+		
 		# currentOffset = LOD Group 0 offset
 		currentOffset = getPaddedPos(reMesh.shadowHeader.offsetOffset + 8 * reMesh.shadowHeader.lodGroupCount, 16)
-	# It turns out shadow meshes can only use existing lods from the main mesh so this was pointless
-	# Skeleton / AABB
+	return currentOffset
+
+def writeSkeleton(parsedMesh, reMesh, sd, currentOffset):
+	#Writes the skeleton, bone inverse-bind matrices and bone bounding boxes. Returns the
+	#advanced currentOffset.
 	if parsedMesh.skeleton != None:
 		reMesh.fileHeader.skeletonOffset = currentOffset
 		reMesh.skeletonHeader = Skeleton()
 		reMesh.skeletonHeader.boneCount = len(parsedMesh.skeleton.boneList)
 		reMesh.skeletonHeader.remapCount = len(parsedMesh.skeleton.weightedBones)
-
+		
 		# Do AABB struct while looping through bones
 		if reMesh.skeletonHeader.remapCount > 0:
 			reMesh.boneBoundingBoxHeader = BoneAABBGroup()
@@ -2150,7 +2108,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			reMesh.skeletonHeader.localMatList.append(parsedBone.localMatrix)
 			reMesh.skeletonHeader.worldMatList.append(parsedBone.worldMatrix)
 			reMesh.skeletonHeader.inverseMatList.append(parsedBone.inverseMatrix)
-
+		
 			bone = Bone()
 			bone.boneIndex = boneIndex
 			bone.boneParent = parsedBone.parentIndex
@@ -2159,16 +2117,22 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			bone.boneSymmetric = parsedBone.symmetryBoneIndex
 			bone.useSecondaryWeight = parsedBone.useSecondaryWeight
 			reMesh.skeletonHeader.boneInfoList.append(bone)
-
+		
 		reMesh.skeletonHeader.boneHeaderOffset = getPaddedPos(
 			reMesh.fileHeader.skeletonOffset + sd.SKELETON_REMAP_TABLE_OFFSET + 2 * reMesh.skeletonHeader.remapCount,
 			16)
 		reMesh.skeletonHeader.boneLocalMatrixOffset = reMesh.skeletonHeader.boneHeaderOffset + reMesh.skeletonHeader.boneCount * sd.BONE_INFO_ENTRY_SIZE
 		reMesh.skeletonHeader.boneWorldMatrixOffset = reMesh.skeletonHeader.boneLocalMatrixOffset + reMesh.skeletonHeader.boneCount * sd.MATRIX_SIZE
 		reMesh.skeletonHeader.boneInverseMatrixOffset = reMesh.skeletonHeader.boneWorldMatrixOffset + reMesh.skeletonHeader.boneCount * sd.MATRIX_SIZE
-
+		
 		currentOffset = reMesh.skeletonHeader.boneInverseMatrixOffset + reMesh.skeletonHeader.boneCount * sd.MATRIX_SIZE
-	# Name lists and remaps
+	return currentOffset
+
+def writeNamesAndBlendRegions(parsedMesh, reMesh, meshVersion, version, sd, currentOffset, parsedSubMeshToSubMeshDataDict):
+	#Writes the string tables (bone/submesh/blendshape names), the submesh-to-material remap
+	#and the blendshape regions. Returns the advanced currentOffset plus the Pragmata blendshape
+	#bookkeeping (blendDeltaBytes, blendPerLodList) consumed by assembleMeshBuffers and the
+	#contentFlag bit set.
 	currentNameIndex = 0
 	for index, materialName in enumerate(parsedMesh.materialNameList):
 		reMesh.rawNameList.append(materialName)
@@ -2197,7 +2161,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			reMesh.blendShapeNameRemapList.append(len(reMesh.rawNameList))
 			reMesh.rawNameList.append(name)
 			currentNameIndex += 1
-
+	
 	reMesh.fileHeader.materialNameRemapOffset = currentOffset
 	currentOffset = getPaddedPos(currentOffset + (len(reMesh.materialNameRemapList) * 2), 16)
 	if parsedMesh.skeleton != None:
@@ -2206,7 +2170,7 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 	if blendNames is not None:
 		reMesh.fileHeader.blendShapeNameOffset = currentOffset
 		currentOffset = getPaddedPos(currentOffset + (len(reMesh.blendShapeNameRemapList) * 2), 16)
-
+	
 	reMesh.fileHeader.nameOffsetsOffset = currentOffset
 	currentOffset = getPaddedPos(currentOffset + (len(reMesh.rawNameList) * 8),
 	                             16)  # Get the position after all string offsets
@@ -2220,22 +2184,28 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		reMesh.fileHeader.aabbOffset = currentOffset
 		reMesh.boneBoundingBoxHeader.offset = currentOffset + sd.AABB_OFFSET
 		currentOffset += sd.AABB_OFFSET + reMesh.boneBoundingBoxHeader.count * sd.AABB_SIZE
-
+	
 	# Retail Pragmata stores a 16-byte normal-recalc stub immediately before the blend header.
 	if version == VERSION_PRAG and blendPerLodList is not None:
 		reMesh.fileHeader.normalRecalcOffset = currentOffset
 		reMesh.normalRecalcRegionBytes = struct.pack("<Q", 1) + bytes(8)
 		currentOffset = getPaddedPos(currentOffset + 16, 16)
-
+	
 	# Pragmata typing-2 blend shape struct region (header + per-LOD data), placed before the mesh buffer.
 	if blendPerLodList is not None:
 		reMesh.fileHeader.blendShapesOffset = currentOffset
 		reMesh.blendShapeRegionBytes = serializePragmataBlendShapeRegion(blendPerLodList, currentOffset)
 		currentOffset = getPaddedPos(currentOffset + len(reMesh.blendShapeRegionBytes), 16)
+	return currentOffset, blendDeltaBytes, blendPerLodList
 
-	# Mesh Buffer
+def assembleMeshBuffers(parsedMesh, reMesh, version, sd, currentOffset, blendDeltaBytes, buffers):
+	#Chunks the six vertex-data streams into declared vertex buffer elements, writes the mesh
+	#buffer header and reconstructs the Pragmata vanilla weight buffers. Returns the advanced
+	#currentOffset, the two unknown content-flag inputs and the (possibly rebound) weight and
+	#extra-weight buffers that the caller must close.
+	vertexPosBuffer, norTanBuffer, UVBuffer, UV2Buffer, weightBuffer, colorBuffer, faceBuffer, extraWeightBuffer, secondaryWeightBuffer = buffers
 	reMesh.fileHeader.meshOffset = currentOffset
-
+	
 	reMesh.meshBufferHeader = MeshBufferHeader()
 	# Retail Pragmata extra-weight (type 7) is not Wilds' 7th-12th influences: it is a second
 	# index pack the face shader fetches. Blender cannot represent it as vertex groups, so
@@ -2256,46 +2226,22 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			extraWeightBuffer = BytesIO(vanExtra)
 			extraWeightBuffer.seek(0, 2)
 			print(f"Pragmata: using imported type-7 extra-weight stream ({want} bytes); vertex-group edits are not written")
-
+	
 	# Collect vertex buffer chunks as bytes, join once at the end (avoids repeated bytearray.extend reallocations)
 	vertexBufferChunks = []
 	vertexElementTuples = []
 	currentBufferOffset = 0
-	if vertexPosBuffer.tell() != 0:
-		vertexElementTuples.append((0, 12, currentBufferOffset))
-		currentBufferOffset += vertexPosBuffer.tell()
-		vertexBufferChunks.append(vertexPosBuffer.getvalue())
-
-	if norTanBuffer.tell() != 0:
-		vertexElementTuples.append((1, 8, currentBufferOffset))
-		currentBufferOffset += norTanBuffer.tell()
-		vertexBufferChunks.append(norTanBuffer.getvalue())
-
-	if UVBuffer.tell() != 0:
-		vertexElementTuples.append((2, 4, currentBufferOffset))
-		currentBufferOffset += UVBuffer.tell()
-		vertexBufferChunks.append(UVBuffer.getvalue())
-
-	if UV2Buffer.tell() != 0:
-		vertexElementTuples.append((3, 4, currentBufferOffset))
-		currentBufferOffset += UV2Buffer.tell()
-		vertexBufferChunks.append(UV2Buffer.getvalue())
-
-	if weightBuffer.tell() != 0:
-		vertexElementTuples.append((4, 16, currentBufferOffset))
-		currentBufferOffset += weightBuffer.tell()
-		vertexBufferChunks.append(weightBuffer.getvalue())
-
-	if colorBuffer.tell() != 0:
-		vertexElementTuples.append((5, 4, currentBufferOffset))
-		currentBufferOffset += colorBuffer.tell()
-		vertexBufferChunks.append(colorBuffer.getvalue())
-
-	if extraWeightBuffer.tell() != 0:
-		vertexElementTuples.append((7, 16, currentBufferOffset))
-		currentBufferOffset += extraWeightBuffer.tell()
-		vertexBufferChunks.append(extraWeightBuffer.getvalue())
-
+	# (buffer, element typing, size) per declared vertex element, in buffer layout order.
+	for buffer, typing, elementSize in ((vertexPosBuffer, 0, 12), (norTanBuffer, 1, 8),
+	                                    (UVBuffer, 2, 4), (UV2Buffer, 3, 4),
+	                                    (weightBuffer, 4, 16), (colorBuffer, 5, 4),
+	                                    (extraWeightBuffer, 7, 16)):
+		bufferSize = buffer.tell()
+		if bufferSize != 0:
+			vertexElementTuples.append((typing, elementSize, currentBufferOffset))
+			currentBufferOffset += bufferSize
+			vertexBufferChunks.append(buffer.getvalue())
+	
 	# Pragmata typing-2 tail: after declared vertex elements the buffer is
 	#   [aux 16*nverts][extra 896][u32 vert map][float16 xyz deltas]
 	# MeshBufferHeader.sunbreakSecondUnknown holds (mapOffset, deltaOffset) as two u32s.
@@ -2328,10 +2274,10 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			f"Pragmata blend tail: aux={len(aux)} mapOff={mapOff} deltaOff={deltaOff} "
 			f"deltas={len(blendDeltaBytes)} vtxBuf={currentBufferOffset}"
 		)
-
+	
 	# Single allocation: join all chunks into the final vertex buffer
 	reMesh.meshBufferHeader.vertexBuffer = bytearray().join(vertexBufferChunks)
-
+	
 	reMesh.meshBufferHeader.faceBuffer = faceBuffer.getvalue()
 	# print(len(reMesh.meshBufferHeader.faceBuffer))
 	# Build numpy structured array directly from collected tuples
@@ -2346,21 +2292,21 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 	reMesh.meshBufferHeader.vertexBufferOffset = getPaddedPos(
 		reMesh.meshBufferHeader.vertexElementOffset + reMesh.meshBufferHeader.vertexElementCount * sd.VERTEX_ELEMENT_SIZE,
 		16)
-
+	
 	# TODO check on this, padding vertex buffer size might cause issues in some games
 	reMesh.meshBufferHeader.vertexBufferSize = getPaddedPos(currentBufferOffset, 16)
 	reMesh.meshBufferHeader.faceBufferOffset = getPaddedPos(
 		reMesh.meshBufferHeader.vertexBufferOffset + reMesh.meshBufferHeader.vertexBufferSize, 16)
 	reMesh.meshBufferHeader.faceBufferSize = faceBuffer.tell()
-
+	
 	# Content Flags
 	unknFlag16 = False  # Bit index 15
 	unknFlag10 = False  # Bit index 9
-
+	
 	if version < VERSION_SF6:
 		reMesh.meshBufferHeader.vertexElementSize = 31872
 		reMesh.meshBufferHeader.block2FaceBufferOffset = reMesh.meshBufferHeader.faceBufferSize
-
+	
 	if version >= VERSION_SF6:
 		reMesh.fileHeader.sf6UnknCount = 84
 		reMesh.meshBufferHeader.vertexElementSize = 27104
@@ -2372,11 +2318,11 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 		                                                       16)
 		unknFlag16 = True
 		unknFlag10 = True
-
+	
 	if version == VERSION_SF6:
 		reMesh.fileHeader.sf6UnknCount = 6
 		reMesh.fileHeader.lodGroupNameHash = 3407096719
-
+	
 	# Final Pragmata backfill: the tail path above may already have set these, and the
 	# SF6 defaults (27104 / -1) must never leak into the retail header.
 	pragmataAux = getattr(parsedMesh, "pragmataBlendAux", None)
@@ -2385,9 +2331,63 @@ def ParsedREMeshToREMesh(parsedMesh, meshVersion):
 			reMesh.meshBufferHeader.vertexElementSize = int(pragmataAux["veSize"])
 		if pragmataAux.get("unkn1") is not None:
 			reMesh.meshBufferHeader.unkn1 = int(pragmataAux["unkn1"])
-
+	
 	currentOffset = getPaddedPos(
 		reMesh.meshBufferHeader.faceBufferOffset + reMesh.meshBufferHeader.faceBufferSize, 16)
+	return currentOffset, unknFlag16, unknFlag10, weightBuffer, extraWeightBuffer
+
+
+def ParsedREMeshToREMesh(parsedMesh, meshVersion):
+	print(f"Mesh Version:{meshVersion}")
+	version = meshFileVersionToNewVersionDict.get(meshVersion, getNearestRemapVersion(meshVersion))
+	print(f"Remapped Version:{version}")
+	sd = sizeData(version)
+	currentOffset = 0
+	currentVertexIndex = 0
+	currentFaceIndex = 0
+
+	totalTangentGenerationTime = 0.0 # For benchmarking the time it takes tangents to calculate
+
+	# Buffers
+	vertexPosBuffer = BytesIO()
+	norTanBuffer = BytesIO()
+	UVBuffer = BytesIO()
+	UV2Buffer = BytesIO()
+	weightBuffer = BytesIO()
+	colorBuffer = BytesIO()
+	faceBuffer = BytesIO()
+	extraWeightBuffer = BytesIO()  # MH Wilds extended weight buffer
+	secondaryWeightBuffer = BytesIO()  # DD2 shapekey
+
+	buffers = (vertexPosBuffer, norTanBuffer, UVBuffer, UV2Buffer, weightBuffer, colorBuffer, faceBuffer, extraWeightBuffer, secondaryWeightBuffer)
+
+	parsedSubMeshToSubMeshDataDict = dict()
+
+	reMesh = REMesh()
+
+	reMesh.fileHeader.version = meshFileVersionToInternalVersionDict.get(
+		meshVersion,
+		getNearestRemapVersion(meshVersion)
+	)
+	# TODO Fix shadow mesh export, causes game to crash. It seems shadow meshes can't have unique lods, even if the sub mesh offsets are still shared. They might only be able to use the existing full lods from the main mesh
+	# parsedMesh.shadowMeshLODList.clear()
+
+	# Main Meshes
+	if parsedMesh.mainMeshLODList != []:
+		currentOffset, currentVertexIndex, currentFaceIndex, totalTangentGenerationTime = writeMainMeshLODs(
+			parsedMesh, reMesh, sd, version, currentOffset, currentVertexIndex, currentFaceIndex,
+			parsedSubMeshToSubMeshDataDict, buffers)
+	print(f"Tangent calculation took {formatMs(totalTangentGenerationTime)} ms.")
+	# Shadow Meshes
+	currentOffset = writeShadowMeshes(parsedMesh, reMesh, sd, currentOffset)
+	# Skeleton / AABB
+	currentOffset = writeSkeleton(parsedMesh, reMesh, sd, currentOffset)
+	# Name lists and remaps
+	currentOffset, blendDeltaBytes, blendPerLodList = writeNamesAndBlendRegions(
+		parsedMesh, reMesh, meshVersion, version, sd, currentOffset, parsedSubMeshToSubMeshDataDict)
+	# Mesh Buffer
+	currentOffset, unknFlag16, unknFlag10, weightBuffer, extraWeightBuffer = assembleMeshBuffers(
+		parsedMesh, reMesh, version, sd, currentOffset, blendDeltaBytes, buffers)
 	# DD2 secondary weights reuse sunbreakSecondUnknown as a byte length. Pragmata/RE9
 	# store (mapOffset, deltaOffset) there; do not overwrite it.
 	if version >= VERSION_DD2 and version not in (VERSION_PRAG, VERSION_RE9):
@@ -2438,7 +2438,7 @@ def readREMesh(filepath, lodTarget=None):
 
 	# Precheck to see if user imported a headerless streaming mesh
 	magic = read_uint(file)
-	if magic != 1213416781 and "streaming" in filepath:
+	if magic != MESH_FILE_MAGIC and "streaming" in filepath:
 		raiseError(
 			"Attempted to import a streaming mesh file. Streaming mesh files cannot be imported directly.\nImport the mesh file that has same path and name that's not in the streaming folder.")
 	file.seek(0)
@@ -2454,7 +2454,7 @@ def readREMesh(filepath, lodTarget=None):
 				with openFileRead(streamingMeshPath, MESH_IO_BUFFER_SIZE) as streamFile:
 					streamingBuffer = streamFile.read()
 				print(f"Loaded {len(streamingBuffer)} bytes from streaming mesh at {streamingMeshPath}")
-	if magic == 1498173517 and IMPORT_MPLY:  # MPLY Mesh
+	if magic == MPLY_FILE_MAGIC and IMPORT_MPLY:  # MPLY Mesh
 		reMeshFile = REMeshMPLY()
 		print("Loading MPLY mesh.")
 	else:
@@ -2477,3 +2477,4 @@ def writeREMesh(reMeshFile, filepath):
 	reMeshFile.meshVersion = meshVersion
 	with openFileWrite(filepath, MESH_IO_BUFFER_SIZE) as file:
 		reMeshFile.write(file, version)
+
