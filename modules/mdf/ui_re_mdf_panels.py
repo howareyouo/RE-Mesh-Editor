@@ -42,6 +42,7 @@ class OBJECT_PT_MDFObjectModePanel(Panel):
 		layout.operator("re_mdf.nullify_texture_bindings")
 		layout.operator("re_mdf.clear_unused_textures")
 		layout.operator("re_mdf.reindex_materials")
+		layout.operator("re_mdf.replace_material_names", icon = "FILE_REFRESH")
 		
 		
 class OBJECT_PT_MDFMaterialPresetPanel(Panel):

@@ -7,7 +7,9 @@ from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
 from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..naming import parseREMeshObjectMaterialName,stripBlenderUserSuffix
-from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE
+from ..blender_utils import (showErrorMessageBox, createEmpty, findMeshCollectionForMDF,
+                             getMaterialNameReplacePlan, iterMeshesUsingMaterialName,
+                             MDF_MATERIAL_TYPE, replaceMaterialNameText)
 from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,fixTexPath,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
@@ -49,6 +51,62 @@ class WM_OT_ReindexMaterials(Operator):
 		reindexMaterials(bpy.context.scene.re_mdf_toolpanel.mdfCollection)
 		self.report({"INFO"},"Reindexed materials.")
 		return {'FINISHED'}
+
+class WM_OT_ReplaceMaterialNames(Operator):
+	bl_label = "Find and Replace Material Names"
+	bl_description = "Find and replace text in the name of every material of the active MDF collection.\nThe meshes using each material are renamed with it, so both sides keep matching"
+	bl_idname = "re_mdf.replace_material_names"
+	bl_options = {'UNDO'}
+
+	findValue : StringProperty(name = "Find")
+	replaceValue : StringProperty(name = "Replace With")
+
+	@classmethod
+	def poll(self,context):
+		return context.scene.re_mdf_toolpanel.mdfCollection is not None
+
+	def execute(self, context):
+		mdfCollection = context.scene.re_mdf_toolpanel.mdfCollection
+		meshCollection = findMeshCollectionForMDF(mdfCollection)
+		renamedMaterialCount, renamedMeshCount, error = replaceMaterialNameText(
+			meshCollection, mdfCollection, self.findValue, self.replaceValue)
+		if error != None:
+			self.report({"ERROR"}, error)
+			return {'CANCELLED'}
+		if renamedMaterialCount == 0:
+			self.report({"INFO"}, "No material name contains that text.")
+			return {'CANCELLED'}
+		self.report({"INFO"}, f"Renamed {renamedMaterialCount} materials and {renamedMeshCount} meshes.")
+		tag_redraw(context)
+		return {'FINISHED'}
+
+	def draw(self, context):
+		layout = self.layout
+		layout.prop(self, "findValue")
+		layout.prop(self, "replaceValue")
+		if self.findValue == "":
+			layout.label(text = "Enter the text to replace in the material names.", icon = 'INFO')
+			return
+		mdfCollection = context.scene.re_mdf_toolpanel.mdfCollection
+		planList, error = getMaterialNameReplacePlan(mdfCollection, self.findValue, self.replaceValue)
+		if error != None:
+			layout.label(text = error, icon = 'ERROR')
+			return
+		if not planList:
+			layout.label(text = "No material name contains that text.", icon = 'INFO')
+			return
+		meshCollection = findMeshCollectionForMDF(mdfCollection)
+		meshCount = sum(len(list(iterMeshesUsingMaterialName(meshCollection, oldName)))
+		                for materialObj, oldName, newName in planList)
+		layout.label(text = f"{len(planList)} materials and {meshCount} meshes will be renamed.")
+		box = layout.box()
+		for materialObj, oldName, newName in planList[:10]:
+			box.label(text = f"{oldName}   ->   {newName}")
+		if len(planList) > 10:
+			box.label(text = f"...and {len(planList) - 10} more.")
+
+	def invoke(self,context,event):
+		return context.window_manager.invoke_props_dialog(self,width = 420)
 
 class WM_OT_AddPresetMaterial(Operator):
 	bl_label = "Add Preset Material"

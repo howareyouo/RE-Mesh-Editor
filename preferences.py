@@ -149,6 +149,11 @@ class REMeshPreferences(AddonPreferences):
 		description = "If a chunk path is detected when a mesh is imported, add it to the chunk path list automatically",
 		default = True
 	)
+	autoSyncMaterialNames: BoolProperty(
+		name="Auto Sync Material Names",
+		description = "Keep material names in sync between the meshes and the MDF when a mesh is renamed in the outliner.\nRenaming a mesh updates the MDF material of the same name and every other mesh piece that shares it (RE engine models are split into several meshes per material).\nRenaming a material in the MDF panel always renames the meshes, this option only controls the mesh to MDF direction",
+		default = True
+	)
 	chunkPathList_items: CollectionProperty(type=ChunkPathPropertyGroup)
 	chunkPathList_index: IntProperty(name="")
 	# addon updater preferences
@@ -207,6 +212,7 @@ class REMeshPreferences(AddonPreferences):
 		layout.prop(self, "useDDS")
 		layout.prop(self, "convertTexToPNG")
 		layout.prop(self, "modFileTrackingPollingRate")
+		layout.prop(self, "autoSyncMaterialNames")
 		
 		box = layout.box()
 		row = box.row()

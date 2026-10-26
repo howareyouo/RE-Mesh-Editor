@@ -105,6 +105,8 @@ To update this addon, navigate to Preferences > Add-ons > RE Mesh Editor and pre
 ### V0.66 - 3/20/2026
 * Fixed issue where certain materials would be set to use alpha blend when they shouldn't be.
 * Fixed issue where textures from DMC 5 wouldn't be loaded.
+* Material names now stay in sync between the meshes and the MDF. Renaming the material name in a mesh object name (the part after `__`) renames the MDF material of the same name and every other mesh piece that shares it; renaming a material in the RE MDF tab renames the meshes. Can be turned off with "Auto Sync Material Names" in the addon preferences.
+* Added "Find and Replace Material Names" to the RE MDF Tools panel: replaces text in the name of every material of the active MDF collection and renames the meshes using each of them. The replacement is refused as a whole when it would produce a duplicate, empty or `__` containing name.
 
 ### V0.65 - 3/2/2026
 * Meshlet (MPLY) model importing is now fully working. These are used for props and stage meshes. (Thanks shadowcookie)

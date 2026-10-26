@@ -1105,6 +1105,181 @@ def test_rename_meshes_syncs_mdf_materials(tmpDir):
           matObj2.re_mdf_material.materialName == "Cloth", matObj2.re_mdf_material.materialName)
 
 
+# ---------------------------------------------------------------- 2f. material name sync
+def test_material_name_sync(tmpDir):
+    """A material name lives in two places that have to match: the "__" suffix of every
+    mesh object using it and the MDF material entry. The engine splits one material over
+    several meshes, so renaming it in one place has to move every copy - in both
+    directions - and must never let two materials end up with the same name."""
+    from modules.mesh import blender_re_mesh_name_sync as nameSync
+
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    # Imported meshes live in a per-LOD child collection, which is itself named "*.mesh"
+    lodCol = bpy.data.collections.new("Main Mesh LOD0 - Body.mesh")
+    meshCol.children.link(lodCol)
+    pieceA = addOneFaceMesh(lodCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
+    pieceB = addOneFaceMesh(lodCol, "Group_0_Sub_1__Shirts_Mat", "Shirts_Mat", x=2)
+    pieceC = addOneFaceMesh(lodCol, "Group_0_Sub_2__Other_Mat", "Other_Mat", x=4)
+    shirtsMat = addMDFMaterialObject(mdfCol, "Material 00 (Shirts_Mat)", "Shirts_Mat")
+    otherMat = addMDFMaterialObject(mdfCol, "Material 01 (Other_Mat)", "Other_Mat")
+
+    # mesh -> MDF: renaming one piece in the outliner renames its siblings and the material
+    nameSync.refreshNameSnapshot()
+    pieceA.name = "Group_0_Sub_0__Cloth_Mat"
+    syncedCount = nameSync.syncRenamedMeshMaterials()
+    check("mesh rename syncs to the MDF material", syncedCount == 1, str(syncedCount))
+    check("mesh sharing the material is renamed too",
+          pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
+    check("mesh sharing the material keeps its numbering",
+          pieceB.name.startswith("Group_0_Sub_1__"), pieceB.name)
+    check("mesh using another material is untouched",
+          pieceC.name == "Group_0_Sub_2__Other_Mat", pieceC.name)
+    check("MDF material follows the mesh rename",
+          shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
+    check("MDF material object name follows the mesh rename",
+          shirtsMat.name == "Material 00 (Cloth_Mat)", shirtsMat.name)
+    check("unrelated MDF material untouched", otherMat.re_mdf_material.materialName == "Other_Mat",
+          otherMat.re_mdf_material.materialName)
+
+    # A rename onto a name another material already holds is refused, and the mesh name
+    # the outliner already accepted is put back.
+    nameSync.refreshNameSnapshot()
+    pieceB.name = "Group_0_Sub_1__Other_Mat"
+    check("conflicting mesh rename is not synced", nameSync.syncRenamedMeshMaterials() == 0)
+    check("refused mesh rename is undone", pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
+    check("refused mesh rename leaves the MDF material alone",
+          shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
+    check("refused mesh rename leaves the sibling alone",
+          pieceA.name == "Group_0_Sub_0__Cloth_Mat", pieceA.name)
+
+    # MDF -> mesh: the MDF panel is the other entry point, and renaming there has to
+    # reach every mesh piece, also when they sit directly in the mesh collection.
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    clothA = addOneFaceMesh(meshCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
+    clothB = addOneFaceMesh(meshCol, "Group_1_Sub_0__Shirts_Mat", "Shirts_Mat", x=2)
+    matObj = addMDFMaterialObject(mdfCol, "Material 00 (Shirts_Mat)", "Shirts_Mat")
+    nameSync.refreshNameSnapshot()
+
+    matObj.re_mdf_material.materialName = "Leather_Mat"
+
+    check("MDF panel rename renames the mesh using the material",
+          clothA.name == "Group_0_Sub_0__Leather_Mat", clothA.name)
+    check("MDF panel rename renames every mesh using the material",
+          clothB.name == "Group_1_Sub_0__Leather_Mat", clothB.name)
+    check("MDF panel rename keeps the MDF object name in step",
+          matObj.name == "Material 00 (Leather_Mat)", matObj.name)
+
+    # Refused duplicate: the panel can't reject the property write, so the sync undoes it
+    otherMat = addMDFMaterialObject(mdfCol, "Material 01 (Other_Mat)", "Other_Mat")
+    matObj.re_mdf_material.materialName = "Other_Mat"
+    check("duplicate material name is refused on the MDF side",
+          matObj.re_mdf_material.materialName == "Leather_Mat", matObj.re_mdf_material.materialName)
+    check("refused MDF rename restores the MDF object name",
+          matObj.name == "Material 00 (Leather_Mat)", matObj.name)
+    check("refused MDF rename leaves the other material alone",
+          otherMat.re_mdf_material.materialName == "Other_Mat", otherMat.re_mdf_material.materialName)
+    check("refused MDF rename leaves the meshes alone",
+          clothA.name == "Group_0_Sub_0__Leather_Mat" and clothB.name == "Group_1_Sub_0__Leather_Mat",
+          f"{clothA.name} / {clothB.name}")
+
+    # The plain case: a material used by a single mesh has no sibling to bring along
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    soloObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Solo_Mat", "Solo_Mat")
+    soloMat = addMDFMaterialObject(mdfCol, "Material 00 (Solo_Mat)", "Solo_Mat")
+    nameSync.refreshNameSnapshot()
+    soloObj.name = "Group_0_Sub_0__Single_Mat"
+    check("single-mesh rename is synced", nameSync.syncRenamedMeshMaterials() == 1)
+    check("single-mesh rename reaches the MDF material and its object name",
+          soloMat.re_mdf_material.materialName == "Single_Mat" and soloMat.name == "Material 00 (Single_Mat)",
+          f"{soloMat.re_mdf_material.materialName} / {soloMat.name}")
+
+
+# ---------------------------------------------------------------- 2g. material name find/replace
+def runReplaceOperator(findValue, replaceValue):
+    """Return the result and error text of the material name find/replace operator.
+
+    A refused operator reports {"ERROR"}, which bpy.ops turns into a RuntimeError."""
+    try:
+        return bpy.ops.re_mdf.replace_material_names(findValue=findValue, replaceValue=replaceValue), ""
+    except RuntimeError as err:
+        return {'CANCELLED'}, str(err)
+
+
+def test_replace_material_names(tmpDir):
+    """The RE MDF Tools "Find and Replace Material Names" operator replaces text in the
+    name of every material of the active MDF collection and renames the meshes bound to
+    each of them, so both sides keep matching."""
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    shirtsA = addOneFaceMesh(meshCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
+    shirtsB = addOneFaceMesh(meshCol, "Group_1_Sub_0__Shirts_Mat", "Shirts_Mat", x=2)
+    wornObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Shirts_Mat_Worn", "Shirts_Mat_Worn", x=4)
+    pantsObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Pants_Mat", "Pants_Mat", x=6)
+    shirtsMat = addMDFMaterialObject(mdfCol, "Material 00 (Shirts_Mat)", "Shirts_Mat")
+    wornMat = addMDFMaterialObject(mdfCol, "Material 01 (Shirts_Mat_Worn)", "Shirts_Mat_Worn")
+    pantsMat = addMDFMaterialObject(mdfCol, "Material 02 (Pants_Mat)", "Pants_Mat")
+
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+    result = bpy.ops.re_mdf.replace_material_names(findValue="Shirts", replaceValue="Cloth")
+
+    check("material name find/replace operator finishes", result == {'FINISHED'}, str(result))
+    check("material name replaced in the MDF",
+          shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
+    check("second matching material replaced too",
+          wornMat.re_mdf_material.materialName == "Cloth_Mat_Worn", wornMat.re_mdf_material.materialName)
+    check("non-matching material untouched",
+          pantsMat.re_mdf_material.materialName == "Pants_Mat", pantsMat.re_mdf_material.materialName)
+    check("MDF material object names follow", shirtsMat.name == "Material 00 (Cloth_Mat)" and
+          wornMat.name == "Material 01 (Cloth_Mat_Worn)", f"{shirtsMat.name} / {wornMat.name}")
+    check("meshes using a replaced material renamed", shirtsA.name == "Group_0_Sub_0__Cloth_Mat", shirtsA.name)
+    check("every mesh piece of the material renamed", shirtsB.name == "Group_1_Sub_0__Cloth_Mat", shirtsB.name)
+    check("mesh with the longer name renamed", wornObj.name == "Group_0_Sub_0__Cloth_Mat_Worn", wornObj.name)
+    check("mesh of a non-matching material untouched", pantsObj.name == "Group_0_Sub_0__Pants_Mat", pantsObj.name)
+
+    # A replacement may contain the text it replaces: the meshes of a later material
+    # must not be resolved through names an earlier rename already produced. "Aa" and
+    # "Aaa" collide after the replacement ("Aaa" and "Aaaaa"), which only the whole-pass
+    # resolution in replaceMaterialNameText keeps apart.
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    shortObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Aa", "Aa", x=0)
+    longObj = addOneFaceMesh(meshCol, "Group_0_Sub_1__Aaa", "Aaa", x=2)
+    shortMat = addMDFMaterialObject(mdfCol, "Material 00 (Aa)", "Aa")
+    longMat = addMDFMaterialObject(mdfCol, "Material 01 (Aaa)", "Aaa")
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+    result = bpy.ops.re_mdf.replace_material_names(findValue="a", replaceValue="aa")
+    check("overlapping replacement is applied", result == {'FINISHED'}, str(result))
+    check("overlapping replacement covers both materials",
+          shortMat.re_mdf_material.materialName == "Aaa" and longMat.re_mdf_material.materialName == "Aaaaa",
+          f"{shortMat.re_mdf_material.materialName} / {longMat.re_mdf_material.materialName}")
+    check("overlapping replacement renames each mesh once",
+          shortObj.name == "Group_0_Sub_0__Aaa" and longObj.name == "Group_0_Sub_1__Aaaaa",
+          f"{shortObj.name} / {longObj.name}")
+
+    # The whole pass is refused when it would give two materials the same name
+    clearSceneObjectsAndCollections()
+    meshCol, mdfCol = makeMeshCollectionScene("Body")
+    targetObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__BodyA", "BodyA", x=0)
+    matchedObj = addOneFaceMesh(meshCol, "Group_0_Sub_1__XBodyA", "XBodyA", x=2)
+    matchedMat = addMDFMaterialObject(mdfCol, "Material 00 (XBodyA)", "XBodyA")
+    addMDFMaterialObject(mdfCol, "Material 01 (BodyA)", "BodyA")
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+    result, error = runReplaceOperator("X", "")
+    check("duplicate material name aborts the replacement", result == {'CANCELLED'}, str(result))
+    check("duplicate refusal spells the material name as it is",
+          '"BodyA"' in error, error)
+    check("aborted replacement leaves the MDF alone",
+          matchedMat.re_mdf_material.materialName == "XBodyA", matchedMat.re_mdf_material.materialName)
+    check("aborted replacement leaves the meshes alone",
+          targetObj.name == "Group_0_Sub_0__BodyA" and matchedObj.name == "Group_0_Sub_1__XBodyA",
+          f"{targetObj.name} / {matchedObj.name}")
+    result, error = runReplaceOperator("", "X")
+    check("empty find text is refused", result == {'CANCELLED'} and "empty" in error, f"{result} {error}")
+
+
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
     test_addon_props()
@@ -1152,6 +1327,14 @@ def main():
         test_rename_meshes_syncs_mdf_materials(tmpDir)
     except Exception:
         check("rename-meshes MDF sync test crashed", False, traceback.format_exc())
+    try:
+        test_material_name_sync(tmpDir)
+    except Exception:
+        check("material name sync test crashed", False, traceback.format_exc())
+    try:
+        test_replace_material_names(tmpDir)
+    except Exception:
+        check("material name find/replace test crashed", False, traceback.format_exc())
     try:
         test_streaming_tex(tmpDir)
     except Exception:

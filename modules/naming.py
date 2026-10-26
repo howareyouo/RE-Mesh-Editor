@@ -69,6 +69,17 @@ def formatREMeshObjectName(groupID, subIndex, materialName, lodPrefix = ""):
 	return f"{lodPrefix}Group_{groupID}_Sub_{subIndex}__{materialName}"
 
 
+def replaceREMeshMaterialSuffix(objectName, materialName):
+	"""Swap the material name in an RE mesh object name.
+
+	Only the part after the first "__" is replaced, so the "[LOD_N_]Group_<G>_Sub_<S>"
+	prefix is kept byte-for-byte, including hand-edited numbering or LOD/shadow
+	variants. Returns the name unchanged when it carries no material suffix."""
+	if "__" not in objectName:
+		return objectName
+	return objectName.split("__", 1)[0] + "__" + materialName
+
+
 def formatREMaterialObjectName(base, index, materialName):
 	"""Build the indexed material entry object name used by MDF/SFur collections.
 

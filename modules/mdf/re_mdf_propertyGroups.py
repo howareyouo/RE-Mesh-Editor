@@ -15,7 +15,9 @@ from bpy.props import (StringProperty,
 from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
-from ..blender_utils import isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName
+from ..blender_utils import (isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName,
+                             getMDFMaterialName, materialNameSync, setMDFMaterialName, syncMaterialNamesFromMDFMaterial)
+from ..gen_functions import raiseWarning
 from ..naming import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
 
 
@@ -187,16 +189,31 @@ def update_listFilter(self, context):
 	
 def update_materialName(self, context):
 	parentObj = self.id_data
+	if parentObj == None:
+		return
+	#The object name still carries the previous material name at this point, so read it
+	#before the rename below overwrites it: it identifies the meshes and any duplicate
+	#MDF entry that have to follow this rename.
+	oldObjectName = parentObj.name
+	oldMaterialName = getMDFMaterialName(parentObj)
 	try:
 		#print(parentObj)
-		if parentObj != None:
-			split = parentObj.name.split("(",1)
-			if len(split) == 2:
-				parentObj.name = f"{split[0]}({self.materialName})"
-			else:
-				parentObj.name = formatREMaterialObjectName("Material", 0, self.materialName)
+		split = parentObj.name.split("(",1)
+		if len(split) == 2:
+			parentObj.name = f"{split[0]}({self.materialName})"
+		else:
+			parentObj.name = formatREMaterialObjectName("Material", 0, self.materialName)
 	except:
 		pass
+	_, error = syncMaterialNamesFromMDFMaterial(parentObj, oldMaterialName, self.materialName)
+	if error != None:
+		raiseWarning(f"Material name was not changed: {error}")
+		#The write landed before this callback ran and Blender can't veto it, so put the
+		#property and the object name back - a duplicate name in the MDF would bind the
+		#meshes to the wrong material.
+		with materialNameSync():
+			setMDFMaterialName(parentObj, oldMaterialName)
+			parentObj.name = oldObjectName
 
 def update_FlagsFromInt(self, context):
 	if not self.internal_changingFlagValues: 

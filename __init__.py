@@ -44,6 +44,8 @@ from .modules.mesh.ui_re_mesh_panels import (
 	OBJECT_PT_MeshArmatureToolsPanel,
 	OBJECT_PT_REAssetExtensionPanel,
 	)
+# Mesh rename -> material name sync (timer + load handler, see register below)
+from .modules.mesh import blender_re_mesh_name_sync
 
 
 #mdf
@@ -79,6 +81,7 @@ from .modules.mdf.re_mdf_propertyGroups import (
 from .modules.mdf.re_mdf_operators import (
 	WM_OT_NewMDFHeader,
 	WM_OT_ReindexMaterials,
+	WM_OT_ReplaceMaterialNames,
 	WM_OT_AddPresetMaterial,
 	WM_OT_SavePreset,
 	WM_OT_OpenPresetFolder,
@@ -243,6 +246,7 @@ classes = [
 	#operators
 	WM_OT_NewMDFHeader,
 	WM_OT_ReindexMaterials,
+	WM_OT_ReplaceMaterialNames,
 	WM_OT_AddPresetMaterial,
 	WM_OT_SavePreset,
 	WM_OT_OpenPresetFolder,
@@ -389,9 +393,13 @@ def register():
 		bpy.utils.register_class(TEX_FH_drag_import)
 		bpy.utils.register_class(FBXSKEL_FH_drag_import)
 		bpy.utils.register_class(SFUR_FH_drag_import)
+
+	#Timer + load handler that keep renamed mesh material names in sync with the MDF
+	blender_re_mesh_name_sync.register()
 		
 	
 def unregister():
+	blender_re_mesh_name_sync.unregister()
 	del bpy.types.WindowManager.enableModFileTracking
 	del bpy.types.WindowManager.re_mdf_findreplace
 	del bpy.types.Scene.re_mdf_toolpanel
