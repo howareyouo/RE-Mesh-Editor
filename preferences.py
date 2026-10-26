@@ -154,6 +154,11 @@ class REMeshPreferences(AddonPreferences):
 		description = "Keep material names in sync between the meshes and the MDF when a mesh is renamed in the outliner.\nRenaming a mesh updates the MDF material of the same name and every other mesh piece that shares it (RE engine models are split into several meshes per material).\nRenaming a material in the MDF panel always renames the meshes, this option only controls the mesh to MDF direction",
 		default = True
 	)
+	autoRenameTextureFiles: BoolProperty(
+		name="Auto Rename Texture Files",
+		description = "Rename the .tex files on disk when the path of a texture binding is changed in the MDF panel, so the binding keeps pointing at a file that exists.\nOnly a name change inside the same folder renames a file, and nothing is renamed when the new name is already taken.\nThe files are renamed outside of Blender, so this is not undone by Blender's undo",
+		default = True
+	)
 	chunkPathList_items: CollectionProperty(type=ChunkPathPropertyGroup)
 	chunkPathList_index: IntProperty(name="")
 	# addon updater preferences
@@ -213,6 +218,7 @@ class REMeshPreferences(AddonPreferences):
 		layout.prop(self, "convertTexToPNG")
 		layout.prop(self, "modFileTrackingPollingRate")
 		layout.prop(self, "autoSyncMaterialNames")
+		layout.prop(self, "autoRenameTextureFiles")
 		
 		box = layout.box()
 		row = box.row()

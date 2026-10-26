@@ -107,6 +107,7 @@ To update this addon, navigate to Preferences > Add-ons > RE Mesh Editor and pre
 * Fixed issue where textures from DMC 5 wouldn't be loaded.
 * Material names now stay in sync between the meshes and the MDF. Renaming the material name in a mesh object name (the part after `__`) renames the MDF material of the same name and every other mesh piece that shares it; renaming a material in the RE MDF tab renames the meshes. Can be turned off with "Auto Sync Material Names" in the addon preferences.
 * Added "Find and Replace Material Names" to the RE MDF Tools panel: replaces text in the name of every material of the active MDF collection and renames the meshes using each of them. The replacement is refused as a whole when it would produce a duplicate, empty or `__` containing name.
+* Changing a texture path in the Texture Bindings list now renames the matching `.tex` files on disk, keeping the version suffix and the streaming copy, and updates the other bindings that used the same file. Files are only renamed when the name changes inside the same folder and the new name is free. Can be turned off with "Auto Rename Texture Files" in the addon preferences.
 
 ### V0.65 - 3/2/2026
 * Meshlet (MPLY) model importing is now fully working. These are used for props and stage meshes. (Thanks shadowcookie)

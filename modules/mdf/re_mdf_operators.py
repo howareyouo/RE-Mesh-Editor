@@ -15,6 +15,8 @@ from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
 from .file_re_mdf import getMDFVersionToGameName
+from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureFileBaseName,
+                                           syncTextureFileFromBindingPath, texturePathSync)
 
 class WM_OT_NewMDFHeader(Operator):
 	bl_label = "Create MDF Collection"
@@ -270,22 +272,30 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 		if not findReplacePairs:
 			return {'CANCELLED'}
 		if frp.replaceAllMaterials:
-			for obj in bpy.data.objects:
-				if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
-					material = obj.re_mdf_material
-					for entry in material.textureBindingList_items:
-						for findVal, replaceVal in findReplacePairs:
-							old_count = entry.path.count(findVal)
-							entry.path = entry.path.replace(findVal, replaceVal)
-							replaceCount += old_count
+			bindingList = [entry for obj in bpy.data.objects if obj.get("~TYPE") == MDF_MATERIAL_TYPE
+			               for entry in obj.re_mdf_material.textureBindingList_items]
 		elif context.active_object and context.active_object.get("~TYPE") == MDF_MATERIAL_TYPE:
-			material = context.active_object.re_mdf_material
-			for entry in material.textureBindingList_items:
-				for findVal, replaceVal in findReplacePairs:
-					replaceCount += entry.path.count(findVal)
-					entry.path = entry.path.replace(findVal,replaceVal)
+			bindingList = list(context.active_object.re_mdf_material.textureBindingList_items)
 		else:
 			return {'CANCELLED'}
+		pathPlanList = []
+		for entry in bindingList:
+			newPath = entry.path
+			for findVal, replaceVal in findReplacePairs:
+				replaceCount += newPath.count(findVal)
+				newPath = newPath.replace(findVal, replaceVal)
+			if newPath != entry.path:
+				pathPlanList.append((entry, entry.path, newPath))
+		#Every path is written first, with the file sync held off: the sync renames the
+		#files of a changed binding and rewrites the bindings that share them, which
+		#would feed the pass its own results if it ran while paths were being computed.
+		with texturePathSync():
+			for entry, oldPath, newPath in pathPlanList:
+				entry.path = newPath
+		for entry, oldPath, newPath in pathPlanList:
+			_, _, error = syncTextureFileFromBindingPath(entry, oldPath, newPath)
+			if error != None:
+				self.report({"WARNING"}, error)
 		self.report({"INFO"},f"Replaced {replaceCount} instances.")
 		return {'FINISHED'}
 	
@@ -359,24 +369,27 @@ class WM_OT_NullifyTextureBindings(Operator):
 		except Exception as err:
 			print(f"Failed to load {jsonPath} - {err}")
 		replaceCount = 0
-		for obj in bpy.context.selected_objects:
-			if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
-				material = obj.re_mdf_material
-				if material.gameName != "":
-					gameName = material.gameName
-				else:
-					print(f"Game name not found on {material.materialName} falling back to active game")
-					gameName = bpy.context.scene.re_mdf_toolpanel.activeGame
-				for entry in material.textureBindingList_items:
-					if entry.textureType in texTypeDict:
-						if gameName in texTypeDict[entry.textureType]:
-							entry.path = texTypeDict[entry.textureType][gameName]
-							replaceCount += 1
-						elif "generic" in texTypeDict[entry.textureType]:
-							entry.path = texTypeDict[entry.textureType]["generic"]
-							replaceCount += 1
-						else:
-							print(f"Unknown texture type {entry.textureType} on {material.materialName}, skipping.")
+		#The null paths are written on purpose: nothing has to move on disk, so the
+		#binding update callback must not rename texture files here.
+		with texturePathSync():
+			for obj in bpy.context.selected_objects:
+				if obj.get("~TYPE") == MDF_MATERIAL_TYPE:
+					material = obj.re_mdf_material
+					if material.gameName != "":
+						gameName = material.gameName
+					else:
+						print(f"Game name not found on {material.materialName} falling back to active game")
+						gameName = bpy.context.scene.re_mdf_toolpanel.activeGame
+					for entry in material.textureBindingList_items:
+						if entry.textureType in texTypeDict:
+							if gameName in texTypeDict[entry.textureType]:
+								entry.path = texTypeDict[entry.textureType][gameName]
+								replaceCount += 1
+							elif "generic" in texTypeDict[entry.textureType]:
+								entry.path = texTypeDict[entry.textureType]["generic"]
+								replaceCount += 1
+							else:
+								print(f"Unknown texture type {entry.textureType} on {material.materialName}, skipping.")
 		if replaceCount > 0:
 			self.report({"INFO"},f"Replaced {replaceCount} texture bindings.")
 			return {'FINISHED'}
@@ -392,25 +405,15 @@ class WM_OT_ClearUnusedTextures(Operator):
 	def poll(self,context):
 		return context.scene.re_mdf_toolpanel.mdfCollection is not None
 
-	def getTexBaseName(self,fname):
-		#Get the .tex base name of a texture file, e.g. "foo.tex" from "foo.tex.123" or "foo.tex.123.pc".
-		#Returns None for files that are not texture files (".rtex", ".txt", etc)
-		lowerName = fname.lower()
-		index = lowerName.find(".tex")
-		if index <= 0:#Ignore junk names like ".tex"
-			return None
-		suffix = lowerName[index+4:]
-		if suffix != "" and not suffix.startswith("."):
-			return None
-		return fname[:index+4]
-
 	def getUnusedTextures(self):
 		#Returns (mdfDir, unusedFileList), or (None,None) if the MDF file path was not stored on the collection or the folder no longer exists
 		mdfCollection = bpy.context.scene.re_mdf_toolpanel.mdfCollection
 		mdfPath = mdfCollection.get("~MDFFILEPATH",None)
 		if mdfPath == None:
 			return (None,None)
-		mdfDir = os.path.dirname(mdfPath)
+		mdfDir = getMDFSourceFolder(mdfCollection)
+		if mdfDir == None:
+			return (None,None)
 		try:
 			fnameList = os.listdir(mdfDir)
 		except OSError as err:
@@ -427,7 +430,7 @@ class WM_OT_ClearUnusedTextures(Operator):
 			filePath = os.path.join(mdfDir,fname)
 			if not os.path.isfile(filePath):
 				continue
-			texBase = self.getTexBaseName(fname)
+			texBase = getTextureFileBaseName(fname)
 			if texBase != None and texBase.lower() not in referencedSet:
 				unusedList.append(filePath)
 		return (mdfDir,unusedList)

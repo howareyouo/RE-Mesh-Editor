@@ -222,6 +222,15 @@ def normalizeMaterialNameFilter(onlyMaterialNames):
 		return set(onlyMaterialNames)
 	return None
 
+def findMDFCollectionForMaterialObject(materialObj):
+	"""Return the MDF collection a material object is linked from, or None.
+
+	Materials are linked into their MDF collection directly, so the first RE MDF
+	collection of the object is the one that owns it (see isMDFCollection)."""
+	if materialObj == None:
+		return None
+	return next((collection for collection in materialObj.users_collection if isMDFCollection(collection)), None)
+
 def findMDFCollectionForMesh(meshCollection):
 	"""Find the MDF collection associated with a mesh collection.
 
@@ -429,7 +438,7 @@ def syncMaterialNamesFromMDFMaterial(materialObj, oldMaterialName, newMaterialNa
 	to undo its own property write when the rename was refused."""
 	if oldMaterialName == newMaterialName or isMaterialNameSyncActive():
 		return 0, None
-	mdfCollection = next((collection for collection in materialObj.users_collection if isMDFCollection(collection)), None)
+	mdfCollection = findMDFCollectionForMaterialObject(materialObj)
 	meshCollection = findMeshCollectionForMDF(mdfCollection)
 	if mdfCollection == None and meshCollection == None:
 		return 0, None

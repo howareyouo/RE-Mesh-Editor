@@ -14,6 +14,7 @@ popup_regions = set()
 from ..mesh.blender_re_mesh import joinObjects,getCollection
 from ..mdf.blender_re_mdf import reindexMaterials
 from ..mdf.re_mdf_presets import readPresetJSON
+from ..mdf.blender_re_mdf_texture_files import texturePathSync
 from .re_mod_workspace_propertyGroups import ConvertedMaterialEntryPropertyGroup
 from .texturepacker.texture_bake import bakeMaterialMaps
 from .texturepacker.texture_pack import packTextures
@@ -839,9 +840,12 @@ class WM_OT_ConvertToREEngine(Operator):
 							if materialObj:
 								materialObj.re_mdf_material.materialName = matInfo["materialName"]
 								textureSetName = matInfo["textureSetName"]
-								for entry in materialObj.re_mdf_material.textureBindingList_items:
-									if entry.textureType in textureMapDict:
-										entry.path = os.path.join(self.texturePath,f"{textureSetName}_{textureMapDict[entry.textureType]}.tex").replace(os.sep,"/")
+								#The bindings just came from the preset; this only repoints them
+								#at the baked textures and must never move files around.
+								with texturePathSync():
+									for entry in materialObj.re_mdf_material.textureBindingList_items:
+										if entry.textureType in textureMapDict:
+											entry.path = os.path.join(self.texturePath,f"{textureSetName}_{textureMapDict[entry.textureType]}.tex").replace(os.sep,"/")
 							else:
 								raiseWarning(f"Failed to create MDF material from {presetPath}")
 				bakeObj.hide_render = True

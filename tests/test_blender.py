@@ -1280,6 +1280,132 @@ def test_replace_material_names(tmpDir):
     check("empty find text is refused", result == {'CANCELLED'} and "empty" in error, f"{result} {error}")
 
 
+# ---------------------------------------------------------------- 2h. texture binding file rename
+def makeTextureFile(folder, fileName):
+    os.makedirs(folder, exist_ok=True)
+    filePath = os.path.join(folder, fileName)
+    with open(filePath, "w", encoding="utf-8"):
+        pass
+    return filePath
+
+
+def addTextureBinding(materialObj, textureType, path):
+    binding = materialObj.re_mdf_material.textureBindingList_items.add()
+    binding.textureType = textureType
+    binding.path = path
+    return binding
+
+
+def getToolPanelPreferences():
+    return bpy.context.preferences.addons["RE-Mesh-Editor"].preferences
+
+
+def test_texture_binding_file_rename(tmpDir):
+    """Editing a texture binding path renames the .tex files on disk, so the binding
+    keeps pointing at a file that exists. The files carry a version suffix and can sit
+    in a streaming folder, and an atlas is bound by several materials, so every copy and
+    every binding that used the path has to follow the edit."""
+    clearSceneObjectsAndCollections()
+    modRoot = os.path.join(tmpDir, "texmod")
+    heroDir = os.path.join(modRoot, "natives", "STM", "character", "hero")
+    streamDir = os.path.join(modRoot, "natives", "STM", "streaming", "character", "hero")
+    makeTextureFile(heroDir, "hero_ALBM.tex.7602304")
+    makeTextureFile(streamDir, "hero_ALBM.tex.7602304")
+    makeTextureFile(heroDir, "taken.tex.7602304")
+    makeTextureFile(heroDir, "render_a.rtex")
+    meshCol, mdfCol = makeMeshCollectionScene("hero")
+    mdfCol["~MDFFILEPATH"] = os.path.join(heroDir, "hero.mdf2")
+    matObj = addMDFMaterialObject(mdfCol, "Material 00 (Body)", "Body")
+    mainBinding = addTextureBinding(matObj, "ALBD", "character/hero/hero_ALBM.tex")
+    sharedBinding = addTextureBinding(matObj, "ATXX", "character/hero/hero_ALBM.tex")
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+
+    mainBinding.path = "character/hero/hero_ALBD.tex"
+    check("renamed texture file keeps its version suffix",
+          os.path.isfile(os.path.join(heroDir, "hero_ALBD.tex.7602304")),
+          str(sorted(os.listdir(heroDir))))
+    check("streaming copy of the texture renamed too",
+          os.path.isfile(os.path.join(streamDir, "hero_ALBD.tex.7602304")),
+          str(sorted(os.listdir(streamDir))))
+    check("old texture file name is gone",
+          not os.path.exists(os.path.join(heroDir, "hero_ALBM.tex.7602304")))
+    check("binding that shared the file follows the rename",
+          sharedBinding.path == "character/hero/hero_ALBD.tex", sharedBinding.path)
+    check("edited binding keeps the new path", mainBinding.path == "character/hero/hero_ALBD.tex", mainBinding.path)
+
+    # A name that is already on disk is not overwritten: the edit points the binding at
+    # a texture that exists, so there is nothing to file under a new name.
+    sharedBinding.path = "character/hero/taken.tex"
+    check("taken name leaves the files alone",
+          os.path.isfile(os.path.join(heroDir, "hero_ALBD.tex.7602304")) and
+          os.path.isfile(os.path.join(heroDir, "taken.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("taken name keeps the path the user typed", sharedBinding.path == "character/hero/taken.tex", sharedBinding.path)
+
+    # Moving a binding to another folder is a repoint, not a rename
+    otherBinding = addTextureBinding(matObj, "NRMR", "character/hero/taken.tex")
+    otherBinding.path = "character/other/taken.tex"
+    check("folder change does not move files",
+          os.path.isfile(os.path.join(heroDir, "taken.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("folder change keeps the path", otherBinding.path == "character/other/taken.tex", otherBinding.path)
+
+    # Render targets have no .tex file to rename
+    renderBinding = addTextureBinding(matObj, "RT", "character/hero/render_a.rtex")
+    renderBinding.path = "character/hero/render_b.rtex"
+    check("render target path is not renamed",
+          os.path.isfile(os.path.join(heroDir, "render_a.rtex")) and
+          not os.path.exists(os.path.join(heroDir, "render_b.rtex")), str(sorted(os.listdir(heroDir))))
+
+    # A new binding has no previous path, and a missing file has nothing to rename
+    newBinding = addTextureBinding(matObj, "ALBM", "")
+    newBinding.path = "character/hero/brand_new.tex"
+    check("new binding does not rename anything",
+          not os.path.exists(os.path.join(heroDir, "brand_new.tex.7602304")))
+    missingBinding = addTextureBinding(matObj, "MISS", "character/hero/missing_a.tex")
+    missingBinding.path = "character/hero/missing_b.tex"
+    check("missing texture file is not renamed",
+          not os.path.exists(os.path.join(heroDir, "missing_b.tex.7602304")))
+
+    # The option only controls the disk side: the path edit itself always lands
+    preferences = getToolPanelPreferences()
+    preferences.autoRenameTextureFiles = False
+    try:
+        mainBinding.path = "character/hero/hero_ALBJ.tex"
+    finally:
+        preferences.autoRenameTextureFiles = True
+    check("disabled option leaves the files alone",
+          os.path.isfile(os.path.join(heroDir, "hero_ALBD.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("disabled option keeps the edited path", mainBinding.path == "character/hero/hero_ALBJ.tex", mainBinding.path)
+
+    # The find/replace operator writes many paths at once and renames each file once
+    clearSceneObjectsAndCollections()
+    makeTextureFile(heroDir, "body_ALBM.tex.7602304")
+    meshCol, mdfCol = makeMeshCollectionScene("hero")
+    mdfCol["~MDFFILEPATH"] = os.path.join(heroDir, "hero.mdf2")
+    replaceMat = addMDFMaterialObject(mdfCol, "Material 00 (Body)", "Body")
+    firstBinding = addTextureBinding(replaceMat, "ALBD", "character/hero/body_ALBM.tex")
+    secondBinding = addTextureBinding(replaceMat, "ATXX", "character/hero/body_ALBM.tex")
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+    bpy.context.view_layer.objects.active = replaceMat
+    findReplace = bpy.context.window_manager.re_mdf_findreplace
+    while len(findReplace.findReplaceList) > 0:
+        findReplace.findReplaceList.remove(0)
+    findReplace.replaceAllMaterials = False
+    item = findReplace.findReplaceList.add()
+    item.findValue = "ALBM"
+    item.replaceValue = "ALBD"
+    result = bpy.ops.re_mdf.replace_texture_bindings()
+    check("texture find/replace operator finishes", result == {'FINISHED'}, str(result))
+    check("texture find/replace renames the file",
+          os.path.isfile(os.path.join(heroDir, "body_ALBD.tex.7602304")) and
+          not os.path.exists(os.path.join(heroDir, "body_ALBM.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("texture find/replace updates every binding",
+          firstBinding.path == "character/hero/body_ALBD.tex" and
+          secondBinding.path == "character/hero/body_ALBD.tex",
+          f"{firstBinding.path} / {secondBinding.path}")
+    while len(findReplace.findReplaceList) > 0:
+        findReplace.findReplaceList.remove(0)
+
+
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
     test_addon_props()
@@ -1335,6 +1461,10 @@ def main():
         test_replace_material_names(tmpDir)
     except Exception:
         check("material name find/replace test crashed", False, traceback.format_exc())
+    try:
+        test_texture_binding_file_rename(tmpDir)
+    except Exception:
+        check("texture binding file rename test crashed", False, traceback.format_exc())
     try:
         test_streaming_tex(tmpDir)
     except Exception:

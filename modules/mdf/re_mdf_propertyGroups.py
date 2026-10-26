@@ -19,6 +19,7 @@ from ..blender_utils import (isMDFCollection, isMeshCollection, isSFurCollection
                              getMDFMaterialName, materialNameSync, setMDFMaterialName, syncMaterialNamesFromMDFMaterial)
 from ..gen_functions import raiseWarning
 from ..naming import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
+from .blender_re_mdf_texture_files import isAutoRenameTextureFilesEnabled, syncTextureFileFromBindingPath
 
 
 #Property names made editable in the material UI - statically maintained
@@ -472,12 +473,29 @@ class MDFPropPropertyGroup(bpy.types.PropertyGroup):
         name="",
         default=0
     )
+def update_textureBindingPath(self, context):
+	#The update callback only receives the new value, so the previous one is kept on the
+	#group itself. It is written before the sync runs, so it always matches the path the
+	#binding holds once the edit is done (a refused rename keeps the path too).
+	oldPath = self.previousPath
+	self.previousPath = self.path
+	if not isAutoRenameTextureFilesEnabled():
+		return
+	_, _, error = syncTextureFileFromBindingPath(self, oldPath, self.path)
+	if error != None:
+		raiseWarning(f"Texture files were not renamed: {error}")
+
 class MDFTextureBindingPropertyGroup(bpy.types.PropertyGroup):
     textureType: StringProperty(
         name="",
     )
     path: StringProperty(
         name="",
+        update=update_textureBindingPath
+    )
+    previousPath: StringProperty(#Not exposed in editor, holds the path from before the update callback ran
+        name="",
+        options={'HIDDEN'}
     )
 
 class MDFMMTRSIndexPropertyGroup(bpy.types.PropertyGroup):
