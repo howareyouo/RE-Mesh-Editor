@@ -22,6 +22,14 @@ def getAddonPreferences():
 	every installed addon with a substring match on "RE-Mesh-Editor")."""
 	return bpy.context.preferences.addons[__package__.split(".")[0]].preferences
 
+def getPreferenceFlag(name, default = True):
+	"""Read a boolean addon preference, returning default when the preferences can't be
+	resolved (the addon isn't registered, e.g. when its modules are imported by the tests)."""
+	try:
+		return bool(getattr(getAddonPreferences(), name))
+	except Exception:
+		return default
+
 def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 
 	def draw(self, context):
@@ -121,6 +129,15 @@ def iterMDFMaterialObjects(collection):
 	if collection == None:
 		return
 	for obj in collection.all_objects:
+		if obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
+			yield obj
+
+def iterAllMDFMaterialObjects():
+	"""Yield every RE_MDF_MATERIAL object in the open file, whatever collection holds it.
+
+	The file-wide counterpart of iterMDFMaterialObjects, for the passes that have to see
+	every material of every imported MDF (texture path bookkeeping, rename detection)."""
+	for obj in bpy.data.objects:
 		if obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
 			yield obj
 

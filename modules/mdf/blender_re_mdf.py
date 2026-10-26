@@ -234,17 +234,14 @@ def MDFErrorCheck(collectionName, onlyMaterialNames = None, useBlenderMaterialNa
 	materialNameSet = set()
 	meshMaterialSet = set()
 	if bpy.data.collections.get(collectionName,None) != None:
-		objList = bpy.data.collections[collectionName].all_objects
+		#The ~TYPE filter lives in iterMDFMaterialObjects, like everywhere else
+		for materialObj in iterMDFMaterialObjects(bpy.data.collections[collectionName]):
+			if materialObj.re_mdf_material.materialName not in materialNameSet:
+				materialNameSet.add(materialObj.re_mdf_material.materialName)
+			else:
+				errorList.append("Duplicate material name on " + materialObj.name+". Set the material name in the custom properties of the material object to a different name.")
 	else:
 		errorList.append("MDF objects must be grouped in a collection.")
-		objList = []
-	for obj in objList:
-		
-		if obj.get("~TYPE",None) == MDF_MATERIAL_TYPE:
-			if obj.re_mdf_material.materialName not in materialNameSet:
-				materialNameSet.add(obj.re_mdf_material.materialName)
-			else:
-				errorList.append("Duplicate material name on " + obj.name+". Set the material name in the custom properties of the material object to a different name.")
 	
 	# OnlyMaterialNames: the export is limited to the materials the mesh uses, the other
 	# MDF materials are dropped from the file, so they must not be reported as unused.

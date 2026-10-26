@@ -3,8 +3,9 @@ import bpy
 import os
 from contextlib import contextmanager
 
-from ..blender_utils import MDF_MATERIAL_TYPE, getAddonPreferences, findMDFCollectionForMaterialObject, iterMDFMaterialObjects
-from ..gen_functions import splitNativesPath
+from ..blender_utils import (getPreferenceFlag, findMDFCollectionForMaterialObject,
+                             iterAllMDFMaterialObjects, iterMDFMaterialObjects)
+from ..gen_functions import splitNativesPath, STREAMING_FOLDER
 from .blender_re_mdf import fixTexPath
 
 # ---------------------------------------------------------------- texture file paths
@@ -16,7 +17,6 @@ from .blender_re_mdf import fixTexPath
 # texture files a material binds to.
 
 TEX_EXTENSION = ".tex"
-STREAMING_FOLDER = "streaming"
 
 def normalizeTexturePath(texturePath):
 	"""Normalise a texture binding path so two spellings of one path compare equal.
@@ -67,9 +67,8 @@ def getTextureSearchFolderList(mdfCollection, texturePath):
 	"streaming" folder below it. The MDF's own folder is tried too, because mods often
 	keep their textures next to the mdf2 instead of in the chunk folder tree."""
 	dirPart = os.path.dirname(normalizeTexturePath(texturePath))
-	mdfFolder = getMDFSourceFolder(mdfCollection)
-	rootList = []
 	mdfPath = mdfCollection.get("~MDFFILEPATH", None) if mdfCollection != None else None
+	rootList = []
 	if mdfPath:
 		nativesPath = splitNativesPath(mdfPath)
 		if nativesPath != None:
@@ -82,8 +81,8 @@ def getTextureSearchFolderList(mdfCollection, texturePath):
 	for root in rootList:
 		folderList.append(os.path.join(root, dirPart))
 		folderList.append(os.path.join(root, STREAMING_FOLDER, dirPart))
-	if mdfFolder:
-		folderList.append(mdfFolder)
+	if mdfPath:
+		folderList.append(os.path.dirname(mdfPath))
 	uniqueList = []
 	seenKeySet = set()
 	for folder in folderList:
@@ -201,10 +200,7 @@ def texturePathSync():
 
 def isAutoRenameTextureFilesEnabled():
 	"""True when editing a texture binding path may rename the files on disk."""
-	try:
-		return getAddonPreferences().autoRenameTextureFiles
-	except Exception:
-		return True
+	return getPreferenceFlag("autoRenameTextureFiles")
 
 # ---------------------------------------------------------------- binding sync
 def iterTextureBindings(mdfCollection):
@@ -212,6 +208,15 @@ def iterTextureBindings(mdfCollection):
 	if mdfCollection == None:
 		return
 	for materialObj in iterMDFMaterialObjects(mdfCollection):
+		for binding in materialObj.re_mdf_material.textureBindingList_items:
+			yield binding
+
+def iterAllTextureBindings():
+	"""Yield every texture binding of every MDF material object in the open file.
+
+	The file-wide counterpart of iterTextureBindings, for the passes that have to see
+	every binding of every imported MDF (path bookkeeping, bulk find/replace)."""
+	for materialObj in iterAllMDFMaterialObjects():
 		for binding in materialObj.re_mdf_material.textureBindingList_items:
 			yield binding
 
@@ -301,13 +306,10 @@ def recordTextureFileRename(oldPath, newPath, renamedFileList):
 def getTexturePathKeySet():
 	"""Return every texture path in use now, normalised for comparison."""
 	pathKeySet = set()
-	for obj in bpy.data.objects:
-		if obj.get("~TYPE", None) != MDF_MATERIAL_TYPE:
-			continue
-		for binding in obj.re_mdf_material.textureBindingList_items:
-			pathKey = normalizeTexturePath(binding.path).lower()
-			if pathKey != "":
-				pathKeySet.add(pathKey)
+	for binding in iterAllTextureBindings():
+		pathKey = normalizeTexturePath(binding.path).lower()
+		if pathKey != "":
+			pathKeySet.add(pathKey)
 	return pathKeySet
 
 def moveTextureFile(sourcePath, targetPath):

@@ -341,7 +341,11 @@ def splitNativesPath(filePath):#Splits file path of RE Engine natives/platform f
 			return None
 	except:
 		return None
-	
+
+# Name of the sub folder (directly under the natives game folder) that mirrors the
+# texture path tree and holds the high resolution mip halves of streaming textures.
+STREAMING_FOLDER = "streaming"
+
 def getAdjacentFileVersion(rootPath,fileType):
 	fileVersion = -1
 	search = wildCardFileSearch(os.path.join(glob.escape(rootPath),"*"+fileType+"*"))

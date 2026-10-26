@@ -12,8 +12,8 @@ import bpy
 
 from ..blender_utils import (MDF_MATERIAL_TYPE, findMDFCollectionForMaterialObject,
                              findMDFCollectionForMesh, findMeshCollectionForMDF,
-                             findMeshCollectionForObject, getAddonPreferences, getMDFMaterialName,
-                             materialNameSync,
+                             findMeshCollectionForObject, getMDFMaterialName, getPreferenceFlag,
+                             iterAllMDFMaterialObjects, materialNameSync,
                              renameREMeshMaterial, setMDFMaterialName, setMDFMaterialObjectName)
 from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName, replaceREMeshMaterialSuffix
 
@@ -85,23 +85,6 @@ def applyMeshMaterialRename(obj, oldMaterialName, newMaterialName):
 	return bool(renamedObjList or renamedMDFCount)
 
 
-def syncRenamedMeshMaterials():
-	"""Apply material name changes made by renaming a mesh to the whole collection.
-
-	Each rename is pushed through renameREMeshMaterial, which renames the matching MDF
-	material and the other mesh pieces using it. Returns the number of synced renames."""
-	global _nameSnapshot
-	syncedCount = 0
-	try:
-		syncedCount = sum(1 for obj, oldMaterialName, newMaterialName in findRenamedMeshMaterials()
-		                  if applyMeshMaterialRename(obj, oldMaterialName, newMaterialName))
-	finally:
-		#Re-capture unconditionally: our own renames must not look like user renames on
-		#the next tick, and anything renamed while we were working shows up next pass.
-		_nameSnapshot = captureNameSnapshot()
-	return syncedCount
-
-
 def findRenamedMDFMaterialObjects():
 	"""Return (object, oldObjectName, oldMaterialName, newMaterialName) for MDF material
 	object renames since the baseline.
@@ -111,9 +94,7 @@ def findRenamedMDFMaterialObjects():
 
 	Reads the snapshot without touching it, so a caller can decide what to do first."""
 	renameList = []
-	for obj in bpy.data.objects:
-		if obj.get("~TYPE", None) != MDF_MATERIAL_TYPE:
-			continue
+	for obj in iterAllMDFMaterialObjects():
 		oldObjectName = _nameSnapshot.get(obj.as_pointer())
 		if oldObjectName == None or oldObjectName == obj.name:
 			continue
@@ -192,21 +173,13 @@ def syncRenamedMaterialNames(syncMeshRenames = True):
 	return syncedCount
 
 
-def _autoSyncEnabled():
-	try:
-		return bool(getAddonPreferences().autoSyncMaterialNames)
-	except Exception:
-		#Preferences don't resolve when the module is imported outside the addon (tests)
-		return True
-
-
 def _pollMaterialNameRenames():
 	try:
 		if not _nameSnapshot:
 			refreshNameSnapshot()
 		else:
 			#The mesh to material direction is the only one the preference controls
-			syncRenamedMaterialNames(_autoSyncEnabled())
+			syncRenamedMaterialNames(getPreferenceFlag("autoSyncMaterialNames"))
 	except Exception as error:
 		#A failing timer would be unregistered by Blender, so keep it alive and report
 		print(f"RE Mesh Editor: material name sync failed - {error}")
