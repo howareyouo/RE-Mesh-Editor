@@ -12,7 +12,7 @@ import bpy
 
 from ..blender_utils import (MDF_MATERIAL_TYPE, findMDFCollectionForMaterialObject,
                              findMDFCollectionForMesh, findMeshCollectionForMDF,
-                             findMeshCollectionForObject, getMDFMaterialName, getPreferenceFlag,
+                             findMeshCollectionForObject, getMDFMaterialName, getToolPanelFlag,
                              iterAllMDFMaterialObjects, materialNameSync,
                              renameREMeshMaterial, setMDFMaterialName, setMDFMaterialObjectName)
 from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName, replaceREMeshMaterialSuffix
@@ -154,8 +154,9 @@ def syncRenamedMaterialNames(syncMeshRenames = True):
 	a rename on one side renames the other side too - reading again between the passes
 	would see our own writes as new user renames. Returns the number of synced renames.
 
-	syncMeshRenames is the "Auto Sync Material Names" preference: renaming a material
-	always renames the meshes, the option only controls the mesh to material direction."""
+	syncMeshRenames is the "Auto Sync Material Names" option in the RE MDF Tools panel:
+	renaming a material always renames the meshes, the option only controls the mesh to
+	material direction."""
 	global _nameSnapshot
 	syncedCount = 0
 	meshRenameList = findRenamedMeshMaterials() if syncMeshRenames else []
@@ -178,8 +179,8 @@ def _pollMaterialNameRenames():
 		if not _nameSnapshot:
 			refreshNameSnapshot()
 		else:
-			#The mesh to material direction is the only one the preference controls
-			syncRenamedMaterialNames(getPreferenceFlag("autoSyncMaterialNames"))
+			#The mesh to material direction is the only one the option controls
+			syncRenamedMaterialNames(getToolPanelFlag("autoSyncMaterialNames"))
 	except Exception as error:
 		#A failing timer would be unregistered by Blender, so keep it alive and report
 		print(f"RE Mesh Editor: material name sync failed - {error}")

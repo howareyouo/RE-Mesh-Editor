@@ -1556,6 +1556,61 @@ def test_texture_binding_file_rename(tmpDir):
     while len(findReplace.findReplaceList) > 0:
         findReplace.findReplaceList.remove(0)
 
+    # The auto rename option gates the bulk operator like a single MDF panel edit:
+    # with it off the bindings move but the files on disk keep their names
+    clearSceneObjectsAndCollections()
+    makeTextureFile(heroDir, "body_ALBM.tex.7602304")
+    meshCol, mdfCol = makeMeshCollectionScene("hero")
+    mdfCol["~MDFFILEPATH"] = os.path.join(heroDir, "hero.mdf2")
+    noRenameMat = addMDFMaterialObject(mdfCol, "Material 00 (Body)", "Body")
+    noRenameBinding = addTextureBinding(noRenameMat, "ALBD", "character/hero/body_ALBM.tex")
+    bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
+    bpy.context.view_layer.objects.active = noRenameMat
+    item = findReplace.findReplaceList.add()
+    item.findValue = "ALBM"
+    item.replaceValue = "ALBD"
+    filesBefore = sorted(os.listdir(heroDir))
+    preferences.autoRenameTextureFiles = False
+    try:
+        result = bpy.ops.re_mdf.replace_texture_bindings()
+    finally:
+        preferences.autoRenameTextureFiles = True
+    check("disabled option: find/replace operator finishes", result == {'FINISHED'}, str(result))
+    check("disabled option: find/replace leaves every file alone",
+          sorted(os.listdir(heroDir)) == filesBefore, str(sorted(os.listdir(heroDir))))
+    check("disabled option: find/replace still rewrites the binding",
+          noRenameBinding.path == "character/hero/body_ALBD.tex", noRenameBinding.path)
+    while len(findReplace.findReplaceList) > 0:
+        findReplace.findReplaceList.remove(0)
+
+
+def test_load_material_textures_iterates_all_entries():
+    """loadMaterialTextures must classify every used texture binding in a material,
+    not just the last one. Regression for a refactor that hoisted the
+    loadUnusedTextures/isUsedTexture gate out of the per-binding loop (and left
+    TEXTURE_CACHE_DIR/USE_DDS unresolved in the split-out function)."""
+    from types import SimpleNamespace
+    from modules.mdf.blender_re_mesh_mdf import loadMaterialTextures
+
+    textureList = [
+        SimpleNamespace(textureType="MaskMap", texturePath="tex/a_msk1.tex"),
+        SimpleNamespace(textureType="MaskMap", texturePath="tex/b_msk1.tex"),
+        SimpleNamespace(textureType="UnusedFillerMap", texturePath="tex/c_unused.tex"),
+        SimpleNamespace(textureType="MaskMap", texturePath="tex/d_msk1.tex"),
+    ]
+    mdfMaterial = SimpleNamespace(textureList=textureList)
+    textureNodeInfoList = []
+    with tempfile.TemporaryDirectory(prefix="reme_mdftex_") as cacheDir:
+        hasVertexColor = loadMaterialTextures(
+            mdfMaterial, 32, "RE4", "Regress_Mat", [], None, cacheDir, False,
+            False, False, {}, set(), {}, textureNodeInfoList)
+    check("every used texture binding classified",
+          len(textureNodeInfoList) == 3,
+          f"expected 3 node entries, got {len(textureNodeInfoList)}")
+    check("unused binding still gated out",
+          all(info[1] != "UnusedFillerMap" for info in textureNodeInfoList))
+    check("plain mask maps do not set the vertex color flag", hasVertexColor is False)
+
 
 def main():
     tmpDir = tempfile.mkdtemp(prefix="remeshtest_")
@@ -1628,6 +1683,10 @@ def main():
         test_import_meshbuffer_numpy()
     except Exception:
         check("numpy import test crashed", False, traceback.format_exc())
+    try:
+        test_load_material_textures_iterates_all_entries()
+    except Exception:
+        check("material texture iteration test crashed", False, traceback.format_exc())
 
     print("\n================================")
     if FAILURES:

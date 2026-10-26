@@ -868,7 +868,7 @@ def wireDualUVMapping(matInfo, nodeTree, UVMap1Node, UVMap2Node, textureNode,
 	return groupNode
 
 
-def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkPathList, texConv, reloadCachedTextures, loadUnusedTextures, loadedImageDict, errorFileSet, texPathCache, textureNodeInfoList):
+def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkPathList, texConv, textureCacheDir, useDDS, reloadCachedTextures, loadUnusedTextures, loadedImageDict, errorFileSet, texPathCache, textureNodeInfoList):
 	#Resolve, convert and load every texture of one material and classify each entry into the
 	#node type it maps to. Appends (nodeType, textureType, imageList, outputPath) tuples to
 	#textureNodeInfoList and mutates the loadedImageDict/errorFileSet/texPathCache caches in
@@ -895,11 +895,11 @@ def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkP
 		or (gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet)
 				
 	)
-	if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo and DEBUG_MODE:
-		print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
-	if loadUnusedTextures or isUsedTexture or autoDetectedAlbedo:
+		if gameName == "SF6" and not isUsedTexture and not autoDetectedAlbedo and DEBUG_MODE:
+			print(f"[SF6 MDF] skipped texture binding: material={materialName}, type={textureType}, path={texture}")
+		if loadUnusedTextures or isUsedTexture or autoDetectedAlbedo:
 			baseTexturePath = texture.replace("@","").replace(".tex","").replace('/',os.sep)
-			outputPath = os.path.join(TEXTURE_CACHE_DIR,baseTexturePath+".png")
+			outputPath = os.path.join(textureCacheDir,baseTexturePath+".png")
 					
 			if baseTexturePath in texPathCache:
 				texPath = texPathCache[baseTexturePath]
@@ -910,7 +910,7 @@ def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkP
 				if texPath not in loadedImageDict:
 					try:
 						if texPath not in errorFileSet:
-							imageList = loadTex(texPath,outputPath,texConv,reloadCachedTextures,USE_DDS)
+							imageList = loadTex(texPath,outputPath,texConv,reloadCachedTextures,useDDS)
 							loadedImageDict[texPath] = imageList
 							#print(imageList)
 					except Exception as err:
@@ -1025,7 +1025,7 @@ def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkP
 	return hasVertexColor
 
 
-def setupMaterialNodeTree(blenderMaterial, mdfMaterial, gameName, materialName, meshPath, textureNodeInfoList, useBackfaceCulling, arrangeNodes):
+def setupMaterialNodeTree(blenderMaterial, mdfMaterial, gameName, materialName, meshPath, textureNodeInfoList, useBackfaceCulling, arrangeNodes, sf6CMDMaterialMapList, cmdCaseInsensitiveMapList, cmdMeshPathParts):
 	#Create the output/BSDF backbone and the matInfo context dict consumed by
 	#applyGameSpecificNodes, apply SF6 CMD property overrides, then create every image
 	#texture node. Returns (matInfo, textureNodeError); texture node errors are reported
@@ -2347,10 +2347,10 @@ def importMDF(mdfFile,meshMaterialDict,loadUnusedTextures,loadUnusedProps,useBac
 		mdfMaterial = mdfMaterialDict.get(materialName,None)
 		textureNodeInfoList = []
 		if mdfMaterial != None:
-			hasVertexColor = loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkPathList, texConv, reloadCachedTextures, loadUnusedTextures, loadedImageDict, errorFileSet, texPathCache, textureNodeInfoList)
+			hasVertexColor = loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkPathList, texConv, TEXTURE_CACHE_DIR, USE_DDS, reloadCachedTextures, loadUnusedTextures, loadedImageDict, errorFileSet, texPathCache, textureNodeInfoList)
 			#Build the node backbone and matInfo context; per-material node errors are reported
 			#without aborting the remaining materials (accumulated into inErrorState).
-			matInfo, textureNodeError = setupMaterialNodeTree(blenderMaterial, mdfMaterial, gameName, materialName, meshPath, textureNodeInfoList, useBackfaceCulling, arrangeNodes)
+			matInfo, textureNodeError = setupMaterialNodeTree(blenderMaterial, mdfMaterial, gameName, materialName, meshPath, textureNodeInfoList, useBackfaceCulling, arrangeNodes, sf6CMDMaterialMapList, cmdCaseInsensitiveMapList, cmdMeshPathParts)
 			try:#Detect nodes for game specific setups
 				applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProps, arrangeNodes)
 			except Exception as err:

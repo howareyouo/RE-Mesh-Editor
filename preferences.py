@@ -149,14 +149,9 @@ class REMeshPreferences(AddonPreferences):
 		description = "If a chunk path is detected when a mesh is imported, add it to the chunk path list automatically",
 		default = True
 	)
-	autoSyncMaterialNames: BoolProperty(
-		name="Auto Sync Material Names",
-		description = "Keep material names in sync between the meshes and the MDF when a mesh is renamed in the outliner.\nRenaming a mesh updates the MDF material of the same name and every other mesh piece that shares it (RE engine models are split into several meshes per material).\nRenaming a material in the MDF panel, or renaming its \"Material NN (name)\" object in the outliner, always renames the meshes, this option only controls the mesh to MDF direction",
-		default = True
-	)
 	autoRenameTextureFiles: BoolProperty(
 		name="Auto Rename Texture Files",
-		description = "Rename the .tex files on disk when the path of a texture binding is changed in the MDF panel, so the binding keeps pointing at a file that exists.\nOnly a name change inside the same folder renames a file, and nothing is renamed when the new name is already taken.\nUndoing the edit renames the files back, and redoing it renames them again",
+		description = "Rename the .tex files on disk when the path of a texture binding is changed in the MDF panel or with the texture find/replace operator, so the binding keeps pointing at a file that exists.\nOnly a name change inside the same folder renames a file, and nothing is renamed when the new name is already taken.\nUndoing the edit renames the files back, and redoing it renames them again",
 		default = True
 	)
 	chunkPathList_items: CollectionProperty(type=ChunkPathPropertyGroup)
@@ -217,7 +212,6 @@ class REMeshPreferences(AddonPreferences):
 		layout.prop(self, "useDDS")
 		layout.prop(self, "convertTexToPNG")
 		layout.prop(self, "modFileTrackingPollingRate")
-		layout.prop(self, "autoSyncMaterialNames")
 		layout.prop(self, "autoRenameTextureFiles")
 		
 		box = layout.box()

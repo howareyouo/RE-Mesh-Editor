@@ -15,7 +15,8 @@ from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureFileBaseName,
-                                           getTextureRenameWarning, syncTextureFileFromBindingPath,
+                                           getTextureRenameWarning, isAutoRenameTextureFilesEnabled,
+                                           iterAllTextureBindings, syncTextureFileFromBindingPath,
                                            texturePathSync)
 
 class WM_OT_NewMDFHeader(Operator):
@@ -243,8 +244,7 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 		if not findReplacePairs:
 			return {'CANCELLED'}
 		if frp.replaceAllMaterials:
-			bindingList = [entry for obj in bpy.data.objects if obj.get("~TYPE") == MDF_MATERIAL_TYPE
-			               for entry in obj.re_mdf_material.textureBindingList_items]
+			bindingList = list(iterAllTextureBindings())
 		elif context.active_object and context.active_object.get("~TYPE") == MDF_MATERIAL_TYPE:
 			bindingList = list(context.active_object.re_mdf_material.textureBindingList_items)
 		else:
@@ -264,10 +264,14 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 			for entry, oldPath, newPath in pathPlanList:
 				entry.path = newPath
 		errorList = []
-		for entry, oldPath, newPath in pathPlanList:
-			_, _, error = syncTextureFileFromBindingPath(entry, oldPath, newPath)
-			if error != None:
-				errorList.append(error)
+		#The preference gates the disk side of a bulk replace too, like it does for a
+		#single binding edited in the MDF panel: the paths always move, the files follow
+		#only when the option allows it.
+		if isAutoRenameTextureFilesEnabled():
+			for entry, oldPath, newPath in pathPlanList:
+				_, _, error = syncTextureFileFromBindingPath(entry, oldPath, newPath)
+				if error != None:
+					errorList.append(error)
 		#One warning for the whole pass: a report per failed file would leave the UI showing
 		#only the last one and the console showing a wall of near identical lines.
 		warning = getTextureRenameWarning(errorList)

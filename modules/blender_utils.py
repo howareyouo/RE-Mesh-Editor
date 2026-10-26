@@ -30,6 +30,15 @@ def getPreferenceFlag(name, default = True):
 	except Exception:
 		return default
 
+def getToolPanelFlag(name, default = True):
+	"""Read a boolean flag from the MDF tool panel property group of the current scene,
+	returning default when it can't be resolved (no scene, e.g. while no file is loaded
+	or when the addon's modules are imported by the tests)."""
+	try:
+		return bool(getattr(bpy.context.scene.re_mdf_toolpanel, name))
+	except Exception:
+		return default
+
 def showMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 
 	def draw(self, context):
