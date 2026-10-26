@@ -4,8 +4,9 @@ from math import radians
 from mathutils import Matrix
 
 from .gen_functions import textColors, splitNativesPath, raiseWarning
-from .naming import (getREMeshMaterialName, parseMDFObjectNameMaterialName,
-                     parseREMeshObjectMaterialName, replaceREMeshMaterialSuffix)
+from .naming import (formatREMaterialObjectName, getREMeshMaterialName,
+                     parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName,
+                     replaceREMeshMaterialSuffix)
 import os
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -151,6 +152,18 @@ def setMDFMaterialName(materialObj, newName):
 		return False
 	materialObj.re_mdf_material.materialName = newName
 	return True
+
+def setMDFMaterialObjectName(materialObj, materialName):
+	"""Rewrite an MDF material object's name to "Material NN (name)".
+
+	The NN index already in the name is kept, so renumbering stays the job of
+	reindexMaterials. A name that doesn't follow the convention has no index to keep
+	and gets the first one. Returns the name the object ends up with."""
+	prefix, separator, _ = materialObj.name.partition("(")
+	newName = f"{prefix}({materialName})" if separator else formatREMaterialObjectName("Material", 0, materialName)
+	if newName != materialObj.name:
+		materialObj.name = newName
+	return newName
 
 def iterMeshLODCollections(meshCollection, exportAllLODs = True):
 	"""Return the collections the mesh exporter processes, in export order.
@@ -310,7 +323,7 @@ def findMeshCollectionForMDF(mdfCollection):
 		return panel.meshCollection
 	return None
 
-# ---------------------------------------------------------------- material name sync
+# ------------------ material name sync ------------------
 # The RE engine caps the size of a single mesh, so a model is split into several
 # objects that share one material. A material name therefore lives in two places that
 # have to match exactly - the "__" suffix of every mesh object name and the MDF
@@ -687,8 +700,7 @@ def nodes_center(ntree):
 			node.location.y += -center_y
 
 def arrangeNodeTree(ntree,margin_x = 100,margin_y = 20,centerNodes = True):
-
-#TODO Fix, blender doesn't initialize node dimensions unless the shader editor is open
+	#TODO Fix, blender doesn't initialize node dimensions unless the shader editor is open
 
 	values.margin_x = margin_x
 	values.margin_y = margin_y

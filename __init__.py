@@ -51,6 +51,7 @@ from .modules.mesh import blender_re_mesh_name_sync
 #mdf
 from.modules.mdf.file_re_mdf import gameNameMDFVersionDict
 from .modules.mdf.blender_re_mdf import importMDFFile,exportMDFFile
+from .modules.mdf.blender_re_mdf_texture_files import registerUndoHandlers, unregisterUndoHandlers
 from .modules.mdf.ui_re_mdf_panels import (
 	OBJECT_PT_MDFObjectModePanel,
 	OBJECT_PT_MDFMaterialPresetPanel,
@@ -62,6 +63,7 @@ from .modules.mdf.ui_re_mdf_panels import (
 	OBJECT_PT_MDFMaterialMMTRSIndexListPanel,
 	OBJECT_PT_MDFMaterialGPBFDataListPanel,
 	OBJECT_PT_MDFMaterialLoadSettingsPanel,
+	OBJECT_PT_MDFMaterialNameReplacePanel,
 	)
 from .modules.mdf.re_mdf_propertyGroups import (
 	MDFToolPanelPropertyGroup,
@@ -233,6 +235,7 @@ classes = [
 	OBJECT_PT_MDFMaterialPresetPanel,
 	OBJECT_PT_MDFMaterialPreviewPanel,
 	OBJECT_PT_MDFMaterialLoadSettingsPanel,
+	OBJECT_PT_MDFMaterialNameReplacePanel,
 	OBJECT_PT_MeshObjectModePanel,
 	OBJECT_PT_MeshArmatureToolsPanel,
 	OBJECT_PT_MDFMaterialPanel,
@@ -396,10 +399,13 @@ def register():
 
 	#Timer + load handler that keep renamed mesh material names in sync with the MDF
 	blender_re_mesh_name_sync.register()
+	#Undo/redo handler that renames the texture files back when a rename is undone
+	registerUndoHandlers()
 		
 	
 def unregister():
 	blender_re_mesh_name_sync.unregister()
+	unregisterUndoHandlers()
 	del bpy.types.WindowManager.enableModFileTracking
 	del bpy.types.WindowManager.re_mdf_findreplace
 	del bpy.types.Scene.re_mdf_toolpanel

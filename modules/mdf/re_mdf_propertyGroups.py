@@ -16,10 +16,12 @@ from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
 from ..blender_utils import (isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName,
-                             getMDFMaterialName, materialNameSync, setMDFMaterialName, syncMaterialNamesFromMDFMaterial)
+                             getMDFMaterialName, materialNameSync, setMDFMaterialName, setMDFMaterialObjectName,
+                             syncMaterialNamesFromMDFMaterial)
 from ..gen_functions import raiseWarning
-from ..naming import formatREMaterialObjectName, parseREMeshObjectMaterialName, stripBlenderUserSuffix
-from .blender_re_mdf_texture_files import isAutoRenameTextureFilesEnabled, syncTextureFileFromBindingPath
+from ..naming import parseREMeshObjectMaterialName, stripBlenderUserSuffix
+from .blender_re_mdf_texture_files import (getTextureRenameWarning, isAutoRenameTextureFilesEnabled,
+                                          syncTextureFileFromBindingPath)
 
 
 #Property names made editable in the material UI - statically maintained
@@ -197,15 +199,7 @@ def update_materialName(self, context):
 	#MDF entry that have to follow this rename.
 	oldObjectName = parentObj.name
 	oldMaterialName = getMDFMaterialName(parentObj)
-	try:
-		#print(parentObj)
-		split = parentObj.name.split("(",1)
-		if len(split) == 2:
-			parentObj.name = f"{split[0]}({self.materialName})"
-		else:
-			parentObj.name = formatREMaterialObjectName("Material", 0, self.materialName)
-	except:
-		pass
+	setMDFMaterialObjectName(parentObj, self.materialName)
 	_, error = syncMaterialNamesFromMDFMaterial(parentObj, oldMaterialName, self.materialName)
 	if error != None:
 		raiseWarning(f"Material name was not changed: {error}")
@@ -293,6 +287,14 @@ class MDFToolPanelPropertyGroup(bpy.types.PropertyGroup):
 		name="",
 		description="Set preset to be used by Add Material Preset button",
 		items= getMaterialPresets
+		)
+	materialNameFindValue: bpy.props.StringProperty(
+		name="",
+		description = "Text to find in the name of every material of the active MDF collection.\nThe meshes using each material are renamed together with it",
+		)
+	materialNameReplaceValue: bpy.props.StringProperty(
+		name="",
+		description = "Text to replace the found text with.\nLeave empty to remove the found text from the material names",
 		)
 	meshCollection: bpy.props.PointerProperty(
 		name="",
@@ -483,7 +485,7 @@ def update_textureBindingPath(self, context):
 		return
 	_, _, error = syncTextureFileFromBindingPath(self, oldPath, self.path)
 	if error != None:
-		raiseWarning(f"Texture files were not renamed: {error}")
+		raiseWarning(getTextureRenameWarning([error]))
 
 class MDFTextureBindingPropertyGroup(bpy.types.PropertyGroup):
     textureType: StringProperty(

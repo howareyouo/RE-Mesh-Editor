@@ -3,7 +3,7 @@ import bpy
 import os
 from contextlib import contextmanager
 
-from ..blender_utils import getAddonPreferences, findMDFCollectionForMaterialObject, iterMDFMaterialObjects
+from ..blender_utils import MDF_MATERIAL_TYPE, getAddonPreferences, findMDFCollectionForMaterialObject, iterMDFMaterialObjects
 from ..gen_functions import splitNativesPath
 from .blender_re_mdf import fixTexPath
 
@@ -163,17 +163,21 @@ def getTextureFileRenamePlan(mdfCollection, oldPath, newPath):
 	return planList, None
 
 def renameTextureFiles(planList):
-	"""Rename the planned files. Returns (renamedCount, errorMessage)."""
-	renamedCount = 0
+	"""Rename the planned files.
+
+	Returns (renamedFileList, errorMessage), where renamedFileList holds the
+	(oldFilePath, newFilePath) pairs that actually moved: the undo restore needs them to
+	move the files back."""
+	renamedFileList = []
 	errorList = []
 	for oldFilePath, newFilePath in planList:
 		try:
 			os.rename(oldFilePath, newFilePath)
-			renamedCount += 1
+			renamedFileList.append((oldFilePath, newFilePath))
 		except OSError as err:
 			print(f"Failed to rename {oldFilePath}: {err}")
 			errorList.append(f"\"{os.path.basename(oldFilePath)}\" could not be renamed: {err}")
-	return renamedCount, (errorList[0] if errorList else None)
+	return renamedFileList, (errorList[0] if errorList else None)
 
 # ---------------------------------------------------------------- path write guard
 _texturePathSyncDepth = 0
@@ -249,11 +253,121 @@ def syncTextureFileFromBindingPath(binding, oldPath, newPath):
 		return 0, 0, error
 	if not planList:
 		return 0, 0, None
-	renamedCount, error = renameTextureFiles(planList)
+	renamedFileList, error = renameTextureFiles(planList)
 	updatedCount = 0
-	if renamedCount > 0:
+	if renamedFileList:
+		#The record lets undo and redo move these files with the path they belong to
+		recordTextureFileRename(oldPath, newPath, renamedFileList)
 		#Only the bindings of a file that actually moved have to follow: the ones left
 		#behind would point at a name that no longer exists.
 		with texturePathSync():
 			updatedCount = updateBindingsUsingTexturePath(mdfCollection, oldPath, newPath, ignoreBinding = binding)
-	return renamedCount, updatedCount, error
+	return len(renamedFileList), updatedCount, error
+
+def getTextureRenameWarning(errorList):
+	"""Fold the errors of a texture file rename pass into one warning, or None when it went through.
+
+	A pass that writes many binding paths fails on one file at a time, so its errors are
+	collected and warned about once: the operator UI keeps only the last of a run of
+	reports, and a wall of near identical lines helps nobody. The wording of a single
+	failure is kept as it is, several are summarised after the first one."""
+	if not errorList:
+		return None
+	if len(errorList) == 1:
+		return f"Texture files were not renamed: {errorList[0]}"
+	return f"Texture files were not renamed for {len(errorList)} bindings: {errorList[0]}"
+
+# ---------------------------------------------------------------- undo / redo restore
+#Blender's undo restores the binding paths of a pass but not the files that were renamed
+#with them, which leaves every binding pointing at a name that no longer exists. The
+#renames are recorded here instead of in the .blend, because undo would drop a record
+#that lives in the file along with the edit it describes. After an undo or redo the disk
+#is brought back in step with the paths the scene holds at that moment.
+
+MAX_RENAME_RECORD_COUNT = 100
+_fileRenameRecordList = []
+
+def recordTextureFileRename(oldPath, newPath, renamedFileList):
+	"""Remember a file rename so undo and redo can move the files with the path."""
+	if not renamedFileList:
+		return
+	oldKey = normalizeTexturePath(oldPath).lower()
+	newKey = normalizeTexturePath(newPath).lower()
+	if oldKey == "" or newKey == "" or oldKey == newKey:
+		return
+	_fileRenameRecordList.append((oldKey, newKey, list(renamedFileList)))
+	del _fileRenameRecordList[:-MAX_RENAME_RECORD_COUNT]
+
+def getTexturePathKeySet():
+	"""Return every texture path in use now, normalised for comparison."""
+	pathKeySet = set()
+	for obj in bpy.data.objects:
+		if obj.get("~TYPE", None) != MDF_MATERIAL_TYPE:
+			continue
+		for binding in obj.re_mdf_material.textureBindingList_items:
+			pathKey = normalizeTexturePath(binding.path).lower()
+			if pathKey != "":
+				pathKeySet.add(pathKey)
+	return pathKeySet
+
+def moveTextureFile(sourcePath, targetPath):
+	"""Move one file when it is still where the rename left it. Returns 1 when it moved."""
+	if os.path.normcase(sourcePath) == os.path.normcase(targetPath):
+		return 0
+	if not os.path.isfile(sourcePath) or os.path.exists(targetPath):
+		return 0
+	try:
+		os.rename(sourcePath, targetPath)
+	except OSError as error:
+		print(f"Failed to rename {sourcePath}: {error}")
+		return 0
+	return 1
+
+def restoreTextureFileNamesForUndo():
+	"""Bring the renamed files back in step with the texture paths of the scene.
+
+	Runs after every undo and redo: a pass whose paths were undone gets its files renamed
+	back, a redone pass gets them renamed again, and the records of paths that survive
+	nowhere are dropped. Records of paths still in use both ways are left alone, e.g.
+	when another binding kept the old path. Returns the number of moved files."""
+	global _fileRenameRecordList
+	if not _fileRenameRecordList:
+		return 0
+	pathKeySet = getTexturePathKeySet()
+	movedCount = 0
+	keptRecordList = []
+	for oldKey, newKey, renamedFileList in _fileRenameRecordList:
+		oldInUse = oldKey in pathKeySet
+		newInUse = newKey in pathKeySet
+		if not oldInUse and not newInUse:
+			#The material is gone or the path moved on again: the files can no longer be
+			#matched to a binding, so the record has nothing left to keep in step with
+			continue
+		if oldInUse != newInUse:
+			for oldFilePath, newFilePath in renamedFileList:
+				if oldInUse:
+					movedCount += moveTextureFile(newFilePath, oldFilePath)
+				else:
+					movedCount += moveTextureFile(oldFilePath, newFilePath)
+		keptRecordList.append((oldKey, newKey, renamedFileList))
+	_fileRenameRecordList = keptRecordList
+	return movedCount
+
+@bpy.app.handlers.persistent
+def _restoreTextureFileNamesAfterUndo(dummy):
+	try:
+		restoreTextureFileNamesForUndo()
+	except Exception as error:
+		#A handler that raises is removed by Blender, so keep it alive and report instead
+		print(f"RE Mesh Editor: texture file name restore failed - {error}")
+
+def registerUndoHandlers():
+	for handlerList in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+		if _restoreTextureFileNamesAfterUndo not in handlerList:
+			handlerList.append(_restoreTextureFileNamesAfterUndo)
+
+def unregisterUndoHandlers():
+	for handlerList in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+		if _restoreTextureFileNamesAfterUndo in handlerList:
+			handlerList.remove(_restoreTextureFileNamesAfterUndo)
+	_fileRenameRecordList.clear()

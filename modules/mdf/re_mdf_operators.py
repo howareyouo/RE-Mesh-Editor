@@ -8,7 +8,6 @@ from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolPrope
 from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..naming import parseREMeshObjectMaterialName,stripBlenderUserSuffix
 from ..blender_utils import (showErrorMessageBox, createEmpty, findMeshCollectionForMDF,
-                             getMaterialNameReplacePlan, iterMeshesUsingMaterialName,
                              MDF_MATERIAL_TYPE, replaceMaterialNameText)
 from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,fixTexPath,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
@@ -16,7 +15,8 @@ from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureFileBaseName,
-                                           syncTextureFileFromBindingPath, texturePathSync)
+                                           getTextureRenameWarning, syncTextureFileFromBindingPath,
+                                           texturePathSync)
 
 class WM_OT_NewMDFHeader(Operator):
 	bl_label = "Create MDF Collection"
@@ -60,18 +60,17 @@ class WM_OT_ReplaceMaterialNames(Operator):
 	bl_idname = "re_mdf.replace_material_names"
 	bl_options = {'UNDO'}
 
-	findValue : StringProperty(name = "Find")
-	replaceValue : StringProperty(name = "Replace With")
-
 	@classmethod
 	def poll(self,context):
 		return context.scene.re_mdf_toolpanel.mdfCollection is not None
 
 	def execute(self, context):
-		mdfCollection = context.scene.re_mdf_toolpanel.mdfCollection
+		re_mdf_toolpanel = context.scene.re_mdf_toolpanel
+		mdfCollection = re_mdf_toolpanel.mdfCollection
 		meshCollection = findMeshCollectionForMDF(mdfCollection)
 		renamedMaterialCount, renamedMeshCount, error = replaceMaterialNameText(
-			meshCollection, mdfCollection, self.findValue, self.replaceValue)
+			meshCollection, mdfCollection, re_mdf_toolpanel.materialNameFindValue,
+			re_mdf_toolpanel.materialNameReplaceValue)
 		if error != None:
 			self.report({"ERROR"}, error)
 			return {'CANCELLED'}
@@ -81,34 +80,6 @@ class WM_OT_ReplaceMaterialNames(Operator):
 		self.report({"INFO"}, f"Renamed {renamedMaterialCount} materials and {renamedMeshCount} meshes.")
 		tag_redraw(context)
 		return {'FINISHED'}
-
-	def draw(self, context):
-		layout = self.layout
-		layout.prop(self, "findValue")
-		layout.prop(self, "replaceValue")
-		if self.findValue == "":
-			layout.label(text = "Enter the text to replace in the material names.", icon = 'INFO')
-			return
-		mdfCollection = context.scene.re_mdf_toolpanel.mdfCollection
-		planList, error = getMaterialNameReplacePlan(mdfCollection, self.findValue, self.replaceValue)
-		if error != None:
-			layout.label(text = error, icon = 'ERROR')
-			return
-		if not planList:
-			layout.label(text = "No material name contains that text.", icon = 'INFO')
-			return
-		meshCollection = findMeshCollectionForMDF(mdfCollection)
-		meshCount = sum(len(list(iterMeshesUsingMaterialName(meshCollection, oldName)))
-		                for materialObj, oldName, newName in planList)
-		layout.label(text = f"{len(planList)} materials and {meshCount} meshes will be renamed.")
-		box = layout.box()
-		for materialObj, oldName, newName in planList[:10]:
-			box.label(text = f"{oldName}   ->   {newName}")
-		if len(planList) > 10:
-			box.label(text = f"...and {len(planList) - 10} more.")
-
-	def invoke(self,context,event):
-		return context.window_manager.invoke_props_dialog(self,width = 420)
 
 class WM_OT_AddPresetMaterial(Operator):
 	bl_label = "Add Preset Material"
@@ -292,10 +263,16 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 		with texturePathSync():
 			for entry, oldPath, newPath in pathPlanList:
 				entry.path = newPath
+		errorList = []
 		for entry, oldPath, newPath in pathPlanList:
 			_, _, error = syncTextureFileFromBindingPath(entry, oldPath, newPath)
 			if error != None:
-				self.report({"WARNING"}, error)
+				errorList.append(error)
+		#One warning for the whole pass: a report per failed file would leave the UI showing
+		#only the last one and the console showing a wall of near identical lines.
+		warning = getTextureRenameWarning(errorList)
+		if warning != None:
+			self.report({"WARNING"}, warning)
 		self.report({"INFO"},f"Replaced {replaceCount} instances.")
 		return {'FINISHED'}
 	

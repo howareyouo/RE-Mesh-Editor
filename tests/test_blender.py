@@ -1127,7 +1127,7 @@ def test_material_name_sync(tmpDir):
     # mesh -> MDF: renaming one piece in the outliner renames its siblings and the material
     nameSync.refreshNameSnapshot()
     pieceA.name = "Group_0_Sub_0__Cloth_Mat"
-    syncedCount = nameSync.syncRenamedMeshMaterials()
+    syncedCount = nameSync.syncRenamedMaterialNames()
     check("mesh rename syncs to the MDF material", syncedCount == 1, str(syncedCount))
     check("mesh sharing the material is renamed too",
           pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
@@ -1146,7 +1146,7 @@ def test_material_name_sync(tmpDir):
     # the outliner already accepted is put back.
     nameSync.refreshNameSnapshot()
     pieceB.name = "Group_0_Sub_1__Other_Mat"
-    check("conflicting mesh rename is not synced", nameSync.syncRenamedMeshMaterials() == 0)
+    check("conflicting mesh rename is not synced", nameSync.syncRenamedMaterialNames() == 0)
     check("refused mesh rename is undone", pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
     check("refused mesh rename leaves the MDF material alone",
           shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
@@ -1184,6 +1184,39 @@ def test_material_name_sync(tmpDir):
           clothA.name == "Group_0_Sub_0__Leather_Mat" and clothB.name == "Group_1_Sub_0__Leather_Mat",
           f"{clothA.name} / {clothB.name}")
 
+    # The third entry point: renaming the "Material NN (name)" empty in the outliner. The
+    # MDF writer resolves the material name from that object name, so the property and
+    # every mesh piece have to follow it instead of waiting for the next export.
+    nameSync.refreshNameSnapshot()
+    matObj.name = "Material 00 (Denim_Mat)"
+    check("MDF object rename is synced", nameSync.syncRenamedMaterialNames() == 1)
+    check("MDF object rename follows through to the property",
+          matObj.re_mdf_material.materialName == "Denim_Mat", matObj.re_mdf_material.materialName)
+    check("MDF object rename reaches every mesh using the material",
+          clothA.name == "Group_0_Sub_0__Denim_Mat" and clothB.name == "Group_1_Sub_0__Denim_Mat",
+          f"{clothA.name} / {clothB.name}")
+
+    # A name that isn't the "Material NN (name)" form carries no material name, so the
+    # property keeps it and the conventional object name is put back
+    nameSync.refreshNameSnapshot()
+    matObj.name = "Denim"
+    check("non conventional MDF object rename is not a material rename",
+          nameSync.syncRenamedMaterialNames() == 0)
+    check("non conventional MDF object name is put back",
+          matObj.name == "Material 00 (Denim_Mat)", matObj.name)
+    check("non conventional MDF object rename keeps the property",
+          matObj.re_mdf_material.materialName == "Denim_Mat", matObj.re_mdf_material.materialName)
+
+    # Refused duplicate on the object name side: the outliner rename is undone
+    nameSync.refreshNameSnapshot()
+    matObj.name = "Material 00 (Other_Mat)"
+    check("conflicting MDF object rename is not synced", nameSync.syncRenamedMaterialNames() == 0)
+    check("refused MDF object rename restores the object name",
+          matObj.name == "Material 00 (Denim_Mat)", matObj.name)
+    check("refused MDF object rename leaves the meshes alone",
+          clothA.name == "Group_0_Sub_0__Denim_Mat" and clothB.name == "Group_1_Sub_0__Denim_Mat",
+          f"{clothA.name} / {clothB.name}")
+
     # The plain case: a material used by a single mesh has no sibling to bring along
     clearSceneObjectsAndCollections()
     meshCol, mdfCol = makeMeshCollectionScene("Body")
@@ -1191,19 +1224,39 @@ def test_material_name_sync(tmpDir):
     soloMat = addMDFMaterialObject(mdfCol, "Material 00 (Solo_Mat)", "Solo_Mat")
     nameSync.refreshNameSnapshot()
     soloObj.name = "Group_0_Sub_0__Single_Mat"
-    check("single-mesh rename is synced", nameSync.syncRenamedMeshMaterials() == 1)
+    check("single-mesh rename is synced", nameSync.syncRenamedMaterialNames() == 1)
     check("single-mesh rename reaches the MDF material and its object name",
           soloMat.re_mdf_material.materialName == "Single_Mat" and soloMat.name == "Material 00 (Single_Mat)",
           f"{soloMat.re_mdf_material.materialName} / {soloMat.name}")
 
 
 # ---------------------------------------------------------------- 2g. material name find/replace
+def setReplaceText(findValue, replaceValue):
+    """Fill in the "Find and Replace Material Names" fields of the RE MDF Tools panel.
+
+    These are scene panel properties, the sub panel reads them and the operator runs
+    off whatever the panel currently holds."""
+    re_mdf_toolpanel = bpy.context.scene.re_mdf_toolpanel
+    re_mdf_toolpanel.materialNameFindValue = findValue
+    re_mdf_toolpanel.materialNameReplaceValue = replaceValue
+
+
+def getReplacePreview():
+    """Return (planList, error) for what the panel shows before the replace is run."""
+    from modules.blender_utils import getMaterialNameReplacePlan
+    re_mdf_toolpanel = bpy.context.scene.re_mdf_toolpanel
+    return getMaterialNameReplacePlan(re_mdf_toolpanel.mdfCollection,
+                                      re_mdf_toolpanel.materialNameFindValue,
+                                      re_mdf_toolpanel.materialNameReplaceValue)
+
+
 def runReplaceOperator(findValue, replaceValue):
     """Return the result and error text of the material name find/replace operator.
 
     A refused operator reports {"ERROR"}, which bpy.ops turns into a RuntimeError."""
+    setReplaceText(findValue, replaceValue)
     try:
-        return bpy.ops.re_mdf.replace_material_names(findValue=findValue, replaceValue=replaceValue), ""
+        return bpy.ops.re_mdf.replace_material_names(), ""
     except RuntimeError as err:
         return {'CANCELLED'}, str(err)
 
@@ -1212,6 +1265,21 @@ def test_replace_material_names(tmpDir):
     """The RE MDF Tools "Find and Replace Material Names" operator replaces text in the
     name of every material of the active MDF collection and renames the meshes bound to
     each of them, so both sides keep matching."""
+    # The fields live in a collapsible sub panel of RE MDF Tools, not in a popup dialog
+    panel = getattr(bpy.types, "OBJECT_PT_mdf_material_name_replace_panel", None)
+    check("material name replace panel is registered", panel is not None)
+    check("material name replace panel is collapsed by default",
+          panel is not None and "DEFAULT_CLOSED" in panel.bl_options,
+          str(getattr(panel, "bl_options", None)))
+    check("material name replace panel sits under the RE MDF Tools panel",
+          panel is not None and panel.bl_parent_id == "OBJECT_PT_mdf_tools_panel",
+          str(getattr(panel, "bl_parent_id", None)))
+    check("replace fields are tool panel properties",
+          {"materialNameFindValue", "materialNameReplaceValue"}.issubset(
+              bpy.context.scene.re_mdf_toolpanel.bl_rna.properties.keys()))
+    check("replace operator keeps no input of its own",
+          "findValue" not in bpy.ops.re_mdf.replace_material_names.get_rna_type().properties.keys())
+
     clearSceneObjectsAndCollections()
     meshCol, mdfCol = makeMeshCollectionScene("Body")
     shirtsA = addOneFaceMesh(meshCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
@@ -1223,7 +1291,12 @@ def test_replace_material_names(tmpDir):
     pantsMat = addMDFMaterialObject(mdfCol, "Material 02 (Pants_Mat)", "Pants_Mat")
 
     bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
-    result = bpy.ops.re_mdf.replace_material_names(findValue="Shirts", replaceValue="Cloth")
+    setReplaceText("Shirts", "Cloth")
+    planList, error = getReplacePreview()
+    check("panel preview lists the materials to rename",
+          error is None and [newName for materialObj, oldName, newName in planList] ==
+          ["Cloth_Mat", "Cloth_Mat_Worn"], f"{error} {planList}")
+    result = bpy.ops.re_mdf.replace_material_names()
 
     check("material name find/replace operator finishes", result == {'FINISHED'}, str(result))
     check("material name replaced in the MDF",
@@ -1250,7 +1323,8 @@ def test_replace_material_names(tmpDir):
     shortMat = addMDFMaterialObject(mdfCol, "Material 00 (Aa)", "Aa")
     longMat = addMDFMaterialObject(mdfCol, "Material 01 (Aaa)", "Aaa")
     bpy.context.scene.re_mdf_toolpanel.mdfCollection = mdfCol
-    result = bpy.ops.re_mdf.replace_material_names(findValue="a", replaceValue="aa")
+    setReplaceText("a", "aa")
+    result = bpy.ops.re_mdf.replace_material_names()
     check("overlapping replacement is applied", result == {'FINISHED'}, str(result))
     check("overlapping replacement covers both materials",
           shortMat.re_mdf_material.materialName == "Aaa" and longMat.re_mdf_material.materialName == "Aaaaa",
@@ -1402,6 +1476,83 @@ def test_texture_binding_file_rename(tmpDir):
           firstBinding.path == "character/hero/body_ALBD.tex" and
           secondBinding.path == "character/hero/body_ALBD.tex",
           f"{firstBinding.path} / {secondBinding.path}")
+
+    # Undoing the pass restores the binding paths but nothing moves the files back, so the
+    # recorded rename has to be walked back with the paths the scene holds afterwards.
+    # Blender's undo can't run in background mode, so the paths undo would restore are
+    # written with the file sync held off, the way undo writes them, and the handler body
+    # is run directly.
+    # The addon runs its own copy of the modules, so the guard and the handler have to come
+    # from that copy: a module imported through the top level "modules" package has its own
+    # sync depth and its own records, which no binding callback would ever touch.
+    textureFiles = sys.modules["RE-Mesh-Editor.modules.mdf.blender_re_mdf_texture_files"]
+    check("undo/redo handler is registered",
+          textureFiles._restoreTextureFileNamesAfterUndo in bpy.app.handlers.undo_post and
+          textureFiles._restoreTextureFileNamesAfterUndo in bpy.app.handlers.redo_post)
+    with textureFiles.texturePathSync():
+        firstBinding.path = "character/hero/body_ALBM.tex"
+        secondBinding.path = "character/hero/body_ALBM.tex"
+    undoMovedCount = textureFiles.restoreTextureFileNamesForUndo()
+    check("undo renames the texture file back",
+          os.path.isfile(os.path.join(heroDir, "body_ALBM.tex.7602304")) and
+          not os.path.exists(os.path.join(heroDir, "body_ALBD.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("undo reports the moved file", undoMovedCount == 1, str(undoMovedCount))
+
+    # Redo puts the paths back, so the file has to follow them forward again
+    with textureFiles.texturePathSync():
+        firstBinding.path = "character/hero/body_ALBD.tex"
+        secondBinding.path = "character/hero/body_ALBD.tex"
+    redoMovedCount = textureFiles.restoreTextureFileNamesForUndo()
+    check("redo renames the texture file forward again",
+          os.path.isfile(os.path.join(heroDir, "body_ALBD.tex.7602304")) and
+          not os.path.exists(os.path.join(heroDir, "body_ALBM.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("redo reports the moved file", redoMovedCount == 1, str(redoMovedCount))
+
+    # A path that is still used on both sides (one binding kept the old one) must not
+    # move the file: there is no single name the binding paths agree on
+    with textureFiles.texturePathSync():
+        firstBinding.path = "character/hero/body_ALBM.tex"
+    check("path in use on both sides leaves the file alone",
+          textureFiles.restoreTextureFileNamesForUndo() == 0 and
+          os.path.isfile(os.path.join(heroDir, "body_ALBD.tex.7602304")),
+          str(sorted(os.listdir(heroDir))))
+    # A path that survives nowhere has no binding left to keep in step with
+    with textureFiles.texturePathSync():
+        firstBinding.path = "character/hero/gone.tex"
+        secondBinding.path = "character/hero/gone.tex"
+    check("record of a path nothing uses is dropped",
+          textureFiles.restoreTextureFileNamesForUndo() == 0)
+    check("dropped record leaves the file where it is",
+          os.path.isfile(os.path.join(heroDir, "body_ALBD.tex.7602304")), str(sorted(os.listdir(heroDir))))
+
+    # A batch that fails on every file warns once instead of once per binding
+    while len(findReplace.findReplaceList) > 0:
+        findReplace.findReplaceList.remove(0)
+    makeTextureFile(heroDir, "body_ALBM.tex.7602304")
+    makeTextureFile(heroDir, "body_ALBI.tex.7602304")
+    # The names the pass would produce are taken, so both renames are refused
+    makeTextureFile(heroDir, "body_ALBDM.tex.7602304")
+    makeTextureFile(heroDir, "body_ALBDI.tex.7602304")
+    failBindingA = addTextureBinding(replaceMat, "ALBD", "character/hero/body_ALBM.tex")
+    failBindingB = addTextureBinding(replaceMat, "ATXX", "character/hero/body_ALBI.tex")
+    item = findReplace.findReplaceList.add()
+    item.findValue = "ALB"
+    item.replaceValue = "ALBD"
+    capturedOutput = io.StringIO()
+    with contextlib.redirect_stdout(capturedOutput):
+        result = bpy.ops.re_mdf.replace_texture_bindings()
+    batchOutput = capturedOutput.getvalue()
+    check("batch rename failure still finishes", result == {'FINISHED'}, str(result))
+    check("batch rename failure warns once",
+          batchOutput.count("Texture files were not renamed") == 1, batchOutput.strip())
+    check("batch rename failure counts the bindings", "for 2 bindings" in batchOutput, batchOutput.strip())
+    check("batch rename failure leaves every file alone",
+          os.path.isfile(os.path.join(heroDir, "body_ALBM.tex.7602304")) and
+          os.path.isfile(os.path.join(heroDir, "body_ALBI.tex.7602304")), str(sorted(os.listdir(heroDir))))
+    check("batch rename failure keeps the paths the pass wrote",
+          failBindingA.path == "character/hero/body_ALBDM.tex" and
+          failBindingB.path == "character/hero/body_ALBDI.tex",
+          f"{failBindingA.path} / {failBindingB.path}")
     while len(findReplace.findReplaceList) > 0:
         findReplace.findReplaceList.remove(0)
 

@@ -6,8 +6,13 @@ from bpy.types import (
 	Operator,
 	PropertyGroup,
 )
-from ..blender_utils import MDF_MATERIAL_TYPE, tag_redraw
+from ..blender_utils import (MDF_MATERIAL_TYPE, findMeshCollectionForMDF, getMaterialNameReplacePlan,
+                             iterMeshesUsingMaterialName, tag_redraw)
 from .file_re_mdf import getMDFVersionToGameName
+
+
+#Renames the "Find and Replace Material Names" panel lists before it switches to "...and N more."
+MAX_NAME_PREVIEW_ROWS = 20
 
 
 def getActiveMaterialMDFVersion(context):
@@ -42,7 +47,6 @@ class OBJECT_PT_MDFObjectModePanel(Panel):
 		layout.operator("re_mdf.nullify_texture_bindings")
 		layout.operator("re_mdf.clear_unused_textures")
 		layout.operator("re_mdf.reindex_materials")
-		layout.operator("re_mdf.replace_material_names", icon = "FILE_REFRESH")
 		
 		
 class OBJECT_PT_MDFMaterialPresetPanel(Panel):
@@ -95,6 +99,58 @@ class OBJECT_PT_MDFMaterialPreviewPanel(Panel):
 		col2.label(text = "Mod Directory")
 		col2.prop(re_mdf_toolpanel, "modDirectory")
 		col2.operator("re_mdf.apply_mdf")
+
+class OBJECT_PT_MDFMaterialNameReplacePanel(Panel):
+	bl_label = "Find and Replace"
+	bl_idname = "OBJECT_PT_mdf_material_name_replace_panel"
+	bl_parent_id = "OBJECT_PT_mdf_tools_panel"  # Specify the ID of the parent panel
+	bl_space_type = "VIEW_3D"
+	bl_region_type = "UI"
+	bl_category = "RE Mesh"
+	bl_options = {'DEFAULT_CLOSED'}
+
+	def draw(self, context):
+		layout = self.layout
+		re_mdf_toolpanel = context.scene.re_mdf_toolpanel
+		row = layout.row()
+		row.emboss = "PULLDOWN_MENU"
+		row.label(text="Rename materials of the active MDF.")
+		split = layout.split(factor=0.025)#Indent list slightly to make it more clear it's a part of a sub panel
+		col1 = split.column()
+		col2 = split.column()
+
+		col2.label(text = "Find (text in the material name)")
+		col2.prop(re_mdf_toolpanel, "materialNameFindValue")
+		col2.label(text = "Replace With (new text)")
+		col2.prop(re_mdf_toolpanel, "materialNameReplaceValue")
+
+		findValue = re_mdf_toolpanel.materialNameFindValue
+		if findValue != "":
+			mdfCollection = re_mdf_toolpanel.mdfCollection
+			planList, error = getMaterialNameReplacePlan(mdfCollection, findValue,
+			                                            re_mdf_toolpanel.materialNameReplaceValue)
+			if error != None:
+				col2.label(text = error, icon = 'ERROR')
+			elif not planList:
+				col2.label(text = "No material name contains that text.", icon = 'INFO')
+			else:
+				meshCollection = findMeshCollectionForMDF(mdfCollection)
+				meshCount = sum(len(list(iterMeshesUsingMaterialName(meshCollection, oldName)))
+				                for materialObj, oldName, newName in planList)
+				col2.label(text = f"{len(planList)} materials and {meshCount} meshes will be renamed.")
+				#Rows of the list are packed against each other and drawn at a smaller scale,
+				#so a long rename list fits in the panel instead of pushing the button off it
+				box = col2.box()
+				previewList = box.column(align = True)
+				previewList.scale_y = 0.85
+				for materialObj, oldName, newName in planList[:MAX_NAME_PREVIEW_ROWS]:
+					previewList.label(text = f"{oldName} > {newName}")
+				if len(planList) > MAX_NAME_PREVIEW_ROWS:
+					previewList.label(text = f"...and {len(planList) - MAX_NAME_PREVIEW_ROWS} more.")
+				#Only shown when there is something to rename, so the button can never be
+				#pressed on an empty find field or on a pass that would rename nothing
+				col2.operator("re_mdf.replace_material_names", text = "Replace", icon = "FILE_REFRESH")
+
 
 class OBJECT_PT_MDFMaterialLoadSettingsPanel(Panel):
 	bl_label = "MDF Load Settings"
