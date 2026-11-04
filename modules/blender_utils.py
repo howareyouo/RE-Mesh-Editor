@@ -390,7 +390,8 @@ def iterMeshesUsingMaterialName(meshCollection, materialName):
 		if parseREMeshObjectMaterialName(obj.name).lower() == targetName:
 			yield obj
 
-def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None):
+def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None,
+                               ignoreMeshObject = None):
 	"""Return a reason when a material can't be renamed to newMaterialName, else None.
 
 	An MDF holds every material name once and the meshes bind to it by name, so a
@@ -398,7 +399,9 @@ def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, 
 	are compared: mesh objects already carrying the new name are the very pieces this
 	rename brings together (and the one the user just typed it into), so they can't
 	count as a conflict. ignoreMaterialObject skips the entry being renamed, which the
-	MDF panel has already updated by the time its callback runs."""
+	MDF panel has already updated by the time its callback runs - ignoreMeshObject is
+	the outliner rename that already happened, which is the same situation one step on:
+	the object carries the new name but the material behind it is not there yet."""
 	newName = newMaterialName.strip()
 	if newName == "":
 		return "Material name can't be empty."
@@ -409,10 +412,13 @@ def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, 
 	for materialObj in iterMDFMaterialObjects(mdfCollection):
 		if materialObj == ignoreMaterialObject:
 			continue
+		if materialObj == ignoreMeshObject:
+			continue
 		materialKey = getMDFMaterialName(materialObj).strip().lower()
 		if materialKey == targetKey and materialKey != oldKey:
 			return f"\"{newName}\" is already used by another material in the MDF collection."
 	return None
+
 
 def renameMeshObjectsToMaterialName(meshObjList, newMaterialName):
 	"""Set the material name part of the given mesh object names.
@@ -438,12 +444,19 @@ def renameMeshesUsingMaterialName(meshCollection, oldMaterialName, newMaterialNa
 		return []
 	return renameMeshObjectsToMaterialName(list(iterMeshesUsingMaterialName(meshCollection, oldMaterialName)), newMaterialName)
 
-def renameREMeshMaterial(meshCollection, mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None):
+def renameREMeshMaterial(meshCollection, mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None,
+                         renamedMeshObject = None, renamedMaterialObject = None):
 	"""Rename one RE material everywhere a mesh/MDF collection pair references it.
 
 	Renames the MDF material entry of that name plus every mesh object using it, and
 	nothing else: no reindexing, no prefix changes. Nothing is renamed when the new
 	name is invalid or already taken (see getMDFMaterialNameConflict).
+
+	renamedMeshObject and renamedMaterialObject are the objects an outliner rename has
+	already moved to newMaterialName - a mesh, or an MDF material entry - so they no
+	longer carry the old name: the new name they carry has to be checked like any other,
+	and the material behind it follows it (see syncRenamedMeshMaterial and
+	syncRenamedMDFMaterialObject).
 
 	Returns (renamedMeshObjects, renamedMDFMaterialCount, errorMessage)."""
 	if isMaterialNameSyncActive():
@@ -454,10 +467,13 @@ def renameREMeshMaterial(meshCollection, mdfCollection, oldMaterialName, newMate
 	materialObjList = [materialObj for materialObj in iterMDFMaterialObjects(mdfCollection)
 	                   if materialObj != ignoreMaterialObject and getMDFMaterialName(materialObj).strip().lower() == oldKey]
 	# Nothing on either side still carries the old name: the pair is already in sync and
-	# the new name being taken is not a conflict for this rename.
-	if not meshObjList and not materialObjList:
+	# the new name being taken is not a conflict for this rename. An object already carrying
+	# the new name is the exception - it is the rename itself, and its new name has to be
+	# checked like any other before the rest of the material is moved onto it.
+	if not meshObjList and not materialObjList and renamedMeshObject == None and renamedMaterialObject == None:
 		return [], 0, None
-	error = getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newName, ignoreMaterialObject)
+	error = getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newName, ignoreMaterialObject,
+	                                   ignoreMeshObject = renamedMaterialObject)
 	if error != None:
 		return [], 0, error
 	with materialNameSync():

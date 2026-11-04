@@ -291,7 +291,7 @@ class MDFToolPanelPropertyGroup(bpy.types.PropertyGroup):
 	autoSyncMaterialNames: BoolProperty(
 		name="Auto Sync Material Names",
 		description="When a mesh is renamed in the outliner, rename the MDF material of the same name and every other mesh piece that shares it.\nRenaming a material always renames its meshes, this option only controls the mesh to MDF direction",
-		default = True
+		default = False
 		)
 	materialNameFindValue: bpy.props.StringProperty(
 		name="",
