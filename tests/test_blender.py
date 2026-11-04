@@ -43,6 +43,17 @@ def test_addon_props():
         for idname in ("re_mdf.exportfile", "re_fbxskel.exportfile", "re_sfur.exportfile"):
             FakeOperator.bl_idname = idname
             check(f"Version list of {idname} found", len(filenameExtensions(FakeOperator())) > 0)
+
+        # Blender's own operator instances report the RNA identifier (RE_MESH_OT_exportfile)
+        # from bl_idname; the dotted name the file browser needs is only on the class.
+        class InstanceLikeOperator(FakeOperator):
+            bl_idname = "re_mesh.exportfile"
+
+            def __init__(self):
+                self.bl_idname = "RE_MESH_OT_exportfile"
+
+        check("Version list still found when bl_idname is the RNA identifier",
+              ".241111606" in filenameExtensions(InstanceLikeOperator()))
     except Exception as err:
         check("filenameExtensions", False, str(err))
 

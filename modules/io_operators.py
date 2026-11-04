@@ -64,8 +64,9 @@ def filenameExtensions(operator):
 
 	An operator instance's own bl_rna only carries the base Operator properties, so the
 	version list has to be read from the registered type through bpy.ops.<module>.<name>.
-	Returns an empty set for a format that has no version extension."""
-	moduleName, operatorName = operator.bl_idname.split(".")
+	Its bl_idname is the RNA identifier (RE_MESH_OT_exportfile), so the dotted one comes
+	from the class. Returns an empty set for a format with no version extension."""
+	moduleName, operatorName = type(operator).bl_idname.split(".")
 	propertyEntry = getattr(getattr(bpy.ops, moduleName), operatorName).get_rna_type().properties.get("filename_ext")
 	return {item.identifier for item in propertyEntry.enum_items} if propertyEntry != None else set()
 
