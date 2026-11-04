@@ -208,13 +208,24 @@ def syncTextureFileFromBindingPath(binding, oldPath, newPath, modDirectory = Non
 			updatedCount = updateBindingsUsingTexturePath(mdfCollection, oldPath, newPath, ignoreBinding = binding)
 	return len(renamedFileList), updatedCount, error
 
+
+def bindingPathHasFile(binding, path, modDirectory = None):
+	"""Whether a binding path names a texture file that is on disk right now."""
+	mdfCollection = findMDFCollectionForMaterialObject(binding.id_data)
+	if mdfCollection == None:
+		return False
+	return bool(resolveTextureFiles(mdfCollection, normalizeTexturePath(path), modDirectory))
+
+
 def setTextureBindingPath(binding, newPath, oldPath = None, modDirectory = None):
 	"""Write a texture binding path, moving the texture files with it.
 
 	The one way a binding path is written: the old value is the caller's or the one the
-	binding still holds, the files are renamed only when the preference allows it, and a
-	refused rename puts the old path back so the binding never points at a file name the
-	disk does not have. Returns the error message of a rename that was refused, or None.
+	binding still holds, and the files are renamed only when the preference allows it. A
+	rename that fails puts the old path back, so the binding never points at a name the
+	disk does not have; a name that was already taken is not such a failure, because the
+	texture the user typed is there and moving off it would undo the edit. Returns the
+	error message of a rename that was refused, or None.
 
 	modDirectory None means read the tool panel's mod directory now."""
 	if oldPath == None:
@@ -231,7 +242,7 @@ def setTextureBindingPath(binding, newPath, oldPath = None, modDirectory = None)
 	if not isAutoRenameTextureFilesEnabled():
 		return None
 	_, _, error = syncTextureFileFromBindingPath(binding, oldPath, newPath, modDirectory)
-	if error != None:
+	if error != None and not bindingPathHasFile(binding, newPath, modDirectory):
 		with texturePathSync():
 			binding.path = oldPath
 	return error
