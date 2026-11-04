@@ -77,9 +77,12 @@ from .modules.sfur.re_sfur_propertyGroups import SFurEntryPropertyGroup
 from .modules.workspace.re_mod_workspace_propertyGroups import ModWorkspaceToolPanelPropertyGroup
 
 
-# Registration. Each module now owns the classes it defines (the `classes` tuple at
-# the foot of the file); this list only puts them in registration order.
-classes = [
+from .modules.registration import orderClasses
+
+# Registration. Each module owns the classes it defines (the `classes` tuple at the foot
+# of the file) in whatever order it declares them; orderClasses then puts every property
+# group before the classes whose annotations reference it, which Blender requires.
+classes = orderClasses([
 	*preferences.classes,
 	*io_operators.classes,
 	*workspacePropertyGroupClasses,
@@ -100,7 +103,7 @@ classes = [
 	*texPanelClasses,
 	*fbxskelPropertyGroupClasses,
 	*fbxskelOperatorClasses,
-	]
+])
 
 
 #Drag and drop importing, 4.1 or higher only
@@ -213,7 +216,7 @@ def unregister():
 	del bpy.types.Object.re_mdf_material
 	del bpy.types.Object.re_sfur_data
 	addon_updater_ops.unregister()
-	for classEntry in classes:
+	for classEntry in reversed(classes):
 		bpy.utils.unregister_class(classEntry)
 		
 	bpy.utils.unregister_class(IMPORT_MT_re_mesh_editor)
