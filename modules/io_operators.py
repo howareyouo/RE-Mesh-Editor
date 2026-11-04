@@ -30,12 +30,60 @@ def setModDirectoryFromFilePath(filePath):
 			print(f"Set mod directory to {bpy.context.scene.re_mdf_toolpanel.modDirectory}")
 		except:
 			print("ERROR: Failed to set mod directory, exported file path probably does not follow the chunk naming scheme.")
-def applySourceDirectory(collection, sourcePathKey, filepath):
-	"""Point filepath at the folder this collection was imported from."""
-	sourcePath = resolveSourcePath(collection.get(sourcePathKey, "")) if collection != None else ""
-	if sourcePath != "":
-		return os.path.join(os.path.dirname(sourcePath), os.path.basename(filepath))
-	return filepath
+def collectionSourcePath(collection, sourcePathKey):
+	"""The file this collection was imported from, or "" when that file is gone."""
+	if collection == None or sourcePathKey == "":
+		return ""
+	return resolveSourcePath(collection.get(sourcePathKey, ""))
+
+
+def collectionExportDirectory(collection, sourcePathKey):
+	"""The folder to export this collection to: the one it was last exported to, when that is
+	not just the folder it was imported from, otherwise the folder it was imported from. ""
+	when neither is known, so the file browser keeps the folder it is on."""
+	sourcePath = collectionSourcePath(collection, sourcePathKey)
+	importDirectory = os.path.dirname(sourcePath) if sourcePath != "" else ""
+	lastExport = os.path.dirname(str(collection.get("BatchExport_path", ""))) if collection != None else ""
+	if lastExport != "" and os.path.isdir(lastExport) and os.path.normpath(lastExport) != os.path.normpath(importDirectory):
+		return lastExport
+	return importDirectory
+
+
+def collectionBaseName(collectionName, baseExtension):
+	"""The collection name with the format extension and any Blender suffix removed."""
+	return collectionName.split(baseExtension)[0] if baseExtension in collectionName else collectionName
+
+
+def versionExtension(version):
+	"""A stored version as the ".NNN" file extension these operators export with."""
+	return "" if version == None else "." + str(version)
+
+
+def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, fallbackVersionExtension = ""):
+	"""Default the export operator to the collection picked in the tool panel, and to the file
+	name and folder that collection was imported from, or last exported to."""
+	if operator.targetCollection == "":
+		if panelCollection == None:
+			return
+		operator.targetCollection = panelCollection.name
+	collection = bpy.data.collections.get(operator.targetCollection, None)
+	extensions = {item.identifier for item in operator.bl_rna.properties["filename_ext"].enum_items}
+	sourcePath = collectionSourcePath(collection, sourcePathKey)
+	extension = os.path.splitext(sourcePath)[1] if sourcePath != "" else ""
+	if extension not in extensions:#A .mply import, or a version this format cannot write
+		extension = fallbackVersionExtension
+	if extension in extensions:
+		operator.filename_ext = extension
+	fileName = collectionBaseName(operator.targetCollection, baseExtension) + baseExtension + extension
+	directory = collectionExportDirectory(collection, sourcePathKey)
+	operator.filepath = os.path.join(directory, fileName) if directory != "" else fileName
+
+
+def drawExportFolderHint(layout, operator, sourcePathKey):
+	"""Point out that the picked collection has no folder to export back to."""
+	collection = bpy.data.collections.get(operator.targetCollection, None)
+	if collection != None and collectionExportDirectory(collection, sourcePathKey) == "":
+		layout.label(icon="INFO", text="Import folder unavailable, using the browser's current folder.")
 
 
 def toggleConsole():
@@ -361,25 +409,35 @@ class ImportREMesh(Operator, ImportHelper):
 				return self.execute(context)
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
-def _syncFileBrowserFilename(self, propertyName, fileExtension):
-	"""Point the open file browser's filename field at the name derived from the
-	collection picker property, so the browser follows the user's selection."""
+def _fileBrowserParams():
+	"""The file select params of the open file browser, if one is open."""
 	temp = bpy.data.screens.get("temp")
-	browserSpace = None
 	if temp != None:
 		for area in temp.areas:
 			for space in area.spaces:
 				params = getattr(space, "params", None)
 				if params is not None and type(params).__name__ == "FileSelectParams":
-					browserSpace = space
-					break
-	if browserSpace != None:
-		value = getattr(self, propertyName)
-		if fileExtension in value:
-			browserSpace.params.filename = value.split(fileExtension)[0] + fileExtension + self.filename_ext
+					return params
+	return None
+
+
+def syncFileBrowserToCollection(self, propertyName, fileExtension, sourcePathKey = ""):
+	"""Keep the open file browser on the folder and file name of the picked collection, so the
+	browser follows the picker instead of staying on the last browsed folder."""
+	params = _fileBrowserParams()
+	collectionName = getattr(self, propertyName)
+	if params == None or collectionName == "":
+		return
+	if sourcePathKey != "":
+		directory = collectionExportDirectory(bpy.data.collections.get(collectionName, None), sourcePathKey)
+		if directory != "":
+			params.directory = directory
+	if fileExtension in collectionName:
+		params.filename = collectionBaseName(collectionName, fileExtension) + fileExtension + self.filename_ext
+
 
 def update_targetMeshCollection(self,context):
-	_syncFileBrowserFilename(self, "targetCollection", ".mesh")
+	syncFileBrowserToCollection(self, "targetCollection", ".mesh", "~MESHFILEPATH")
 class ExportREMesh(Operator, ExportHelper):
 	'''Export RE Engine Mesh File'''
 	bl_idname = "re_mesh.exportfile"
@@ -468,28 +526,8 @@ class ExportREMesh(Operator, ExportHelper):
 		
 		remapLegacySceneVersion(context.scene, "REMeshLastExportedMeshVersion")
 		
-		if self.targetCollection == "":
-			
-			
-			#Get last exported collection, if there isn't one, get last imported
-			exportCollection = context.scene.get("REMeshLastExportedCollection","")
-			if exportCollection in bpy.data.collections:
-				self.targetCollection = exportCollection
-				if ".mesh" in exportCollection:#Remove blender suffix after .mesh if it exists
-					if context.scene.get("REMeshLastExportedMeshVersion") in meshFileVersionToGameNameDict:
-						self.filename_ext = "."+str(context.scene.get("REMeshLastExportedMeshVersion",1808282334))
-					self.filepath = exportCollection.split(".mesh")[0]+".mesh" + self.filename_ext
-			else:
-				prevCollection = context.scene.get("REMeshLastImportedCollection","")
-				if prevCollection in bpy.data.collections:
-					self.targetCollection = prevCollection
-				if ".mesh" in prevCollection:#Remove blender suffix after .mesh if it exists
-					if context.scene.get("REMeshLastImportedMeshVersion") in meshFileVersionToGameNameDict:
-						self.filename_ext = "."+str(context.scene.get("REMeshLastImportedMeshVersion",1808282334))
-					self.filepath = prevCollection.split(".mesh")[0]+".mesh" + self.filename_ext
-
-			
-		self.filepath = applySourceDirectory(bpy.data.collections.get(self.targetCollection, None), "~MESHFILEPATH", self.filepath)
+		setExportDefaults(self, "~MESHFILEPATH", ".mesh", context.scene.re_mdf_toolpanel.meshCollection,
+		                 versionExtension(context.scene.get("REMeshLastImportedMeshVersion", None)))
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	def draw(self, context):
@@ -500,6 +538,7 @@ class ExportREMesh(Operator, ExportHelper):
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_01")
 		
 		drawCollectionWarning(layout, self, "targetCollection", isMeshCollection, "Collection is not a mesh collection.")
+		drawExportFolderHint(layout, self, "~MESHFILEPATH")
 		layout.prop(self, "selectedOnly")
 		layout.label(text = "Advanced Options")
 		layout.prop(self, "exportAllLODs")
@@ -606,7 +645,7 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
 		return {'RUNNING_MODAL'}
 
 def update_targetMDFCollection(self,context):
-	_syncFileBrowserFilename(self, "targetCollection", ".mdf2")
+	syncFileBrowserToCollection(self, "targetCollection", ".mdf2", "~MDFFILEPATH")
 class ExportREMDF(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine MDF File'''
 	bl_idname = "re_mdf.exportfile"
@@ -637,13 +676,9 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 	   update = update_targetMDFCollection)
 	filter_glob: StringProperty(default="*.mdf2*", options={'HIDDEN'})
 	def invoke(self, context, event):
-		if bpy.data.collections.get(self.targetCollection,None) == None:
-			if bpy.context.scene.re_mdf_toolpanel.mdfCollection:
-				self.targetCollection = bpy.context.scene.re_mdf_toolpanel.mdfCollection.name
-				if self.targetCollection.endswith(".mdf2"):
-					self.filepath = self.targetCollection + self.filename_ext
-			self.filename_ext = "."+str(gameNameMDFVersionDict[bpy.context.scene.re_mdf_toolpanel.activeGame])
-		self.filepath = applySourceDirectory(bpy.data.collections.get(self.targetCollection, None), "~MDFFILEPATH", self.filepath)
+		gameVersion = gameNameMDFVersionDict.get(context.scene.re_mdf_toolpanel.activeGame, None)
+		setExportDefaults(self, "~MDFFILEPATH", ".mdf2", context.scene.re_mdf_toolpanel.mdfCollection,
+		                 versionExtension(gameVersion))
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	
@@ -654,6 +689,7 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 		layout.label(text = "MDF Collection:")
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_05")
 		drawCollectionWarning(layout, self, "targetCollection", isMDFCollection, "Collection is not a MDF collection.")
+		drawExportFolderHint(layout, self, "~MDFFILEPATH")
 	def execute(self, context):
 		printEditorHeader(bl_info)
 		success = exportMDFFile(self.filepath,self.targetCollection)
@@ -699,7 +735,7 @@ class ImportREFBXSkel(bpy.types.Operator, ImportHelper):
 			return {"CANCELLED"}
 
 def update_targetFBXSkelArmature(self,context):
-	_syncFileBrowserFilename(self, "targetArmature", ".fbxskel")
+	syncFileBrowserToCollection(self, "targetArmature", ".fbxskel")
 		
 class ExportREFBXSkel(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine FBXSkel File'''
@@ -809,7 +845,7 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
 		return {'RUNNING_MODAL'}
 
 def update_targetSFurCollection(self,context):
-	_syncFileBrowserFilename(self, "targetCollection", ".sfur")
+	syncFileBrowserToCollection(self, "targetCollection", ".sfur")
 class ExportRESFur(bpy.types.Operator, ExportHelper):
 	'''Export RE Engine SFur File'''
 	bl_idname = "re_sfur.exportfile"

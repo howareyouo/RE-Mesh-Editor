@@ -1146,7 +1146,6 @@ def exportREMeshFile(filePath, options):
 		targetCollection = bpy.context.scene.collection
 	else:
 		print(f"Target collection: {targetCollection.name}")
-		bpy.context.scene["REMeshLastExportedCollection"] = targetCollection.name
 
 	# Shared with getMeshMaterialNames (iterMeshLODCollections), so the exclude-unused
 	# material filter always sees exactly the LODs this export writes.
