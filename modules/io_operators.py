@@ -59,6 +59,17 @@ def versionExtension(version):
 	return "" if version == None else "." + str(version)
 
 
+def filenameExtensions(operator):
+	"""The version extensions `operator` can write.
+
+	An operator instance's own bl_rna only carries the base Operator properties, so the
+	version list has to be read from the registered type through bpy.ops.<module>.<name>.
+	Returns an empty set for a format that has no version extension."""
+	moduleName, operatorName = operator.bl_idname.split(".")
+	propertyEntry = getattr(getattr(bpy.ops, moduleName), operatorName).get_rna_type().properties.get("filename_ext")
+	return {item.identifier for item in propertyEntry.enum_items} if propertyEntry != None else set()
+
+
 def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, fallbackVersionExtension = ""):
 	"""Default the export operator to the collection picked in the tool panel, and to the file
 	name and folder that collection was imported from, or last exported to."""
@@ -67,7 +78,7 @@ def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, f
 			return
 		operator.targetCollection = panelCollection.name
 	collection = bpy.data.collections.get(operator.targetCollection, None)
-	extensions = {item.identifier for item in operator.bl_rna.properties["filename_ext"].enum_items}
+	extensions = filenameExtensions(operator)
 	sourcePath = collectionSourcePath(collection, sourcePathKey)
 	extension = os.path.splitext(sourcePath)[1] if sourcePath != "" else ""
 	if extension not in extensions:#A .mply import, or a version this format cannot write

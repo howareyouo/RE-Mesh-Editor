@@ -31,6 +31,21 @@ def test_addon_props():
     except Exception as err:
         check("addon_enable", False, str(err))
 
+    try:
+        filenameExtensions = sys.modules["RE-Mesh-Editor.modules.io_operators"].filenameExtensions
+
+        class FakeOperator:
+            bl_idname = "re_mesh.exportfile"
+
+        extensions = filenameExtensions(FakeOperator())
+        check("Export defaults read the version list off the operator's registered type",
+              ".241111606" in extensions, str(sorted(extensions)))
+        for idname in ("re_mdf.exportfile", "re_fbxskel.exportfile", "re_sfur.exportfile"):
+            FakeOperator.bl_idname = idname
+            check(f"Version list of {idname} found", len(filenameExtensions(FakeOperator())) > 0)
+    except Exception as err:
+        check("filenameExtensions", False, str(err))
+
 
 # ---------------------------------------------------------------- 2. Export warnings
 def buildScene():
