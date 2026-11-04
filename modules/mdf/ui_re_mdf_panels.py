@@ -383,3 +383,19 @@ OBJECT_PT_MDFMaterialGPBFDataListPanel = _build_list_panel(
 	panel_options = {"DEFAULT_CLOSED"},
 	min_mdf_version = 19,#GPBF buffer entries are only present in the file on version 19 and newer
 )
+
+
+# Registration
+classes = (
+	OBJECT_PT_MDFObjectModePanel,
+	OBJECT_PT_MDFMaterialPresetPanel,
+	OBJECT_PT_MDFMaterialPreviewPanel,
+	OBJECT_PT_MDFMaterialLoadSettingsPanel,
+	OBJECT_PT_MDFMaterialNameReplacePanel,
+	OBJECT_PT_MDFMaterialPanel,
+	OBJECT_PT_MDFFlagsPanel,
+	OBJECT_PT_MDFMaterialTextureBindingListPanel,
+	OBJECT_PT_MDFMaterialPropertyListPanel,
+	OBJECT_PT_MDFMaterialMMTRSIndexListPanel,
+	OBJECT_PT_MDFMaterialGPBFDataListPanel,
+)

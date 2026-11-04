@@ -1,40 +1,21 @@
-# Single source of truth for game / file-format version tables shared across
-# mesh, mdf and tex modules. All version dicts used by multiple modules live
-# here; other modules import from here instead of redefining them.
+# MDF and tex version tables shared across the mesh, mdf and tex modules.
 #
-# GAME_INFO below is the master reference table for adding a new game:
-#   - mesh: the number in the .mesh.<N> file extension
-#   - mdf:  the number in the .mdf2.<N> file extension
-#   - tex:  the number in the .tex.<N> file extension
-#   - remap: the remapped mesh version (see modules/mesh/mesh_versions.py)
-#
-# When adding a game, update GAME_INFO AND the derived dicts that follow.
+# The per-game numbers live in modules/mesh/game_profile.py and the tables below
+# derive from those rows. Add a game by adding a row to game_profile._GAME_ROWS.
 
+from .mesh.game_profile import ALL_PROFILES, profile, profilesByFileVersion
+
+# game: (mesh file version, mdf file version, tex file version, remapped mesh version)
 GAME_INFO = {
-    # game      mesh         mdf  tex         remap  notes
-    "DMC5":    (1808282334,  10,   11,          75),  # mesh shared w/ RE2 family lookup
-    "RE2":     (1808312334,  10,   10,          80),
-    "RE3":     (1902042334,  13,   190820018,   85),
-    "RE8":     (2101050001,  19,   30,          90),  # also RE VERSE (2102020001 -> 20/31)
-    "RE2RT":   (2109108288,  21,   34,          95),  # RE3RT shares mdf 21
-    "RE7RT":   (220128762,   21,   35,          96),
-    "MHRSB":   (2109148288,  23,   28,          100),
-    "SF6":     (230110883,   31,   241101895,   105),
-    "RE4":     (221108797,   32,   143221013,   110),
-    "DD2":     (231011879,   40,   760230703,   115),  # KG/DR/DD2NEW share mdf 40
-    "KG":      (240306278,   40,   231106777,   120),
-    "DD2NEW":  (240423143,   40,   760230703,   124),
-    "DR":      (240424828,   40,   240606151,   125),
-    "MHWILDSBETA": (240820143, 45, 241106027,   130),  # beta build
-    "MHWILDS": (241111606,   45,   241106027,   130),
-    "ONI2":    (240827123,   46,   240701001,   127),
-    "MHS3":    (250604100,   49,   251111100,   136),  # mdf2.49 has no dedicated parser yet
-    "PRAG":    (251121828,   51,   251111100,   135),  # retail mesh 251121828; demo build shared RE9's 250925211
-    "RE9":     (250925211,   51,   250813143,   140),
+	gameProfile.name: (gameProfile.meshFileVersion, gameProfile.mdfVersion,
+	                   gameProfile.texVersion, gameProfile.remapVersion)
+	for gameProfile in ALL_PROFILES
+	if gameProfile.meshFileVersion is not None
 }
 
 # MDF version <-> game name (bidirectional). Alias games share one mdf version;
-# the int key maps to the first listed game.
+# the int key maps to the first listed game. Hand-curated: this is the UI alias
+# table, so RE3RT / RE Verse are listed here and DD2NEW / MHWILDSBETA are not.
 gameNameMDFVersionDict = {
     10: "RE2",  # DMC5
     13: "RE3",
@@ -73,27 +54,12 @@ def getMDFVersionToGameName(gameName):
     return gameNameMDFVersionDict.get(gameName, -1)
 
 
-# game name -> tex file version (the number in the .tex.<N> extension)
+# game name -> tex file version (the number in the .tex.<N> extension).
+# Build variants report the retail name, so DD2NEW / MHWILDSBETA are skipped here.
 gameNameToTexVersionDict = {
-    "DMC5": 11,
-    "RE2": 10,
-    "RE3": 190820018,
-    "MHR": 28,
-    "MHRSB": 28,
-    "RE8": 30,
-    "RE2RT": 34,
-    "RE3RT": 34,
-    "RE7RT": 35,
-    "RE4": 143221013,
-    "SF6": 241101895,
-    "DD2": 760230703,
-    "KG": 231106777,
-    "DR": 240606151,
-    "MHWILDS": 241106027,
-    "ONI2": 240701001,
-    "MHS3": 251111100,
-    "PRAG": 251111100,  # retail; demo shipped RE9's 250813143
-    "RE9": 250813143,
+    gameProfile.name: gameProfile.texVersion
+    for gameProfile in ALL_PROFILES
+    if gameProfile.texVersion is not None and gameProfile.reportedName == gameProfile.name
 }
 
 
@@ -105,55 +71,34 @@ def getTexVersion(gameName):
 # to a .mesh file. NOTE: mdf versions 21/40/46 are intentionally absent from
 # texVersionDict below (they fall back to wildcard search), but are listed here.
 mdfVersionDict = {
-    ".1808312334": ".10",  # RE2
-    ".1902042334": ".13",  # RE3
-    ".32": ".6",  # RE7
-    ".2101050001": ".19",  # RE8
-    ".2102020001": ".20",  # RE VERSE
-    ".1808282334": ".10",  # DMC5
-    ".2008058288": ".19",  # MHRise
-    ".2109148288": ".23",  # MHRiseSunbreak
-    ".2010231143": ".19",  # REVerse
-    ".2109108288": ".21",  # RERT
-    ".220128762": ".21",  # RE7RT
-    ".221108797": ".32",  # RE4
-    ".230110883": ".31",  # SF6
-    ".231011879": ".40",  # DD2
-    ".240306278": ".40",  # KG
-    ".240423143": ".40",  # DD2NEW
-    ".240424828": ".40",  # DR
-    ".240820143": ".45",  # MHWILDS
-    ".241111606": ".45",  # MHWILDS
-    ".240827123": ".46",  # ONI2
-    ".250604100": ".49",  # MHS3
-    ".250925211": ".51",  # RE9
-    ".251121828": ".51",  # PRAG
+    f".{gameProfile.meshFileVersion}": f".{gameProfile.mdfVersion}"
+    for gameProfile in profilesByFileVersion.values()
+    if gameProfile.mdfVersion is not None
 }
+# Mesh file versions that have no game row of their own.
+mdfVersionDict.update({
+    ".32": ".6",  # RE7
+    ".2008058288": ".19",  # MHRise
+    ".2010231143": ".19",  # REVerse
+})
 
 # MDF version -> tex file extension, used when locating .tex files next to an
-# MDF. mdf versions 21 (RE2RT family), 40 (DD2/KG/DR) and 46 (ONI2) are
-# intentionally absent: those games' tex versions were never confirmed, so the
-# lookup falls back to a wildcard search. Do NOT add them without verifying.
-texVersionDict = {
-    6: ".8",
-    10: ".10",
-    13: ".190820018",
-    19: ".30",
-    20: ".31",
-    # 21: ".34",  # unscannable, leave for wildcard search
-    23: ".28",
-    31: ".241101895",  # SF6
-    32: ".143221013",
-    # 40: ".760230703",  # unscannable, leave for wildcard search
-    45: ".241106027",
-    51: ".250813143",
-}
+# MDF. These games' tex versions were never confirmed, so the lookup falls back
+# to a wildcard search. Do NOT add them without verifying.
+_TEX_VERSION_UNCONFIRMED_MDF = frozenset((21, 40, 46, 49))  # RE2RT, DD2/KG/DR, ONI2, MHS3
+
+texVersionDict = {6: ".8"}  # RE7: mdf2.6 has no mesh game row
+for _gameProfile in profilesByFileVersion.values():
+    if _gameProfile.mdfVersion is None or _gameProfile.mdfVersion in _TEX_VERSION_UNCONFIRMED_MDF:
+        continue
+    texVersionDict[_gameProfile.mdfVersion] = f".{_gameProfile.texVersion}"
+texVersionDict = dict(sorted(texVersionDict.items()))
 
 # Explicit per-game tex version overrides, applied before texVersionDict when
 # the game name is known. PRAG retail shares mdf 51 with RE9 but ships MHS3's
 # tex version, so the mdf-derived lookup would pick RE9's .250813143.
 gameTexVersionDict = {
-    "PRAG": ".251111100",
+    "PRAG": f".{profile('PRAG').texVersion}",
 }
 
 

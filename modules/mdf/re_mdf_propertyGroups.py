@@ -16,12 +16,12 @@ from .file_re_mdf import gameNameMDFVersionDict
 from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
 from ..blender_utils import (isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName,
-                             getMDFMaterialName, materialNameSync, setMDFMaterialName, setMDFMaterialObjectName,
-                             syncMaterialNamesFromMDFMaterial)
+                             getMDFMaterialName, setMDFMaterialObjectName, findMDFCollectionForMaterialObject,
+                             findMeshCollectionForMDF)
+from ..mesh.material_name import MaterialRenameRequest, applyMaterialRename
 from ..gen_functions import raiseWarning
 from ..naming import parseREMeshObjectMaterialName, stripBlenderUserSuffix
-from .blender_re_mdf_texture_files import (getTextureRenameWarning, isAutoRenameTextureFilesEnabled,
-                                          syncTextureFileFromBindingPath)
+from .blender_re_mdf_texture_files import getTextureRenameWarning, setTextureBindingPath
 
 
 #Property names made editable in the material UI - statically maintained
@@ -200,15 +200,13 @@ def update_materialName(self, context):
 	oldObjectName = parentObj.name
 	oldMaterialName = getMDFMaterialName(parentObj)
 	setMDFMaterialObjectName(parentObj, self.materialName)
-	_, error = syncMaterialNamesFromMDFMaterial(parentObj, oldMaterialName, self.materialName)
-	if error != None:
-		raiseWarning(f"Material name was not changed: {error}")
-		#The write landed before this callback ran and Blender can't veto it, so put the
-		#property and the object name back - a duplicate name in the MDF would bind the
-		#meshes to the wrong material.
-		with materialNameSync():
-			setMDFMaterialName(parentObj, oldMaterialName)
-			parentObj.name = oldObjectName
+	mdfCollection = findMDFCollectionForMaterialObject(parentObj)
+	result = applyMaterialRename(MaterialRenameRequest(findMeshCollectionForMDF(mdfCollection), mdfCollection,
+	                                                   oldMaterialName, self.materialName,
+	                                                   renamedMaterialObject = parentObj,
+	                                                   previousObjectName = oldObjectName))
+	if result.error != None:
+		raiseWarning(f"Material name was not changed: {result.error}")
 
 def update_FlagsFromInt(self, context):
 	if not self.internal_changingFlagValues: 
@@ -481,14 +479,13 @@ class MDFPropPropertyGroup(bpy.types.PropertyGroup):
         default=0
     )
 def update_textureBindingPath(self, context):
-	#The update callback only receives the new value, so the previous one is kept on the
-	#group itself. It is written before the sync runs, so it always matches the path the
-	#binding holds once the edit is done (a refused rename keeps the path too).
+	#RNA hands the callback only the new value, so the previous one is kept on the group.
+	#It is updated before the write, which may put the old path back when a rename is
+	#refused, so it always matches the path the binding holds afterwards.
 	oldPath = self.previousPath
 	self.previousPath = self.path
-	if not isAutoRenameTextureFilesEnabled():
-		return
-	_, _, error = syncTextureFileFromBindingPath(self, oldPath, self.path)
+	error = setTextureBindingPath(self, self.path, oldPath = oldPath)
+	self.previousPath = self.path
 	if error != None:
 		raiseWarning(getTextureRenameWarning([error]))
 
@@ -500,7 +497,7 @@ class MDFTextureBindingPropertyGroup(bpy.types.PropertyGroup):
         name="",
         update=update_textureBindingPath
     )
-    previousPath: StringProperty(#Not exposed in editor, holds the path from before the update callback ran
+    previousPath: StringProperty(#Not exposed in editor, holds the path the binding had before the update callback ran
         name="",
         options={'HIDDEN'}
     )
@@ -691,3 +688,19 @@ class MDFMaterialPropertyGroup(bpy.types.PropertyGroup):
 	
 	gpbfData_items: CollectionProperty(type = MDFGPBFDataPropertyGroup)
 	gpbfData_index: IntProperty(name="")
+
+
+# Registration
+classes = (
+	MDFMMTRSIndexPropertyGroup,
+	MDFGPBFDataPropertyGroup,
+	MDFFlagsPropertyGroup,
+	MDFToolPanelPropertyGroup,
+	MDFPropPropertyGroup,
+	MDFTextureBindingPropertyGroup,
+	MDFMaterialPropertyGroup,
+	MESH_UL_MDFPropertyList,
+	MESH_UL_MDFTextureBindingList,
+	MESH_UL_MDFMMTRSDataList,
+	MESH_UL_MDFGPBFDataList,
+)

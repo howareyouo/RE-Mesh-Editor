@@ -39,3 +39,9 @@ class OBJECT_PT_REModWorkspacePanel(Panel):
 			panelBody.operator("re_mod_workspace.uninstall_mod_files_from_game_dir",icon="TRASH")
 			panelBody.operator("re_mod_workspace.launch_game",icon = "PLAY")
 		
+
+
+# Registration
+classes = (
+	OBJECT_PT_REModWorkspacePanel,
+)

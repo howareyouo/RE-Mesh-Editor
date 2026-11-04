@@ -157,3 +157,9 @@ class SFurEntryPropertyGroup(bpy.types.PropertyGroup):
 		max = 65536,
 		)
 	
+
+
+# Registration
+classes = (
+	SFurEntryPropertyGroup,
+)

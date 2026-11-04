@@ -6,11 +6,13 @@ from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollec
 	normalizeMaterialNameFilter,
 	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	)
-from ..gen_functions import textColors,raiseWarning,splitNativesPath,getAdjacentFileVersion,parseFileVersion,ENABLE_EXPORT_WARNINGS
+from ..gen_functions import textColors,raiseWarning,getAdjacentFileVersion,parseFileVersion,ENABLE_EXPORT_WARNINGS
 from ..naming import normalizeREMaterialName,getREMeshMaterialName,formatREMaterialObjectName
+from ..tex.tex_paths import normalizeTexturePath
 from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
 from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
 from .ui_re_mdf_panels import tag_redraw
+from .blender_re_mdf_texture_files import setTextureBindingPath, texturePathSync
 
 MDFGameNameConflictDict = set(["RE2","RE2RT","DD2"])
 
@@ -107,10 +109,13 @@ def addPropsToPropList(obj,matPropertyList):
 
 
 def addTextureBindingsToBindingList(obj,matTextureList):
-	for texture in matTextureList:
-		newListItem = obj.re_mdf_material.textureBindingList_items.add()
-		newListItem.textureType = texture.textureType
-		newListItem.path = texture.texturePath
+	#The paths come from the MDF file, so no file follows them: hold the sync off while
+	#the bindings are filled in.
+	with texturePathSync():
+		for texture in matTextureList:
+			newListItem = obj.re_mdf_material.textureBindingList_items.add()
+			newListItem.textureType = texture.textureType
+			setTextureBindingPath(newListItem, texture.texturePath, oldPath = "")
 
 def addMMTRSDataToList(obj,mmtrsData):
 	for indexList in mmtrsData.indexDataList:
@@ -297,14 +302,6 @@ def MDFErrorCheck(collectionName, onlyMaterialNames = None, useBlenderMaterialNa
 		print(textColors.FAIL + "__________________________________\nMDF export failed."+textColors.ENDC)
 		return False
 
-def fixTexPath(path):#Fix potential path problems
-	if not path.endswith(".rtex"):
-		path = path.replace(os.sep,"/").split(".tex")[0]+".tex"#Fix incorrect directory separators and including version numbers on the tex path
-		if "natives" in path.lower():
-			splitPath = splitNativesPath(path)
-			if splitPath != None:
-				path = splitPath[1]#Fix including the chunk root path in the tex path
-	return path
 def filterMDFMaterials(materialObjList, onlyMaterialNames):
 	"""Keep only the material objects whose name is used by the mesh, so materials that
 	exist in the MDF collection but not in the mesh collection are left out of the file.
@@ -398,7 +395,7 @@ def buildMDF(mdfCollectionName,mdfVersion = None,onlyMaterialNames = None,useBle
 			for textureBinding in materialObj.re_mdf_material.textureBindingList_items:
 				textureEntry = TextureBinding()
 				textureEntry.textureType = textureBinding.textureType
-				textureEntry.texturePath = fixTexPath(textureBinding.path)
+				textureEntry.texturePath = normalizeTexturePath(textureBinding.path)
 				materialEntry.textureList.append(textureEntry)
 			
 			for prop in materialObj.re_mdf_material.propertyList_items:

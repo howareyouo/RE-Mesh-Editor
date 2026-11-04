@@ -9,14 +9,15 @@ from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..naming import parseREMeshObjectMaterialName,stripBlenderUserSuffix
 from ..blender_utils import (showErrorMessageBox, createEmpty, findMeshCollectionForMDF,
                              MDF_MATERIAL_TYPE, replaceMaterialNameText)
-from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,fixTexPath,iterMDFMaterialObjects
+from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
 from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
 from .file_re_mdf import getMDFVersionToGameName
-from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureFileBaseName,
-                                           getTextureRenameWarning, isAutoRenameTextureFilesEnabled,
-                                           iterAllTextureBindings, syncTextureFileFromBindingPath,
+from ..tex.tex_paths import getTextureFileBaseName, normalizeTexturePath
+from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureRenameWarning,
+                                           isAutoRenameTextureFilesEnabled, iterAllTextureBindings,
+                                           setTextureBindingPath, syncTextureFileFromBindingPath,
                                            texturePathSync)
 
 class WM_OT_NewMDFHeader(Operator):
@@ -262,7 +263,7 @@ class WM_OT_FindReplaceTextureBindings(Operator):
 		#would feed the pass its own results if it ran while paths were being computed.
 		with texturePathSync():
 			for entry, oldPath, newPath in pathPlanList:
-				entry.path = newPath
+				setTextureBindingPath(entry, newPath, oldPath = oldPath)
 		errorList = []
 		#The preference gates the disk side of a bulk replace too, like it does for a
 		#single binding edited in the MDF panel: the paths always move, the files follow
@@ -364,10 +365,10 @@ class WM_OT_NullifyTextureBindings(Operator):
 					for entry in material.textureBindingList_items:
 						if entry.textureType in texTypeDict:
 							if gameName in texTypeDict[entry.textureType]:
-								entry.path = texTypeDict[entry.textureType][gameName]
+								setTextureBindingPath(entry, texTypeDict[entry.textureType][gameName])
 								replaceCount += 1
 							elif "generic" in texTypeDict[entry.textureType]:
-								entry.path = texTypeDict[entry.textureType]["generic"]
+								setTextureBindingPath(entry, texTypeDict[entry.textureType]["generic"])
 								replaceCount += 1
 							else:
 								print(f"Unknown texture type {entry.textureType} on {material.materialName}, skipping.")
@@ -403,7 +404,7 @@ class WM_OT_ClearUnusedTextures(Operator):
 		referencedSet = set()
 		for materialObj in iterMDFMaterialObjects(mdfCollection):
 			for binding in materialObj.re_mdf_material.textureBindingList_items:
-				refBase = os.path.basename(fixTexPath(binding.path)).replace("@","").lower()
+				refBase = os.path.basename(normalizeTexturePath(binding.path)).replace("@","").lower()
 				if refBase.endswith(".tex"):
 					referencedSet.add(refBase)
 		unusedList = []
@@ -476,3 +477,22 @@ class WM_OT_ClearUnusedTextures(Operator):
 				otherMDFCount += 1
 		self.otherMDFCount = otherMDFCount - 1#Exclude the active MDF itself
 		return context.window_manager.invoke_props_dialog(self)
+
+
+# Registration
+classes = (
+	WM_OT_NewMDFHeader,
+	WM_OT_ReindexMaterials,
+	WM_OT_ReplaceMaterialNames,
+	WM_OT_AddPresetMaterial,
+	WM_OT_SavePreset,
+	WM_OT_OpenPresetFolder,
+	WM_OT_ApplyMDFToMeshCollection,
+	WM_OT_FindReplaceTextureBindings,
+	WM_OT_FindReplaceAddItem,
+	WM_OT_FindReplaceRemoveItem,
+	WM_OT_NullifyTextureBindings,
+	WM_OT_ClearUnusedTextures,
+	FindReplaceItem,
+	FindReplacePropertyGroup,
+)

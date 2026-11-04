@@ -7,85 +7,23 @@
 #snapshot. The comparison runs on a timer instead of a depsgraph handler: an outliner
 #rename doesn't reliably tag a depsgraph update, and a timer also catches renames made
 #by undo/redo or by other addons.
+#
+#The snapshot and the renames themselves belong to material_name.py, which owns them for
+#every door a rename can come from; this module only decides which renames the user made
+#and hands them over as requests.
 
 import bpy
 
-from ..blender_utils import (MDF_MATERIAL_TYPE, findMDFCollectionForMaterialObject,
-                             findMDFCollectionForMesh, findMeshCollectionForMDF,
-                             findMeshCollectionForObject, getMDFMaterialName,
-                             getMDFMaterialNameConflict, getToolPanelFlag,
-                             iterAllMDFMaterialObjects, materialNameSync,
-                             renameREMeshMaterial, setMDFMaterialName, setMDFMaterialObjectName)
-from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName, replaceREMeshMaterialSuffix
+from ..blender_utils import (findMDFCollectionForMaterialObject, findMDFCollectionForMesh,
+                             findMeshCollectionForMDF, findMeshCollectionForObject, getMDFMaterialName,
+                             getMDFMaterialNameConflict, getToolPanelFlag, iterAllMDFMaterialObjects,
+                             setMDFMaterialObjectName)
+from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName
+from .material_name import (MaterialRenameRequest, applyMaterialRename, clearNameSnapshot,
+                            getSnapshotObjectName, hasNameSnapshot, refreshNameSnapshot,
+                            restoreRefusedMaterialRename)
 
 POLL_INTERVAL = 0.5
-
-#object pointer -> object name as of the last check
-_nameSnapshot = {}
-
-
-def captureNameSnapshot():
-	"""Record the current name of every object a material name lives on.
-
-	Both sides are needed: the "__" suffix of the mesh objects and the
-	"Material NN (name)" name of the MDF material objects, which is where a user can
-	rename a material without touching any property (see findRenamedMDFMaterialObjects)."""
-	#bpy.data is a _RestrictData stub while an addon loads, and an empty snapshot only
-	#means "no baseline yet" - the first timer tick captures the real one.
-	objectList = getattr(bpy.data, "objects", None)
-	if objectList == None:
-		return {}
-	snapshot = {}
-	for obj in objectList:
-		if obj.type == "MESH" or obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
-			snapshot[obj.as_pointer()] = obj.name
-	return snapshot
-
-
-def refreshNameSnapshot():
-	"""Make the current names the baseline, ignoring renames made until now."""
-	global _nameSnapshot
-	_nameSnapshot = captureNameSnapshot()
-
-
-def clearSnapshotEntry(obj):
-	"""Drop one object from the baseline, so what happens to its name next - including
-	being renamed by someone else - is new state and not a user rename."""
-	global _nameSnapshot
-	_nameSnapshot.pop(obj.as_pointer(), None)
-
-
-def restoreObjectName(obj, restoreName):
-	"""Put a name a rename was refused on back onto the object.
-
-	Blender doesn't just give the old name back: a .NNN suffix is appended when another
-	object has taken it in the meantime (e.g. a duplicated mesh in the same tick), and
-	the data-block name is refused outright while its mesh datablock still holds it. A
-	failed restore raises into the timer and stops the whole sync pass, so both cases are
-	handled here - the exception is the datablock case, where a different name is the
-	only way to get the object back off the refused one. Returns the name it ended up
-	with (see stripBlenderUserSuffix, which keeps ".NNN" suffixes out of the material
-	name), so the caller can log it."""
-	try:
-		obj.name = restoreName
-	except Exception:
-		#Blender refuses the name only while the object's own mesh datablock still holds it
-		#(the rest of the collision cases are resolved with a suffix instead), which is the
-		#datablock case: release the name there and try again.
-		meshData = getattr(obj, "data", None)
-		if meshData == None:
-			raise
-		meshData.name = getattr(meshData, "name", "") + "_mesh"
-		obj.name = restoreName
-	#The object is clean again, so the rollback inside the next tick must not be taken for
-	#a fresh rename - of the material name or of any sibling that was let go to restore it
-	for otherObj in bpy.data.objects:
-		previousName = _nameSnapshot.get(otherObj.as_pointer())
-		if previousName == None or otherObj.name in (previousName, restoreName):
-			continue
-		if parseREMeshObjectMaterialName(otherObj.name) == parseREMeshObjectMaterialName(restoreName):
-			clearSnapshotEntry(otherObj)
-	return obj.name
 
 
 def findRenamedMeshMaterials():
@@ -96,7 +34,7 @@ def findRenamedMeshMaterials():
 	for obj in bpy.data.objects:
 		if obj.type != "MESH":
 			continue
-		oldObjectName = _nameSnapshot.get(obj.as_pointer())
+		oldObjectName = getSnapshotObjectName(obj)
 		if oldObjectName == None or oldObjectName == obj.name:
 			continue
 		oldMaterialName = parseREMeshObjectMaterialName(oldObjectName)
@@ -119,35 +57,23 @@ def getMeshRenameConflict(obj, oldMaterialName, newMaterialName):
 	return getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMeshObject = obj)
 
 
-def rollbackMeshMaterialName(obj, oldMaterialName):
-	"""Put a mesh name a refused rename left behind back onto its old material name."""
-	restoredName = replaceREMeshMaterialSuffix(obj.name, oldMaterialName)
-	restoredName = restoreObjectName(obj, restoredName)
-	if parseREMeshObjectMaterialName(restoredName) != oldMaterialName:
-		print(f"RE Mesh Editor: \"{obj.name}\" was renamed back to \"{restoredName}\", "
-		      f"\"{oldMaterialName}\" was taken")
-
-
 def syncRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
 	"""Push a material rename made by renaming a mesh object onto the rest of its material.
 
 	The outliner rename has already moved obj onto the new material name, so it is passed
 	along: the name it now carries is what has to be checked for a conflict, and the rest
-	of the material follows it. A refused rename is undone, and the rename count decides
-	whether anything happened - the object itself is always already renamed."""
+	of the material follows it. A refused rename is undone by the rename itself, and the
+	rename count decides whether anything happened - the object itself is always already
+	renamed."""
 	meshCollection = findMeshCollectionForObject(obj)
 	if meshCollection == None:
 		return False
-	renamedObjList, renamedMDFCount, error = renameREMeshMaterial(
-		meshCollection, findMDFCollectionForMesh(meshCollection), oldMaterialName, newMaterialName,
-		renamedMeshObject = obj)
-	if error != None:
-		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {error}")
-		#A refused rename is undone: the outliner can't veto it, and a mesh name with no
-		#matching material would fail the export check anyway.
-		rollbackMeshMaterialName(obj, oldMaterialName)
+	result = applyMaterialRename(MaterialRenameRequest(meshCollection, findMDFCollectionForMesh(meshCollection),
+	                                                   oldMaterialName, newMaterialName, renamedMeshObject = obj))
+	if result.error != None:
+		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {result.error}")
 		return False
-	return bool(renamedObjList or renamedMDFCount)
+	return bool(result.renamedMeshObjects or result.renamedMDFMaterialCount)
 
 
 def refuseRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
@@ -162,7 +88,7 @@ def refuseRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
 	if error == None:
 		return False
 	print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {error}")
-	rollbackMeshMaterialName(obj, oldMaterialName)
+	restoreRefusedMaterialRename(MaterialRenameRequest(oldMaterialName = oldMaterialName, renamedMeshObject = obj))
 	return True
 
 
@@ -176,7 +102,7 @@ def findRenamedMDFMaterialObjects():
 	Reads the snapshot without touching it, so a caller can decide what to do first."""
 	renameList = []
 	for obj in iterAllMDFMaterialObjects():
-		oldObjectName = _nameSnapshot.get(obj.as_pointer())
+		oldObjectName = getSnapshotObjectName(obj)
 		if oldObjectName == None or oldObjectName == obj.name:
 			continue
 		oldMaterialName = parseMDFObjectNameMaterialName(oldObjectName)
@@ -210,32 +136,18 @@ def syncRenamedMDFMaterialObject(obj, oldObjectName, oldMaterialName, newMateria
 		      f"\"Material NN (name)\", kept \"{keptName}\" ({keptObjectName})")
 		return 0
 	mdfCollection = findMDFCollectionForMaterialObject(obj)
-	meshCollection = findMeshCollectionForMDF(mdfCollection)
-	#The renamed object is skipped as an ignore target: it already carries the new name, so
-	#looking it up under the old name finds nothing. It still has to be reported as the source
-	#of the rename, or the rollback short circuit would take a refused rename for a done one.
-	renamedObjList, renamedMDFCount, error = renameREMeshMaterial(
-		meshCollection, mdfCollection, oldMaterialName, newMaterialName,
-		ignoreMaterialObject = obj, renamedMaterialObject = obj)
-	if error != None:
-		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {error}")
-		#A refused rename is undone, like the mesh side: a duplicate name in the MDF would
-		#bind the meshes to the wrong material. The object name is the source of this rename,
-		#so it is put back on a "Material NN (name)" carrying the old material name first -
-		#the rollback has to keep that convention even when the old object name was taken.
-		setMDFMaterialObjectName(obj, oldMaterialName)
-		restoredName = restoreObjectName(obj, oldObjectName)
-		if restoredName != oldObjectName:
-			print(f"RE Mesh Editor: \"{oldObjectName}\" was renamed back to \"{restoredName}\" "
-			      f"because another object took the old name")
+	#The renamed object is the source of the rename: it already carries the new name, so it
+	#is passed along instead of being looked up under the old one, and its property is written
+	#with the rest so the mesh side and the MDF stay in step.
+	result = applyMaterialRename(MaterialRenameRequest(findMeshCollectionForMDF(mdfCollection), mdfCollection,
+	                                                   oldMaterialName, newMaterialName,
+	                                                   renamedMaterialObject = obj, previousObjectName = oldObjectName))
+	if result.error != None:
+		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {result.error}")
 		return 0
-	#The object name is the source of this rename, so the property is written after the
-	#meshes: the property's update callback would otherwise start a second sync.
-	with materialNameSync():
-		propertyChanged = setMDFMaterialName(obj, newMaterialName)
 	#Nothing left to change means the rename was already applied - e.g. by the mesh pass
 	#of the same tick, which renames the MDF material of a renamed mesh
-	return 1 if (renamedObjList or renamedMDFCount or propertyChanged) else 0
+	return 1 if (result.renamedMeshObjects or result.renamedMDFMaterialCount) else 0
 
 
 def syncRenamedMaterialNames(syncMeshRenames = True):
@@ -249,7 +161,6 @@ def syncRenamedMaterialNames(syncMeshRenames = True):
 	renaming a material always renames the meshes, the option only controls the mesh to
 	material direction. Turning it off stops the sync, not the duplicate name check: a
 	rename onto a material name another mesh already uses is undone either way."""
-	global _nameSnapshot
 	syncedCount = 0
 	meshRenameList = findRenamedMeshMaterials()
 	materialRenameList = findRenamedMDFMaterialObjects()
@@ -265,13 +176,13 @@ def syncRenamedMaterialNames(syncMeshRenames = True):
 	finally:
 		#Re-capture unconditionally: our own renames must not look like user renames on
 		#the next tick, and anything renamed while we were working shows up next pass.
-		_nameSnapshot = captureNameSnapshot()
+		refreshNameSnapshot()
 	return syncedCount
 
 
 def _pollMaterialNameRenames():
 	try:
-		if not _nameSnapshot:
+		if not hasNameSnapshot():
 			refreshNameSnapshot()
 		else:
 			#The mesh to material direction is the only one the option controls, and it is off by default
@@ -301,4 +212,4 @@ def unregister():
 		bpy.app.timers.unregister(_pollMaterialNameRenames)
 	if resetNameSnapshotOnLoad in bpy.app.handlers.load_post:
 		bpy.app.handlers.load_post.remove(resetNameSnapshotOnLoad)
-	_nameSnapshot.clear()
+	clearNameSnapshot()

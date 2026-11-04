@@ -292,3 +292,12 @@ class WM_OT_CopyConvertedTextures(Operator):
 			self.report({"ERROR"},f"Texture directory does not exist")
 		
 		return {"FINISHED"}
+
+
+# Registration
+classes = (
+	WM_OT_ConvertFolderToTex,
+	WM_OT_CopyConvertedTextures,
+	WM_OT_ConvertDDSTexFile,
+	WM_OT_PNGToTexConversionWindow,
+)

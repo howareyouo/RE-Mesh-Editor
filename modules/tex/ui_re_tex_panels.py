@@ -32,3 +32,9 @@ class OBJECT_PT_TexConversionPanel(Panel):
 		layout.operator("re_tex.copy_converted_tex")
 		
 		
+
+
+# Registration
+classes = (
+	OBJECT_PT_TexConversionPanel,
+)

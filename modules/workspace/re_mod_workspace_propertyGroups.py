@@ -92,3 +92,11 @@ class REMOD_UL_MaterialConversionList(bpy.types.UIList):
 	# Disable double-click to rename
 	def invoke(self, context, event):
 		return {'PASS_THROUGH'}
+
+
+# Registration
+classes = (
+	ModWorkspaceToolPanelPropertyGroup,
+	ConvertedMaterialEntryPropertyGroup,
+	REMOD_UL_MaterialConversionList,
+)

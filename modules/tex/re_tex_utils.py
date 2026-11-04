@@ -3,7 +3,8 @@
 from ..dds.file_dds import DDS, DX10_Header, DDSFile, getDDSHeader
 
 from .file_re_tex import RE_TexFile, MipData, CompressedImageHeader,GDEFLATE_VERSIONS
-from ..gen_functions import raiseWarning, splitNativesPath, STREAMING_FOLDER
+from ..gen_functions import raiseWarning
+from .tex_paths import getStreamingTexturePath
 from ..gdeflate.gdeflate import GDeflate, GDeflateCompressionLevel, GDeflateError
 from ..ddsconv.directx.texconv import Texconv
 from .enums import tex_format_enum as texenum
@@ -285,21 +286,6 @@ def writeStreamingTexFiles(ddsList, texVersion, mainOutPath, streamingOutPath, s
     streamingTexFile.write(streamingOutPath)
     mainTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=streamingMipCount, mipEnd=mipCount)
     mainTexFile.write(mainOutPath)
-
-
-def getStreamingTexturePath(texPath):
-    """Returns the streaming tex path for a tex file inside a mod directory.
-
-    The streaming folder is placed directly under the game folder and mirrors
-    the texture's relative path, ex:
-    natives/STM/Art/Model/foo/pl_foo_ALB.tex.241106027 ->
-    natives/STM/streaming/Art/Model/foo/pl_foo_ALB.tex.241106027"""
-    normalizedPath = texPath.replace("/", os.sep).replace("\\", os.sep)
-    split = splitNativesPath(normalizedPath)
-    if split != None:
-        rootPath, nativesPath = split
-        return os.path.join(rootPath, STREAMING_FOLDER, nativesPath)
-    return os.path.join(os.path.dirname(texPath), STREAMING_FOLDER, os.path.basename(texPath))
 
 
 def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOutPath=None):

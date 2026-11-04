@@ -24,26 +24,9 @@ from .modules.game_versions import mdfVersionDict
 #mesh
 from .modules.mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .modules.mesh.blender_re_mesh import importREMeshFile,exportREMeshFile
-from .modules.mesh.re_mesh_propertyGroups import (
-	ExporterNodePropertyGroup,
-	MESH_UL_REExporterList
-	)
-from .modules.mesh.re_mesh_operators import (
-	WM_OT_DeleteLoose,
-	WM_OT_RenameMeshToREFormat,
-	WM_OT_RemoveZeroWeightVertexGroups,
-	WM_OT_LimitTotalNormalizeAll,
-	WM_OT_CreateMeshCollection,
-	WM_OT_REBatchExporter,
-	WM_OT_SolveRepeatedUVs,
-	WM_OT_QuickBatchExport,
-
-)
-from .modules.mesh.ui_re_mesh_panels import (
-	OBJECT_PT_MeshObjectModePanel,
-	OBJECT_PT_MeshArmatureToolsPanel,
-	OBJECT_PT_REAssetExtensionPanel,
-	)
+from .modules.mesh.re_mesh_propertyGroups import classes as meshPropertyGroupClasses
+from .modules.mesh.re_mesh_operators import classes as meshOperatorClasses
+from .modules.mesh.ui_re_mesh_panels import classes as meshPanelClasses
 # Mesh rename -> material name sync (timer + load handler, see register below)
 from .modules.mesh import blender_re_mesh_name_sync
 
@@ -52,254 +35,71 @@ from .modules.mesh import blender_re_mesh_name_sync
 from.modules.mdf.file_re_mdf import gameNameMDFVersionDict
 from .modules.mdf.blender_re_mdf import importMDFFile,exportMDFFile
 from .modules.mdf.blender_re_mdf_texture_files import registerUndoHandlers, unregisterUndoHandlers
-from .modules.mdf.ui_re_mdf_panels import (
-	OBJECT_PT_MDFObjectModePanel,
-	OBJECT_PT_MDFMaterialPresetPanel,
-	OBJECT_PT_MDFMaterialPreviewPanel,
-	OBJECT_PT_MDFMaterialPanel,
-	OBJECT_PT_MDFFlagsPanel,
-	OBJECT_PT_MDFMaterialPropertyListPanel,
-	OBJECT_PT_MDFMaterialTextureBindingListPanel,
-	OBJECT_PT_MDFMaterialMMTRSIndexListPanel,
-	OBJECT_PT_MDFMaterialGPBFDataListPanel,
-	OBJECT_PT_MDFMaterialLoadSettingsPanel,
-	OBJECT_PT_MDFMaterialNameReplacePanel,
-	)
-from .modules.mdf.re_mdf_propertyGroups import (
-	MDFToolPanelPropertyGroup,
-	MDFFlagsPropertyGroup,
-	MDFPropPropertyGroup,
-	MDFTextureBindingPropertyGroup,
-	MDFMaterialPropertyGroup,
-	MDFMMTRSIndexPropertyGroup,
-	MDFGPBFDataPropertyGroup,
-	
-	MESH_UL_MDFPropertyList,
-	MESH_UL_MDFTextureBindingList,
-	MESH_UL_MDFMMTRSDataList,
-	MESH_UL_MDFGPBFDataList,
-	)
+from .modules.mdf.ui_re_mdf_panels import classes as mdfPanelClasses
+from .modules.mdf.re_mdf_propertyGroups import classes as mdfPropertyGroupClasses
 
-from .modules.mdf.re_mdf_operators import (
-	WM_OT_NewMDFHeader,
-	WM_OT_ReindexMaterials,
-	WM_OT_ReplaceMaterialNames,
-	WM_OT_AddPresetMaterial,
-	WM_OT_SavePreset,
-	WM_OT_OpenPresetFolder,
-	WM_OT_ApplyMDFToMeshCollection,
-	WM_OT_FindReplaceTextureBindings,
-	WM_OT_FindReplaceAddItem,
-	WM_OT_FindReplaceRemoveItem,
-	WM_OT_NullifyTextureBindings,
-	WM_OT_ClearUnusedTextures,
-	FindReplaceItem,
-	FindReplacePropertyGroup,
-)
+from .modules.mdf.re_mdf_operators import classes as mdfOperatorClasses
 #tex
 from .modules.tex.file_re_tex import gameNameToTexVersionDict
 
-from .modules.tex.ui_re_tex_panels import (
-	OBJECT_PT_TexConversionPanel,
-	)
+from .modules.tex.ui_re_tex_panels import classes as texPanelClasses
 
-from .modules.tex.re_tex_operators import (
-	WM_OT_ConvertFolderToTex,
-	WM_OT_CopyConvertedTextures,
-	WM_OT_ConvertDDSTexFile,
-	WM_OT_PNGToTexConversionWindow,
-	
-
-)
-from .modules.tex.re_tex_propertyGroups import (
-	PNGConversionEntryPropertyGroup,
-	TEX_UL_PNGConversionList,
-	)
-from .modules.mesh.re_mesh_export_errors import  (
-	REMeshErrorEntry,
-	MESH_UL_REMeshErrorList,
-	WM_OT_ShowREMeshErrorWindow,
-	)
+from .modules.tex.re_tex_operators import classes as texOperatorClasses
+from .modules.tex.re_tex_propertyGroups import classes as texPropertyGroupClasses
+from .modules.mesh.re_mesh_export_errors import classes as meshErrorClasses
 #fbxskel
 from .modules.fbxskel.blender_re_fbxskel import importFBXSkelFile,exportFBXSkelFile
-from .modules.fbxskel.re_fbxskel_operators import (
-	WM_OT_LinkArmatureBones,
-	WM_OT_ClearBoneLinkages
-	)
-from .modules.fbxskel.re_fbxskel_propertyGroups import (
-	ToggleStringPropertyGroup,
-	FBXSKEL_UL_ObjectCheckList
-	)
+from .modules.fbxskel.re_fbxskel_operators import classes as fbxskelOperatorClasses
+from .modules.fbxskel.re_fbxskel_propertyGroups import classes as fbxskelPropertyGroupClasses
 
 #sfur
 from .modules.sfur.blender_re_sfur import importSFurFile,exportSFurFile
-from .modules.sfur.re_sfur_operators import (
-	WM_OT_NewSFurHeader,
-	WM_OT_ReindexEntries,
-	WM_OT_AddFurEntry,
-	)
-from .modules.sfur.ui_re_sfur_panels import (
-	OBJECT_PT_SFurObjectModePanel,
-	OBJECT_PT_SFurEntryPanel,
-	)
-from .modules.sfur.re_sfur_propertyGroups import (
-	SFurEntryPropertyGroup,
-	)
+from .modules.sfur.re_sfur_operators import classes as sfurOperatorClasses
+from .modules.sfur.ui_re_sfur_panels import classes as sfurPanelClasses
+from .modules.sfur.re_sfur_propertyGroups import classes as sfurPropertyGroupClasses
 #mod workspace
 
-from .modules.workspace.re_mod_workspace_operators import (
-	WM_OT_CreateModWorkspace,
-	WM_OT_EditModInfo,
-	WM_OT_ConvertToREEngine,
-	WM_OT_TexturePacker,
-	WM_OT_ToggleModFileTracking,
-	WM_OT_CopyModFilesToGameDir,
-	WM_OT_UninstallModFilesFromGameDir,
-	WM_OT_LaunchGame,
-	WM_OT_OpenModWorkspace,
-	)
+from .modules.workspace.re_mod_workspace_operators import classes as workspaceOperatorClasses
 
-from .modules.workspace.re_mod_workspace_propertyGroups import (
-	ModWorkspaceToolPanelPropertyGroup,
-	ConvertedMaterialEntryPropertyGroup,
-	REMOD_UL_MaterialConversionList,
-	)
-from .modules.workspace.ui_re_mod_workspace_panels import (
-	OBJECT_PT_REModWorkspacePanel,
-	)
+from .modules.workspace.re_mod_workspace_propertyGroups import classes as workspacePropertyGroupClasses
+from .modules.workspace.ui_re_mod_workspace_panels import classes as workspacePanelClasses
 # Import/export operators and addon preferences, split out of __init__.py
 from . import preferences
 from .modules import io_operators
 from .modules.io_operators import (ImportREMesh, ExportREMesh, ImportREMDF, ExportREMDF,
                                    ImportREFBXSkel, ExportREFBXSkel, ImportRESFur, ExportRESFur)
 
+# Property group types reattached as RNA properties in register() below; the owning
+# module also lists them in its `classes` tuple above.
+from .modules.mdf.re_mdf_operators import FindReplacePropertyGroup
+from .modules.mdf.re_mdf_propertyGroups import MDFMaterialPropertyGroup, MDFToolPanelPropertyGroup
+from .modules.sfur.re_sfur_propertyGroups import SFurEntryPropertyGroup
+from .modules.workspace.re_mod_workspace_propertyGroups import ModWorkspaceToolPanelPropertyGroup
 
-# Registration. First the classes from the split-out modules (preferences.py and
-# modules/io_operators.py), then the feature-module classes registered from here.
+
+# Registration. Each module now owns the classes it defines (the `classes` tuple at
+# the foot of the file); this list only puts them in registration order.
 classes = [
-	#preferences (preferences.py)
 	*preferences.classes,
-	#RE mesh / MDF / FBXSkel / SFur import & export (modules/io_operators.py)
 	*io_operators.classes,
-	#mod workspace
-	#property groups
-	ModWorkspaceToolPanelPropertyGroup,
-	ConvertedMaterialEntryPropertyGroup,
-	REMOD_UL_MaterialConversionList,
-	#operators
-	WM_OT_CreateModWorkspace,
-	WM_OT_EditModInfo,
-	WM_OT_ConvertToREEngine,
-	#WM_OT_TexturePacker,#Not implemented yet
-	WM_OT_ToggleModFileTracking,
-	WM_OT_CopyModFilesToGameDir,
-	WM_OT_UninstallModFilesFromGameDir,
-	WM_OT_LaunchGame,
-	WM_OT_OpenModWorkspace,
-	#ui panels
-	OBJECT_PT_REModWorkspacePanel,
-	
-	
-	#mesh
-
-	WM_OT_DeleteLoose,
-	WM_OT_RenameMeshToREFormat,
-	WM_OT_RemoveZeroWeightVertexGroups,
-	WM_OT_LimitTotalNormalizeAll,
-	WM_OT_CreateMeshCollection,
-	ExporterNodePropertyGroup,
-	MESH_UL_REExporterList,
-	WM_OT_REBatchExporter,
-	WM_OT_SolveRepeatedUVs,
-	WM_OT_QuickBatchExport,
-	
-	#mdf
-	#property groups
-	MDFMMTRSIndexPropertyGroup,
-	MDFGPBFDataPropertyGroup,
-	MDFFlagsPropertyGroup,
-	MDFToolPanelPropertyGroup,
-	MDFPropPropertyGroup,
-	MDFTextureBindingPropertyGroup,
-	MDFMaterialPropertyGroup,
-	REMeshErrorEntry,
-	MESH_UL_REMeshErrorList,
-	
-	MESH_UL_MDFPropertyList,
-	MESH_UL_MDFTextureBindingList,
-	MESH_UL_MDFMMTRSDataList,
-	MESH_UL_MDFGPBFDataList,
-	
-	#ui panels
-	OBJECT_PT_MDFObjectModePanel,
-	OBJECT_PT_MDFMaterialPresetPanel,
-	OBJECT_PT_MDFMaterialPreviewPanel,
-	OBJECT_PT_MDFMaterialLoadSettingsPanel,
-	OBJECT_PT_MDFMaterialNameReplacePanel,
-	OBJECT_PT_MeshObjectModePanel,
-	OBJECT_PT_MeshArmatureToolsPanel,
-	OBJECT_PT_MDFMaterialPanel,
-	OBJECT_PT_MDFFlagsPanel,
-	OBJECT_PT_MDFMaterialTextureBindingListPanel,
-	OBJECT_PT_MDFMaterialPropertyListPanel,
-	OBJECT_PT_MDFMaterialMMTRSIndexListPanel,
-	OBJECT_PT_MDFMaterialGPBFDataListPanel,
-	
-	
-	#operators
-	WM_OT_NewMDFHeader,
-	WM_OT_ReindexMaterials,
-	WM_OT_ReplaceMaterialNames,
-	WM_OT_AddPresetMaterial,
-	WM_OT_SavePreset,
-	WM_OT_OpenPresetFolder,
-	WM_OT_ApplyMDFToMeshCollection,
-	WM_OT_ShowREMeshErrorWindow,
-	WM_OT_FindReplaceTextureBindings,
-	WM_OT_FindReplaceAddItem,
-	WM_OT_FindReplaceRemoveItem,
-	WM_OT_NullifyTextureBindings,
-	WM_OT_ClearUnusedTextures,
-	FindReplaceItem,
-	FindReplacePropertyGroup,
-	
-	#sfur
-	#operators
-	WM_OT_NewSFurHeader,
-	WM_OT_ReindexEntries,
-	WM_OT_AddFurEntry,
-	#WM_OT_ApplySFurToMeshCollection,
-	#ui panels
-	OBJECT_PT_SFurObjectModePanel,
-	OBJECT_PT_SFurEntryPanel,
-	#property groups
-	SFurEntryPropertyGroup,
-	
-	#tex
-	#property groups
-	PNGConversionEntryPropertyGroup,
-	TEX_UL_PNGConversionList,
-	
-	#operators
-	WM_OT_ConvertFolderToTex,
-	WM_OT_CopyConvertedTextures,
-	WM_OT_ConvertDDSTexFile,
-	WM_OT_PNGToTexConversionWindow,
-	#ui panels
-	OBJECT_PT_TexConversionPanel,
-	
-	
-	#fbxskel
-	#property groups
-	ToggleStringPropertyGroup,
-	FBXSKEL_UL_ObjectCheckList,
-	#operators
-	WM_OT_LinkArmatureBones,
-	WM_OT_ClearBoneLinkages,
-	
-	
-	#RE asset extra tools
-	OBJECT_PT_REAssetExtensionPanel,
+	*workspacePropertyGroupClasses,
+	*workspaceOperatorClasses,
+	*workspacePanelClasses,
+	*meshOperatorClasses,
+	*meshPropertyGroupClasses,
+	*mdfPropertyGroupClasses,
+	*meshErrorClasses,
+	*mdfPanelClasses,
+	*meshPanelClasses,
+	*mdfOperatorClasses,
+	*sfurOperatorClasses,
+	*sfurPanelClasses,
+	*sfurPropertyGroupClasses,
+	*texPropertyGroupClasses,
+	*texOperatorClasses,
+	*texPanelClasses,
+	*fbxskelPropertyGroupClasses,
+	*fbxskelOperatorClasses,
 	]
 
 

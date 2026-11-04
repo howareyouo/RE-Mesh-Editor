@@ -84,3 +84,11 @@ class OBJECT_PT_REAssetExtensionPanel(Panel):
                 pass
         else:
             layout.label(text="Update RE Asset Library for more options.")
+
+
+# Registration
+classes = (
+	OBJECT_PT_MeshObjectModePanel,
+	OBJECT_PT_MeshArmatureToolsPanel,
+	OBJECT_PT_REAssetExtensionPanel,
+)

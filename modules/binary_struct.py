@@ -16,11 +16,15 @@ Field options:
   count=int | 'attr_name' | callable(self, version)->int
 
 Subclasses keep __init__ to set defaults and may implement:
+  pre_read(file, version)    before field layout (e.g. validate the magic)
   post_read(file, version)   after field layout (e.g. resolve string offsets)
   pre_write(file, version)   before field layout (e.g. recompute offsets)
+  post_write(file, version)  after field layout (e.g. write trailing buffers)
 
-NOTE: mesh hot-path readers keep their hand-tuned numpy/struct batches; this
-module targets the fbxskel/sfur/mdf leaf structs.
+The mesh file/mesh buffer headers use this module as well: their per-version
+field order and version gates live in one _fields_ list, while their bulk
+numpy buffers stay hand-tuned in post_read/post_write so reads and writes keep
+going through one batch each (no extra copies).
 """
 
 import struct
@@ -90,7 +94,8 @@ def _build_plan(fields, version):
 
 	def flush():
 		if batch:
-			plan.append(('batch', ''.join(f for f, _, _ in batch), [(n, w) for _, n, w in batch]))
+			# '<' keeps mixed-width batches free of native alignment padding
+			plan.append(('batch', '<' + ''.join(f for f, _, _ in batch), [(n, w) for _, n, w in batch]))
 			batch.clear()
 
 	for f in fields:
@@ -127,6 +132,7 @@ class BinaryStruct:
 	_fields_ = []
 
 	def read(self, file, version=None):
+		self.pre_read(file, version)
 		plan = _get_plan(type(self), self._fields_, version)
 		for item in plan:
 			kind = item[0]
@@ -180,9 +186,16 @@ class BinaryStruct:
 				count = _resolve_count(count_desc, self, version)
 				st = _struct(fmt * count)
 				file.write(st.pack(*getattr(self, name)))
+		self.post_write(file, version)
+
+	def pre_read(self, file, version):
+		pass
 
 	def post_read(self, file, version):
 		pass
 
 	def pre_write(self, file, version):
+		pass
+
+	def post_write(self, file, version):
 		pass

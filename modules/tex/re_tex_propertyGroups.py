@@ -39,3 +39,10 @@ class TEX_UL_PNGConversionList(bpy.types.UIList):
 	def invoke(self, context, event):
 		return {'PASS_THROUGH'}
 	
+
+
+# Registration
+classes = (
+	PNGConversionEntryPropertyGroup,
+	TEX_UL_PNGConversionList,
+)

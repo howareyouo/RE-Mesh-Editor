@@ -136,3 +136,10 @@ class MESH_UL_REExporterList(bpy.types.UIList):
     # Disable double-click to rename
     def invoke(self, context, event):
         return {'PASS_THROUGH'}
+
+
+# Registration
+classes = (
+	ExporterNodePropertyGroup,
+	MESH_UL_REExporterList,
+)

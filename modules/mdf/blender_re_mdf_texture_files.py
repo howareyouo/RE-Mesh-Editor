@@ -5,8 +5,10 @@ from contextlib import contextmanager
 
 from ..blender_utils import (getPreferenceFlag, findMDFCollectionForMaterialObject,
                              iterAllMDFMaterialObjects, iterMDFMaterialObjects)
-from ..gen_functions import splitNativesPath, STREAMING_FOLDER
-from .blender_re_mdf import fixTexPath
+from ..gen_functions import splitNativesPath
+from ..tex.tex_paths import (SearchRoot, TEX_EXTENSION, TEX_MATCH_BASE, findTextureFiles,
+                             getTextureFileBaseName, normalizeTexturePath,
+                             replaceTextureFileBaseName)
 
 # ---------------------------------------------------------------- texture file paths
 # A texture binding holds the path the game resolves inside the mod's natives/STM
@@ -15,39 +17,6 @@ from .blender_re_mdf import fixTexPath
 # Renaming a binding therefore only keeps pointing at a real file when the file is
 # renamed with it - the rule the mesh/MDF material name sync follows, applied to the
 # texture files a material binds to.
-
-TEX_EXTENSION = ".tex"
-
-def normalizeTexturePath(texturePath):
-	"""Normalise a texture binding path so two spellings of one path compare equal.
-
-	fixTexPath drops the version suffix and the chunk root, but it cleans up the
-	separators before its own natives split, so backslashes can survive it."""
-	if texturePath == "":
-		return ""
-	return fixTexPath(texturePath.replace("\\", "/")).replace("\\", "/").strip("/")
-
-def getTextureFileBaseName(fileName):
-	"""Get the .tex base name of a texture file, e.g. "foo.tex" from "foo.tex.123" or
-	"foo.tex.123.pc". Returns None for files that are not texture files (".rtex", ".txt")."""
-	lowerName = fileName.lower()
-	index = lowerName.find(TEX_EXTENSION)
-	if index <= 0:#Ignore junk names like ".tex"
-		return None
-	suffix = lowerName[index + len(TEX_EXTENSION):]
-	if suffix != "" and not suffix.startswith("."):
-		return None
-	return fileName[:index + len(TEX_EXTENSION)]
-
-def replaceTextureFileBaseName(fileName, newBaseName):
-	"""Replace the .tex base of a file name, keeping its suffix as it is, e.g.
-	"foo.tex.7602304.pc" -> "bar.tex.7602304.pc".
-
-	The version suffix identifies the file for the game, so only the name part moves."""
-	baseName = getTextureFileBaseName(fileName)
-	if baseName == None:
-		return fileName
-	return newBaseName + fileName[len(baseName):]
 
 def getMDFSourceFolder(mdfCollection):
 	"""Return the folder the MDF file was imported from, or None when the import path was
@@ -59,72 +28,40 @@ def getMDFSourceFolder(mdfCollection):
 		return None
 	return os.path.dirname(mdfPath)
 
-def getTextureSearchFolderList(mdfCollection, texturePath):
-	"""Return every folder a texture path can resolve to, most specific first.
+def getTextureModDirectory():
+	"""Return the mod's natives folder as set in the MDF tool panel, or "" when it is not set."""
+	panel = getattr(getattr(bpy.context, "scene", None), "re_mdf_toolpanel", None)
+	return getattr(panel, "modDirectory", "") if panel != None else ""
+
+def getTextureSearchRootList(mdfCollection, texturePath, modDirectory = None):
+	"""Return the places a texture path of an MDF resolves against, in priority order.
 
 	Texture paths are relative to the mod's natives/STM root, which is stored both on
 	the MDF file path and in the tool panel's mod directory; streaming textures sit one
-	"streaming" folder below it. The MDF's own folder is tried too, because mods often
-	keep their textures next to the mdf2 instead of in the chunk folder tree."""
+	"streaming" folder below it. The MDF's own folder is searched last and without a
+	streaming sibling, because mods often keep their textures next to the mdf2 instead
+	of in the chunk folder tree. modDirectory None means read the tool panel now."""
+	if modDirectory == None:
+		modDirectory = getTextureModDirectory()
 	dirPart = os.path.dirname(normalizeTexturePath(texturePath))
 	mdfPath = mdfCollection.get("~MDFFILEPATH", None) if mdfCollection != None else None
 	rootList = []
 	if mdfPath:
 		nativesPath = splitNativesPath(mdfPath)
 		if nativesPath != None:
-			rootList.append(nativesPath[0])
-	panel = getattr(bpy.context.scene, "re_mdf_toolpanel", None)
-	modDirectory = getattr(panel, "modDirectory", "") if panel != None else ""
+			rootList.append(SearchRoot(nativesPath[0], dirPart))
 	if modDirectory:
-		rootList.append(modDirectory)
-	folderList = []
-	for root in rootList:
-		folderList.append(os.path.join(root, dirPart))
-		folderList.append(os.path.join(root, STREAMING_FOLDER, dirPart))
+		rootList.append(SearchRoot(modDirectory, dirPart))
 	if mdfPath:
-		folderList.append(os.path.dirname(mdfPath))
-	uniqueList = []
-	seenKeySet = set()
-	for folder in folderList:
-		key = os.path.normcase(os.path.realpath(os.path.abspath(folder)))
-		if key in seenKeySet:
-			continue
-		seenKeySet.add(key)
-		uniqueList.append(folder)
-	return uniqueList
+		rootList.append(SearchRoot(os.path.dirname(mdfPath), "", False))
+	return rootList
 
-def findTextureFilesInFolder(folder, baseName):
-	"""Return the texture files of one folder whose .tex base name matches.
-
-	Several files can match (one per platform or language suffix); the suffix is not
-	part of the binding path, so it can't narrow the search down."""
-	try:
-		nameList = sorted(os.listdir(folder))
-	except OSError:
-		return []
-	targetName = baseName.lower()
-	fileList = []
-	for fileName in nameList:
-		fileBaseName = getTextureFileBaseName(fileName)
-		if fileBaseName == None or fileBaseName.lower() != targetName:
-			continue
-		filePath = os.path.join(folder, fileName)
-		if os.path.isfile(filePath):
-			fileList.append(filePath)
-	return fileList
-
-def resolveTextureFiles(mdfCollection, texturePath):
+def resolveTextureFiles(mdfCollection, texturePath, modDirectory = None):
 	"""Return the files on disk a texture binding path currently points at."""
-	normalizedPath = normalizeTexturePath(texturePath)
-	baseName = getTextureFileBaseName(os.path.basename(normalizedPath))
-	if baseName == None:
-		return []
-	fileList = []
-	for folder in getTextureSearchFolderList(mdfCollection, normalizedPath):
-		fileList.extend(findTextureFilesInFolder(folder, baseName))
-	return fileList
+	return findTextureFiles(texturePath, getTextureSearchRootList(mdfCollection, texturePath, modDirectory),
+	                        matchMode = TEX_MATCH_BASE)
 
-def getTextureFileRenamePlan(mdfCollection, oldPath, newPath):
+def getTextureFileRenamePlan(mdfCollection, oldPath, newPath, modDirectory = None):
 	"""Plan renaming the texture files of a binding path to the new name.
 
 	Only a name change inside the same folder is a rename. A path that moves to
@@ -147,7 +84,7 @@ def getTextureFileRenamePlan(mdfCollection, oldPath, newPath):
 		return [], None
 	if oldFolder.lower() != newFolder.lower() or oldBaseName.lower() == newBaseName.lower():
 		return [], None
-	fileList = resolveTextureFiles(mdfCollection, oldNormalized)
+	fileList = resolveTextureFiles(mdfCollection, oldNormalized, modDirectory)
 	if not fileList:
 		return [], None
 	planList = []
@@ -166,17 +103,19 @@ def renameTextureFiles(planList):
 
 	Returns (renamedFileList, errorMessage), where renamedFileList holds the
 	(oldFilePath, newFilePath) pairs that actually moved: the undo restore needs them to
-	move the files back."""
+	move the files back. A plan that fails part of the way is moved back, so a half
+	renamed texture is never left on disk."""
 	renamedFileList = []
-	errorList = []
 	for oldFilePath, newFilePath in planList:
 		try:
 			os.rename(oldFilePath, newFilePath)
-			renamedFileList.append((oldFilePath, newFilePath))
 		except OSError as err:
 			print(f"Failed to rename {oldFilePath}: {err}")
-			errorList.append(f"\"{os.path.basename(oldFilePath)}\" could not be renamed: {err}")
-	return renamedFileList, (errorList[0] if errorList else None)
+			for movedOldPath, movedNewPath in reversed(renamedFileList):
+				moveTextureFile(movedNewPath, movedOldPath)
+			return [], f"\"{os.path.basename(oldFilePath)}\" could not be renamed: {err}"
+		renamedFileList.append((oldFilePath, newFilePath))
+	return renamedFileList, None
 
 # ---------------------------------------------------------------- path write guard
 _texturePathSyncDepth = 0
@@ -239,7 +178,7 @@ def updateBindingsUsingTexturePath(mdfCollection, oldPath, newPath, ignoreBindin
 		updatedCount += 1
 	return updatedCount
 
-def syncTextureFileFromBindingPath(binding, oldPath, newPath):
+def syncTextureFileFromBindingPath(binding, oldPath, newPath, modDirectory = None):
 	"""Rename the files of a binding path change and keep the bindings sharing them in sync.
 
 	Returns (renamedFileCount, updatedBindingCount, errorMessage). Nothing is renamed
@@ -253,7 +192,7 @@ def syncTextureFileFromBindingPath(binding, oldPath, newPath):
 	mdfCollection = findMDFCollectionForMaterialObject(materialObj)
 	if mdfCollection == None:
 		return 0, 0, None
-	planList, error = getTextureFileRenamePlan(mdfCollection, oldPath, newPath)
+	planList, error = getTextureFileRenamePlan(mdfCollection, oldPath, newPath, modDirectory)
 	if error != None:
 		return 0, 0, error
 	if not planList:
@@ -268,6 +207,34 @@ def syncTextureFileFromBindingPath(binding, oldPath, newPath):
 		with texturePathSync():
 			updatedCount = updateBindingsUsingTexturePath(mdfCollection, oldPath, newPath, ignoreBinding = binding)
 	return len(renamedFileList), updatedCount, error
+
+def setTextureBindingPath(binding, newPath, oldPath = None, modDirectory = None):
+	"""Write a texture binding path, moving the texture files with it.
+
+	The one way a binding path is written: the old value is the caller's or the one the
+	binding still holds, the files are renamed only when the preference allows it, and a
+	refused rename puts the old path back so the binding never points at a file name the
+	disk does not have. Returns the error message of a rename that was refused, or None.
+
+	modDirectory None means read the tool panel's mod directory now."""
+	if oldPath == None:
+		oldPath = binding.path
+	if oldPath == newPath:
+		return None
+	if isTexturePathSyncActive():#A pass holding the sync renames the files itself, once per path
+		binding.path = newPath
+		return None
+	if modDirectory == None:
+		modDirectory = getTextureModDirectory()
+	with texturePathSync():
+		binding.path = newPath
+	if not isAutoRenameTextureFilesEnabled():
+		return None
+	_, _, error = syncTextureFileFromBindingPath(binding, oldPath, newPath, modDirectory)
+	if error != None:
+		with texturePathSync():
+			binding.path = oldPath
+	return error
 
 def getTextureRenameWarning(errorList):
 	"""Fold the errors of a texture file rename pass into one warning, or None when it went through.

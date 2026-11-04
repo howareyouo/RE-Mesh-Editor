@@ -1201,3 +1201,17 @@ class WM_OT_OpenModWorkspace(Operator):
 			openFolder(bpy.context.scene["modWorkspace_directory"])
 					
 		return {'FINISHED'}
+
+
+# Registration
+# WM_OT_TexturePacker exists but is not implemented yet, so it is not registered
+classes = (
+	WM_OT_CreateModWorkspace,
+	WM_OT_EditModInfo,
+	WM_OT_ConvertToREEngine,
+	WM_OT_ToggleModFileTracking,
+	WM_OT_CopyModFilesToGameDir,
+	WM_OT_UninstallModFilesFromGameDir,
+	WM_OT_LaunchGame,
+	WM_OT_OpenModWorkspace,
+)

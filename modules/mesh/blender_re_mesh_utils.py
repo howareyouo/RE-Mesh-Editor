@@ -5,26 +5,28 @@ import json
 import time
 import numpy as np
 from .file_re_mesh import SIX_WEIGHT_MESH_FILE_VERSIONS, validatePragmataSourceIndices
+from .game_profile import ALL_PROFILES, DEFAULT_WEIGHT_PACKING
 from ..gen_functions import raiseError, raiseWarning
 
 # Vertex group / shape key name prefix used to tag imported blend shapes.
 SHAPEKEY_PREFIX = "SHAPEKEY_"
 
 
-# Game-specific weight packing settings, keyed by game name.
-# Tuple layout: (maxWeightsPerVertex, maxWeightsPerVertexExtended, maxWeightedBones,
-#                padWithLastWeightIndex, extendedWeights)
+# Game-specific weight packing settings, keyed by game name. Games that keep the
+# default packing are absent, and build variants (which report the retail name) are
+# skipped. Tuple layout: (maxWeightsPerVertex, maxWeightsPerVertexExtended,
+#                maxWeightedBones, padWithLastWeightIndex, extendedWeights)
 _GAME_PROFILES = {
-    "MHWILDS": (8, 16, 256, False, True),
-    "PRAG":    (8, 16, 256, True, True),
-    "MHS3":    (8, 16, 256, True, True),
-    "RE9":     (8, 16, 256, True, False),
+    gameProfile.name: gameProfile.weightPacking
+    for gameProfile in ALL_PROFILES
+    if (gameProfile.reportedName == gameProfile.name
+        and gameProfile.weightPacking != DEFAULT_WEIGHT_PACKING)
 }
 
 
 def _game_settings(gameName, meshVersion):
     """Return the weight-packing settings 5-tuple for this game + mesh version."""
-    mw, mew, mb, pad, ext = _GAME_PROFILES.get(gameName, (8, 16, 256, False, False))
+    mw, mew, mb, pad, ext = _GAME_PROFILES.get(gameName, DEFAULT_WEIGHT_PACKING)
     if meshVersion in SIX_WEIGHT_MESH_FILE_VERSIONS:
         mw, mew, mb = 6, 12, 1024  # 6-weight packing always wins over game name
     return mw, mew, mb, pad, ext

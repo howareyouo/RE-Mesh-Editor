@@ -131,3 +131,79 @@ def normalizeREMaterialName(name, stripSuffix = True):
 	if stripSuffix:
 		name = stripREMatSuffix(name)
 	return capitalizeREMaterialName(name)
+
+
+# --- material name rules ---
+# A material name lives in two places that have to match exactly: the "__" suffix of every
+# mesh object name and the MDF material entries. These are the rules a rename of it follows,
+# kept free of bpy so the mesh side, the MDF side and the tests share one definition.
+
+def getMaterialNameRenameError(materialNameList, oldMaterialName, newMaterialName):
+	"""Return a reason a material can't be renamed to newMaterialName, else None.
+
+	materialNameList holds the names the new name has to be unique against - the MDF entries,
+	since an MDF holds every material name once and the meshes bind to it by name. A name
+	equal to the old one is not a conflict: that is the material being renamed to a different
+	case. Callers leave out the objects whose rename is the source of this one, which already
+	carry the new name and can't count as their own conflict."""
+	newName = newMaterialName.strip()
+	if newName == "":
+		return "Material name can't be empty."
+	if "__" in newName:
+		return "\"__\" can't be part of a material name, it separates the mesh name from the material name."
+	targetKey = newName.lower()
+	oldKey = oldMaterialName.strip().lower()
+	for materialName in materialNameList:
+		materialKey = materialName.strip().lower()
+		if materialKey == targetKey and materialKey != oldKey:
+			return f"\"{newName}\" is already used by another material in the MDF collection."
+	return None
+
+
+def getMaterialNamePassError(materialNameList, renamePlanList):
+	"""Return a reason a planned bulk rename is refused as a whole, else None.
+
+	materialNameList holds the current names and renamePlanList holds (index, newName) for the
+	entries the pass renames, so the names the pass vacates are no clashes. Nothing is renamed
+	here, so a pass can be refused before anything is written - a bulk rename that produces a
+	duplicate would otherwise leave half of the materials renamed."""
+	#Keyed by the lower-cased new name, which is how material names are compared, so the error
+	#messages can still spell the names the way the user typed them.
+	plannedKeyDict = {}
+	plannedIndexSet = set()
+	for index, newName in renamePlanList:
+		oldName = materialNameList[index]
+		newName = newName.strip()
+		if newName == "":
+			return f"\"{oldName}\" would become an empty material name."
+		if "__" in newName:
+			return f"\"{newName}\" can't contain \"__\", it separates the mesh name from the material name."
+		newNameKey = newName.lower()
+		if newNameKey in plannedKeyDict:
+			return f"\"{newName}\" would be the name of two materials: \"{plannedKeyDict[newNameKey][0]}\" and \"{oldName}\"."
+		plannedKeyDict[newNameKey] = (oldName, newName)
+		plannedIndexSet.add(index)
+	untouchedKeySet = set(materialNameList[index].strip().lower()
+	                      for index in range(len(materialNameList)) if index not in plannedIndexSet)
+	clashKeyList = sorted(set(plannedKeyDict) & untouchedKeySet)
+	if clashKeyList:
+		return f"\"{plannedKeyDict[clashKeyList[0]][1]}\" is already used by another material in the MDF collection."
+	return None
+
+
+def planMaterialNameReplacement(materialNameList, findValue, replaceValue):
+	"""Plan replacing text in a list of material names.
+
+	Nothing is changed here, so a bulk rename can be refused as a whole instead of leaving
+	half of the materials renamed. Returns (planList, errorMessage), where planList holds
+	(index, oldName, newName) for the names the replacement changes, indexed into the list
+	passed in: every entry is resolved against the names as they are now, so a replacement
+	that contains the text it replaces can't catch an entry renamed earlier in the pass."""
+	if findValue == "":
+		return [], "Find text can't be empty."
+	renamePlanList = [(index, oldName.replace(findValue, replaceValue).strip())
+	                  for index, oldName in enumerate(materialNameList) if findValue in oldName]
+	error = getMaterialNamePassError(materialNameList, renamePlanList)
+	if error != None:
+		return [], error
+	return [(index, materialNameList[index], newName) for index, newName in renamePlanList], None

@@ -7,8 +7,9 @@ import glob
 import struct
 
 from mathutils import Vector
-from ..gen_functions import IS_WINDOWS,isLinux,resolveLinuxPath,fname,readUTF16String
+from ..gen_functions import isLinux,resolveLinuxPath,fname,readUTF16String
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
+from ..tex.tex_paths import SearchRoot, TEX_EXTENSION, TEX_MATCH_VERSION, findTextureFile
 from .node_factories import addMathNode, addSeparateColor
 def getAnisoInputName(nodeBSDF):
 	for inputName in nodeBSDF.inputs.keys():
@@ -756,9 +757,9 @@ def _listTexDir(dirPath):
 	entry = _dirListingCache.get(dirPath)
 	if entry is None:
 		try:
-			entry = frozenset(os.listdir(dirPath))
+			entry = tuple(sorted(os.listdir(dirPath)))
 		except OSError:
-			entry = frozenset()
+			entry = ()
 		if len(_dirListingCache) >= 512:  # simple memory guard
 			_dirListingCache.clear()
 		_dirListingCache[dirPath] = entry
@@ -766,40 +767,13 @@ def _listTexDir(dirPath):
 
 
 def getTexPath(baseTexturePath,chunkPathList,mdfVersion,gameName=None):
-	inputPath = None
+	"""Return the texture file of a binding path, or None when no chunk has it."""
 	texVersion = gameTexVersionDict.get(gameName, texVersionDict.get(mdfVersion,""))
-	exactName = baseTexturePath + f".tex{texVersion}"
-	exactLower = exactName.lower() if IS_WINDOWS else exactName
-	#Fallback prefix: accept any .tex<N> revision when the version-specific name
-	#misses (unknown/unlisted mdf tex version or a different build on disk)
-	anyLower = (baseTexturePath + ".tex").lower() if IS_WINDOWS else baseTexturePath + ".tex"
-	for chunkPath in chunkPathList:
-		#Fast path: exact file name via a single stat, no directory enumeration
-		for relDir in ("streaming",""):
-			exactPath = os.path.join(chunkPath,relDir,exactName)
-			if os.path.isfile(exactPath):
-				return exactPath
-		#Slow path: capcom can append platform/lang extensions - scan a cached directory listing once
-		anyPath = None
-		for relDir in ("streaming",""):
-			dirPath = os.path.join(chunkPath,relDir)
-			for fname in _listTexDir(dirPath):
-				lname = fname.lower() if IS_WINDOWS else fname
-				if lname.startswith(exactLower):
-					return os.path.join(dirPath,fname)
-				if anyPath is None and lname.startswith(anyLower):
-					anyPath = os.path.join(dirPath,fname)
-		if anyPath != None:
-			return anyPath
-		
-		if isLinux():
-			inputPath = resolveLinuxPath(os.path.join(chunkPath,"streaming",exactName))
-			if inputPath == None:
-				inputPath = resolveLinuxPath(os.path.join(chunkPath,exactName))
-			if inputPath != None:
-				break
-				
-	return inputPath	
+	return findTextureFile(baseTexturePath + TEX_EXTENSION,
+	                       [SearchRoot(chunkPath) for chunkPath in chunkPathList],
+	                       texVersion = texVersion, matchMode = TEX_MATCH_VERSION,
+	                       listDir = _listTexDir,
+	                       resolvePath = resolveLinuxPath if isLinux() else None)
 
 
 def addPropertyNodeFallback(matInfo, propNames, nodeTree):

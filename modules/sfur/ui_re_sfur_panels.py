@@ -80,3 +80,10 @@ class OBJECT_PT_SFurEntryPanel(Panel):
 		col4.prop(re_sfur_data, "isForceTwoSide")
 		col4.prop(re_sfur_data, "isForceAlphaTest")
 		col4.prop(re_sfur_data, "unknownFlag")
+
+
+# Registration
+classes = (
+	OBJECT_PT_SFurObjectModePanel,
+	OBJECT_PT_SFurEntryPanel,
+)

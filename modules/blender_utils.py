@@ -4,13 +4,17 @@ from math import radians
 from mathutils import Matrix
 
 from .gen_functions import textColors, splitNativesPath, raiseWarning
-from .naming import (formatREMaterialObjectName, getREMeshMaterialName,
-                     parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName,
-                     replaceREMeshMaterialSuffix)
+from .naming import formatREMaterialObjectName, getREMeshMaterialName, parseMDFObjectNameMaterialName
 import os
 from collections import OrderedDict
-from contextlib import contextmanager
 from itertools import repeat
+
+#The material rename engine lives in mesh/material_name.py and is re-exported here, so the
+#mesh and MDF modules keep importing its public names from this module.
+from .mesh.material_name import (MaterialRenameRequest, MaterialRenameResult, applyMaterialRename,
+                                 getMDFMaterialNameConflict, getMaterialNameReplacePlan,
+                                 isMaterialNameSyncActive, iterMeshesUsingMaterialName, materialNameSync,
+                                 renameMeshObjectsToMaterialName, replaceMaterialNameText)
 
 # Shared rotation matrices (X-axis ±90°) for RE Engine import/export
 rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
@@ -349,214 +353,6 @@ def findMeshCollectionForMDF(mdfCollection):
 		return panel.meshCollection
 	return None
 
-# ------------------ material name sync ------------------
-# The RE engine caps the size of a single mesh, so a model is split into several
-# objects that share one material. A material name therefore lives in two places that
-# have to match exactly - the "__" suffix of every mesh object name and the MDF
-# material entries - and a mismatch shows up as a checkerboard texture in game.
-# Everything that renames a material goes through renameREMeshMaterial so all copies
-# move together and only the name changes: no Group/Sub/LOD prefix, no NN index.
-
-_materialNameSyncDepth = 0
-
-def isMaterialNameSyncActive():
-	"""True while a material rename is being applied.
-
-	Writing an MDF material's materialName fires the property's update callback, which
-	would restart the sync for the rename it is already part of, so nested calls bail
-	out instead of repeating the work."""
-	return _materialNameSyncDepth > 0
-
-@contextmanager
-def materialNameSync():
-	"""Run a block whose material name writes must not start a nested sync."""
-	global _materialNameSyncDepth
-	_materialNameSyncDepth += 1
-	try:
-		yield
-	finally:
-		_materialNameSyncDepth = max(0, _materialNameSyncDepth - 1)
-
-def iterMeshesUsingMaterialName(meshCollection, materialName):
-	"""Yield the mesh objects of a mesh collection that use the given material name.
-
-	Returns every mesh piece sharing the material, across all LOD collections and
-	including export-excluded meshes, so a rename can't leave stale names behind.
-	The comparison is case-insensitive."""
-	if meshCollection == None or materialName == "":
-		return
-	targetName = materialName.lower()
-	for obj in iterExportableMeshObjects(meshCollection, includeExcluded = True):
-		if parseREMeshObjectMaterialName(obj.name).lower() == targetName:
-			yield obj
-
-def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None,
-                               ignoreMeshObject = None):
-	"""Return a reason when a material can't be renamed to newMaterialName, else None.
-
-	An MDF holds every material name once and the meshes bind to it by name, so a
-	duplicate would silently bind meshes to the wrong material. Only the MDF entries
-	are compared: mesh objects already carrying the new name are the very pieces this
-	rename brings together (and the one the user just typed it into), so they can't
-	count as a conflict. ignoreMaterialObject skips the entry being renamed, which the
-	MDF panel has already updated by the time its callback runs - ignoreMeshObject is
-	the outliner rename that already happened, which is the same situation one step on:
-	the object carries the new name but the material behind it is not there yet."""
-	newName = newMaterialName.strip()
-	if newName == "":
-		return "Material name can't be empty."
-	if "__" in newName:
-		return "\"__\" can't be part of a material name, it separates the mesh name from the material name."
-	targetKey = newName.lower()
-	oldKey = oldMaterialName.strip().lower()
-	for materialObj in iterMDFMaterialObjects(mdfCollection):
-		if materialObj == ignoreMaterialObject:
-			continue
-		if materialObj == ignoreMeshObject:
-			continue
-		materialKey = getMDFMaterialName(materialObj).strip().lower()
-		if materialKey == targetKey and materialKey != oldKey:
-			return f"\"{newName}\" is already used by another material in the MDF collection."
-	return None
-
-
-def renameMeshObjectsToMaterialName(meshObjList, newMaterialName):
-	"""Set the material name part of the given mesh object names.
-
-	Only the text after "__" is replaced (see replaceREMeshMaterialSuffix), so each
-	object keeps its LOD and Group/Sub numbering. Returns the objects that changed."""
-	renamedObjList = []
-	for obj in meshObjList:
-		newObjectName = replaceREMeshMaterialSuffix(obj.name, newMaterialName)
-		if newObjectName != obj.name:
-			obj.name = newObjectName
-			renamedObjList.append(obj)
-	return renamedObjList
-
-def renameMeshesUsingMaterialName(meshCollection, oldMaterialName, newMaterialName):
-	"""Rename every mesh in the collection that uses oldMaterialName.
-
-	Returns the renamed objects. A caller that renames several materials in one pass
-	has to resolve the objects first and use renameMeshObjectsToMaterialName instead:
-	a replacement can contain the text it replaces, so a later lookup by name could
-	catch objects the pass has already renamed."""
-	if meshCollection == None or oldMaterialName == "":
-		return []
-	return renameMeshObjectsToMaterialName(list(iterMeshesUsingMaterialName(meshCollection, oldMaterialName)), newMaterialName)
-
-def renameREMeshMaterial(meshCollection, mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None,
-                         renamedMeshObject = None, renamedMaterialObject = None):
-	"""Rename one RE material everywhere a mesh/MDF collection pair references it.
-
-	Renames the MDF material entry of that name plus every mesh object using it, and
-	nothing else: no reindexing, no prefix changes. Nothing is renamed when the new
-	name is invalid or already taken (see getMDFMaterialNameConflict).
-
-	renamedMeshObject and renamedMaterialObject are the objects an outliner rename has
-	already moved to newMaterialName - a mesh, or an MDF material entry - so they no
-	longer carry the old name: the new name they carry has to be checked like any other,
-	and the material behind it follows it (see syncRenamedMeshMaterial and
-	syncRenamedMDFMaterialObject).
-
-	Returns (renamedMeshObjects, renamedMDFMaterialCount, errorMessage)."""
-	if isMaterialNameSyncActive():
-		return [], 0, None
-	newName = newMaterialName.strip()
-	oldKey = oldMaterialName.strip().lower()
-	meshObjList = list(iterMeshesUsingMaterialName(meshCollection, oldMaterialName))
-	materialObjList = [materialObj for materialObj in iterMDFMaterialObjects(mdfCollection)
-	                   if materialObj != ignoreMaterialObject and getMDFMaterialName(materialObj).strip().lower() == oldKey]
-	# Nothing on either side still carries the old name: the pair is already in sync and
-	# the new name being taken is not a conflict for this rename. An object already carrying
-	# the new name is the exception - it is the rename itself, and its new name has to be
-	# checked like any other before the rest of the material is moved onto it.
-	if not meshObjList and not materialObjList and renamedMeshObject == None and renamedMaterialObject == None:
-		return [], 0, None
-	error = getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newName, ignoreMaterialObject,
-	                                   ignoreMeshObject = renamedMaterialObject)
-	if error != None:
-		return [], 0, error
-	with materialNameSync():
-		renamedObjList = renameMeshesUsingMaterialName(meshCollection, oldMaterialName, newName)
-		renamedCount = 0
-		for materialObj in materialObjList:
-			if setMDFMaterialName(materialObj, newName):
-				renamedCount += 1
-	return renamedObjList, renamedCount, None
-
-def syncMaterialNamesFromMDFMaterial(materialObj, oldMaterialName, newMaterialName):
-	"""Push a material rename made in the MDF panel onto the meshes that use it.
-
-	The mesh side of a material name is spread over several objects, so the MDF
-	material entry is the entry point a user can't miss; renaming it renames the mesh
-	pieces immediately. Returns (renamedMeshObjectCount, errorMessage) - the caller has
-	to undo its own property write when the rename was refused."""
-	if oldMaterialName == newMaterialName or isMaterialNameSyncActive():
-		return 0, None
-	mdfCollection = findMDFCollectionForMaterialObject(materialObj)
-	meshCollection = findMeshCollectionForMDF(mdfCollection)
-	if mdfCollection == None and meshCollection == None:
-		return 0, None
-	renamedObjList, renamedCount, error = renameREMeshMaterial(
-		meshCollection, mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = materialObj)
-	return len(renamedObjList), error
-
-def getMaterialNameReplacePlan(mdfCollection, findValue, replaceValue):
-	"""Plan replacing text in the name of every material of an MDF collection.
-
-	Nothing is changed here, so a bulk rename can be refused as a whole instead of
-	leaving half of the materials renamed. Returns (planList, errorMessage), where
-	planList holds (materialObject, oldName, newName) for the materials the
-	replacement actually changes."""
-	if findValue == "":
-		return [], "Find text can't be empty."
-	planList = []
-	#Keyed by the lower-cased new name, which is how material names are compared, so the
-	#error messages can still spell the names the way the user typed them.
-	newNameKeyDict = {}
-	untouchedKeySet = set()
-	for materialObj in iterMDFMaterialObjects(mdfCollection):
-		oldName = getMDFMaterialName(materialObj)
-		if findValue not in oldName:
-			untouchedKeySet.add(oldName.strip().lower())
-			continue
-		newName = oldName.replace(findValue, replaceValue).strip()
-		if newName == "":
-			return [], f"\"{oldName}\" would become an empty material name."
-		if "__" in newName:
-			return [], f"\"{newName}\" can't contain \"__\", it separates the mesh name from the material name."
-		newNameKey = newName.lower()
-		if newNameKey in newNameKeyDict:
-			return [], f"\"{newName}\" would be the name of two materials: \"{newNameKeyDict[newNameKey][0]}\" and \"{oldName}\"."
-		newNameKeyDict[newNameKey] = (oldName, newName)
-		planList.append((materialObj, oldName, newName))
-	clashKeyList = sorted(set(newNameKeyDict) & untouchedKeySet)
-	if clashKeyList:
-		return [], f"\"{newNameKeyDict[clashKeyList[0]][1]}\" is already used by another material in the MDF collection."
-	return planList, None
-
-def replaceMaterialNameText(meshCollection, mdfCollection, findValue, replaceValue):
-	"""Replace text in the name of every material of an MDF collection.
-
-	The meshes bound to each material are renamed with it, so the mesh side keeps
-	matching the MDF. Names are taken as they are otherwise: no reindexing, no prefix
-	changes. Returns (renamedMaterialCount, renamedMeshCount, errorMessage); nothing is
-	renamed when the pass is refused (see getMaterialNameReplacePlan)."""
-	planList, error = getMaterialNameReplacePlan(mdfCollection, findValue, replaceValue)
-	if error != None:
-		return 0, 0, error
-	if not planList:
-		return 0, 0, None
-	#Resolve every mesh before the first rename: a replacement can contain the text it
-	#replaces, so looking names up while renaming would catch objects of a later entry.
-	materialPlanList = [(materialObj, newName, list(iterMeshesUsingMaterialName(meshCollection, oldName)))
-	                    for materialObj, oldName, newName in planList]
-	renamedMeshCount = 0
-	with materialNameSync():
-		for materialObj, newName, meshObjList in materialPlanList:
-			renamedMeshCount += len(renameMeshObjectsToMaterialName(meshObjList, newName))
-			setMDFMaterialName(materialObj, newName)
-	return len(planList), renamedMeshCount, None
 
 def createEmpty(name, propertyList, parent=None, collection=None):
 	"""Create a Blender Empty object with display type PLAIN_AXES, custom

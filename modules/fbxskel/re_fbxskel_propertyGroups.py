@@ -25,3 +25,10 @@ class FBXSKEL_UL_ObjectCheckList(bpy.types.UIList):
 	def invoke(self, context, event):
 		return {'PASS_THROUGH'}
 	
+
+
+# Registration
+classes = (
+	ToggleStringPropertyGroup,
+	FBXSKEL_UL_ObjectCheckList,
+)

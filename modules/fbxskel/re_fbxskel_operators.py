@@ -145,3 +145,10 @@ class WM_OT_ClearBoneLinkages(Operator):
 		self.report({"INFO"},"Cleared bone linkages on selected armatures.")
 		return {'FINISHED'}
 	
+
+
+# Registration
+classes = (
+	WM_OT_LinkArmatureBones,
+	WM_OT_ClearBoneLinkages,
+)

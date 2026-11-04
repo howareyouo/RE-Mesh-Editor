@@ -98,3 +98,12 @@ class WM_OT_ApplySFurToMeshCollection(Operator):
 		else:
 			self.report({"ERROR"},"Invalid mesh or SFur collection.")
 		return {'FINISHED'}
+
+
+# Registration
+# WM_OT_ApplySFurToMeshCollection exists but is not registered
+classes = (
+	WM_OT_NewSFurHeader,
+	WM_OT_ReindexEntries,
+	WM_OT_AddFurEntry,
+)

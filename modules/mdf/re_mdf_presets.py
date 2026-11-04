@@ -9,6 +9,7 @@ from ..naming import formatREMaterialObjectName
 from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE
 from .file_re_mdf import getMDFVersionToGameName
 from .blender_re_mdf import checkNameUsage
+from .blender_re_mdf_texture_files import setTextureBindingPath
 
 from .mdf_value import getPropValueJSON,setPropValue
 
@@ -163,7 +164,7 @@ def readPresetJSON(filepath,targetCollection = None):
 		for bindingEntry in materialJSONDict["Texture Bindings"]:
 			binding = materialObj.re_mdf_material.textureBindingList_items.add()
 			binding.textureType = bindingEntry["Texture Type"]
-			binding.path = bindingEntry["Texture Path"]
+			setTextureBindingPath(binding, bindingEntry["Texture Path"], oldPath = "")
 		
 		if "MMTRS Data" in materialJSONDict:
 			for indexString in materialJSONDict["MMTRS Data"]:
