@@ -238,23 +238,14 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		meshData.polygons.add(n_polys)
 		meshData.polygons.foreach_set("loop_start", loop_start)
 		meshData.polygons.foreach_set("loop_total", loop_total)
-	# from_pydata used to compute edges internally. Blender <4.0's
-	# calc_normals_split() needs edge data, so keep calc_edges there; on 4.0+
-	# edges are computed lazily by Blender and nothing in this addon reads
+	# Edges are computed lazily by Blender and nothing in this addon reads
 	# mesh.edges (export/solve-UVs/split-sharp all work on loops/bmesh), so the
 	# expensive per-submesh edge build is skipped on big imports.
-	meshData.update(calc_edges=(bpy.app.version < (4, 0, 0)))
+	meshData.update(calc_edges=False)
 	# Import vertex normals
 	if len(vertexNormalList) > 0:
 		_phase_switch("normals_prep")
 		meshData.polygons.foreach_set("use_smooth", np.ones(len(meshData.polygons), dtype=bool))
-		if bpy.app.version < (4, 0, 0):
-			# Validate before setting custom normals to avoid rare crashes on old
-			# Blender. The mesh is bulk-constructed and well-formed (exact array
-			# sizes, in-range indices) and RE files have no loose vertices, so on
-			# 4.0+ this O(n) full-mesh sanity pass is pure overhead (~0.5s on a
-			# 460k-vert import) and is skipped.
-			meshData.validate()
 		# Vectorized normal normalization - much faster than Python loop
 		normals = np.asarray(vertexNormalList, dtype=np.float32)
 		norms = np.linalg.norm(normals, axis=1, keepdims=True)
@@ -269,19 +260,12 @@ def importMesh(meshName="newMesh", vertexList=[], faceList=[], vertexNormalList=
 		# ~2x faster than handing it the numpy array.
 		meshData.normals_split_custom_set_from_vertices(normalized_normals.tolist())
 
-		if bpy.app.version < (4, 0, 0):
-			meshData.use_auto_smooth = True
-			meshData.calc_normals_split()
 	# Import UV Layers and Vertex Colors - precompute loop indices once
 	_phase_switch("uv_color")
-	if bpy.app.version >= (4, 0, 0):
-		# No validate() on 4.0+ (see normals phase), so the loop->vertex indices
-		# are exactly what was written during construction - reuse them instead
-		# of paying a multi-million element foreach_get per submesh.
-		loop_vertex_indices = loop_vert.astype(np.int32, copy=False)
-	else:
-		loop_vertex_indices = np.zeros(len(meshData.loops), dtype=np.int32)
-		meshData.loops.foreach_get("vertex_index", loop_vertex_indices)
+	# The mesh is never validate()d, so the loop->vertex indices are exactly what
+	# was written during construction - reuse them instead of paying a
+	# multi-million element foreach_get per submesh.
+	loop_vertex_indices = loop_vert.astype(np.int32, copy=False)
 
 	UVLayerList = (UV0List, UV1List, UV2List)
 	for layerIndex, layer in enumerate(UVLayerList):
@@ -723,13 +707,13 @@ def importBoundingBoxes(meshBoundingBox, meshBoundingSphere, meshCollection, arm
 				                  armatureObj, bone.boneName, rotate90)
 
 
-meshGameNameConflictDict = set(["RERT"])  # Games that use the same mesh version
+meshGameNameConflictDict = set(["RE2RT"])  # Games that use the same mesh version
 
 
 def resolveMeshGameNameConflict(gameName, filePath):
 	rootPath = os.path.split(filePath)[0]
 	realGameName = None
-	if gameName == "RERT":
+	if gameName == "RE2RT":
 		if "RE2" in rootPath:
 			realGameName = "RE2RT"
 		elif "RE3" in rootPath or "escape" in rootPath.lower():

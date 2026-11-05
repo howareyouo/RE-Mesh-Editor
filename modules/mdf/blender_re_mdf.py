@@ -1,17 +1,16 @@
 import os
 import bpy
 
-from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, checkNameUsage,
+from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, tag_redraw,
 	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, iterExportableMeshObjects, getMDFMaterialName, setMDFMaterialName,
-	normalizeMaterialNameFilter,
 	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
 	)
 from ..gen_functions import textColors,raiseWarning,getAdjacentFileVersion,parseFileVersion,ENABLE_EXPORT_WARNINGS
+from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
 from ..naming import normalizeREMaterialName,getREMeshMaterialName,formatREMaterialObjectName
 from ..tex.tex_paths import normalizeTexturePath
-from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,gameNameMDFVersionDict,getMDFVersionToGameName,MMTRSData,GPBFEntry
+from .file_re_mdf import readMDF,writeMDF,MDFFile,Material,TextureBinding,Property,MMTRSData,GPBFEntry
 from .mdf_value import classify_prop,getPropValue,setPropValue,flipSF6CustomizeValues
-from .ui_re_mdf_panels import tag_redraw
 from .blender_re_mdf_texture_files import setTextureBindingPath, texturePathSync
 
 MDFGameNameConflictDict = set(["RE2","RE2RT","DD2"])
@@ -301,6 +300,17 @@ def MDFErrorCheck(collectionName, onlyMaterialNames = None, useBlenderMaterialNa
 		print(errorString)
 		print(textColors.FAIL + "__________________________________\nMDF export failed."+textColors.ENDC)
 		return False
+
+def normalizeMaterialNameFilter(onlyMaterialNames):
+	"""Normalise a material-name filter so an empty set means the same as no filter.
+
+	The mesh-exclude-unused filter may legitimately be empty (the mesh uses no exportable
+	materials). An empty set must behave identically to None - "export every material" -
+	wherever it is consumed, otherwise the MDF checks and the per-material filter disagree.
+	Returns a fresh set, or None when empty."""
+	if onlyMaterialNames:
+		return set(onlyMaterialNames)
+	return None
 
 def filterMDFMaterials(materialObjList, onlyMaterialNames):
 	"""Keep only the material objects whose name is used by the mesh, so materials that

@@ -4,7 +4,7 @@
 # Every table below derives from the per-game rows in game_profile.py; edit that
 # module to add a game or change a game's versions.
 
-from .game_profile import (ALL_PROFILES, VERSION_DD2, VERSION_DD2NEW, VERSION_DMC5,
+from .game_profile import (ALL_PROFILES,
                            VERSION_DR, VERSION_KG, VERSION_MHWILDS, VERSION_MHS3, VERSION_MHRSB,
                            VERSION_ONI2, VERSION_PRAG, VERSION_RE2, VERSION_RE3, VERSION_RE4,
                            VERSION_RE7RT, VERSION_RE8, VERSION_RE9, VERSION_RERT, VERSION_SF6,

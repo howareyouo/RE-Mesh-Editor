@@ -4,7 +4,6 @@ import struct
 
 from ..gen_functions import raiseWarning,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_unicode_string,write_uint,write_int,write_uint64,write_unicode_string
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
-from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
 from ..binary_struct import BinaryStruct,u32,u16,u64,i32,skip
 import ctypes
 
@@ -575,6 +574,7 @@ def writeMDF(mdfFile,filepath):
 	print("Opening " + filepath)
 	version = parseFileVersion(filepath, 23)
 	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
-		raiseWarning("No number extension found on mdf file, defaulting to version 23")
+		version = mdfFile.fileVersion or 23
+		raiseWarning(f"No number extension found on mdf file, defaulting to version {version}")
 	with openFileWrite(filepath) as file:
 		mdfFile.write(file,version)

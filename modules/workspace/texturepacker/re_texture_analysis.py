@@ -1,4 +1,3 @@
-import bpy
 import os
 import json
 TEX_RES_X = 1024

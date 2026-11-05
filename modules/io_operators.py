@@ -17,7 +17,7 @@ from .blender_utils import (printEditorHeader, isMDFCollection, isMeshCollection
 from .game_versions import mdfVersionDict
 from .mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .mesh.blender_re_mesh import importREMeshFile, exportREMeshFile
-from .mdf.file_re_mdf import gameNameMDFVersionDict
+from .game_versions import gameNameMDFVersionDict
 from .mdf.blender_re_mdf import importMDFFile, exportMDFFile
 from .fbxskel.blender_re_fbxskel import importFBXSkelFile, exportFBXSkelFile
 from .sfur.blender_re_sfur import importSFurFile, exportSFurFile

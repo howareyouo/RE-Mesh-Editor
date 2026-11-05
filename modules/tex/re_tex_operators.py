@@ -9,8 +9,8 @@ from bpy.props import StringProperty,CollectionProperty
 from .file_re_tex import getTexVersionFromGameName
 from .blender_re_tex import convertTexDDSList
 from .re_tex_propertyGroups import PNGConversionEntryPropertyGroup
-from ..mdf.file_re_mdf import getMDFVersionToGameName
-from .re_tex_utils import DDSToTex,ImageListToDDS,getStreamingTexturePath
+from .re_tex_utils import ImageListToDDS
+from .tex_paths import getStreamingTexturePath
 
 import shutil
 #from .re_tex_utils import

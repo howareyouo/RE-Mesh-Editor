@@ -1,6 +1,6 @@
 import bpy
 import numpy as np
-from .image_utils import NRMRToNRRX,NRRXToNRMR
+from .image_utils import NRMRToNRRX
 #-------------------
 #Shared helpers for texture type packing.
 #

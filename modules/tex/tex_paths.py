@@ -117,7 +117,7 @@ def _findBaseNamedFiles(splitPath, searchRootList, listDir):
 	targetName = baseName.lower()
 	fileList = []
 	for folder in _getUniqueFolderList(searchRootList, dirPart):
-		for entryName in sorted(_listFolder(folder, listDir)):
+		for entryName in _listFolder(folder, listDir):
 			entryBaseName = getTextureFileBaseName(entryName)
 			if entryBaseName == None or entryBaseName.lower() != targetName:
 				continue
@@ -146,7 +146,7 @@ def _findVersionedFiles(normalizedPath, searchRootList, texVersion, listDir, res
 		#chunk can match here - the scope the import has always had.
 		anyVersionPath = None
 		for folder in folderList:
-			for entryName in sorted(_listFolder(folder, listDir)):
+			for entryName in _listFolder(folder, listDir):
 				entryKey = os.path.normcase(entryName)
 				if entryKey.startswith(exactKey):
 					return [os.path.normpath(os.path.join(folder, entryName))]
@@ -191,10 +191,10 @@ def _joinRelPath(folderPath, relDir):
 
 
 def _listFolder(folder, listDir = None):
-	"""Return the entry names of a folder, empty when it can't be read."""
+	"""Return the entry names of a folder in name order, empty when it can't be read."""
 	if listDir != None:
 		return listDir(folder)
 	try:
-		return os.listdir(folder)
+		return sorted(os.listdir(folder))
 	except OSError:
 		return ()

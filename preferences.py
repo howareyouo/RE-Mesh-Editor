@@ -113,9 +113,9 @@ class REMeshPreferences(AddonPreferences):
 	bl_idname = ADDON_NAME
 	
 	dragDropImportOptions: BoolProperty(
-		name="Show Drag and Drop Import Options (Blender 4.1 or higher)",
-		description = "Show import options when dragging a mesh or mdf file into the 3D View.\nIf this is disabled, the default import options will be used.\nDrag and drop importing is only supported on Blender 4.1 or higher",
-		default = False if bpy.app.version < (4,1,0) else True
+		name="Show Drag and Drop Import Options",
+		description = "Show import options when dragging a mesh or mdf file into the 3D View.\nIf this is disabled, the default import options will be used.",
+		default = True
 	)
 	showConsole: BoolProperty(
 		name="Show Console During Import/Export",

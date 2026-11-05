@@ -4,7 +4,6 @@ from ..dds.file_dds import DDS, DX10_Header, DDSFile, getDDSHeader
 
 from .file_re_tex import RE_TexFile, MipData, CompressedImageHeader,GDEFLATE_VERSIONS
 from ..gen_functions import raiseWarning
-from .tex_paths import getStreamingTexturePath
 from ..gdeflate.gdeflate import GDeflate, GDeflateCompressionLevel, GDeflateError
 from ..ddsconv.directx.texconv import Texconv
 from .enums import tex_format_enum as texenum

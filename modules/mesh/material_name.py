@@ -21,8 +21,8 @@ from contextlib import contextmanager
 from ..naming import (getMaterialNameRenameError, parseREMeshObjectMaterialName,
                       planMaterialNameReplacement, replaceREMeshMaterialSuffix)
 
-#The bpy helpers a rename goes through are read from blender_utils on first use: blender_utils
-#re-exports this module, so importing it at load time would be circular.
+from ..blender_utils import (MDF_MATERIAL_TYPE, getMDFMaterialName, iterExportableMeshObjects,
+                             iterMDFMaterialObjects, setMDFMaterialName, setMDFMaterialObjectName)
 
 _materialNameSyncDepth = 0
 
@@ -57,7 +57,6 @@ def captureNameSnapshot():
 	Both sides are needed: the "__" suffix of the mesh objects and the "Material NN (name)" name
 	of the MDF material objects, which is where a user can rename a material without touching
 	any property (see findRenamedMDFMaterialObjects)."""
-	from ..blender_utils import MDF_MATERIAL_TYPE
 	#bpy.data is a _RestrictData stub while an addon loads, and an empty snapshot only means
 	#"no baseline yet" - the first timer tick captures the real one.
 	objectList = getattr(bpy.data, "objects", None)
@@ -129,7 +128,6 @@ def iterMeshesUsingMaterialName(meshCollection, materialName):
 	Returns every mesh piece sharing the material, across all LOD collections and including
 	export-excluded meshes, so a rename can't leave stale names behind. The comparison is
 	case-insensitive."""
-	from ..blender_utils import iterExportableMeshObjects
 	if meshCollection == None or materialName == "":
 		return
 	targetName = materialName.lower()
@@ -147,7 +145,6 @@ def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, 
 	has already updated by the time its callback runs - ignoreMeshObject is the outliner rename
 	that already happened, which is the same situation one step on: the object carries the new
 	name but the material behind it is not there yet."""
-	from ..blender_utils import getMDFMaterialName, iterMDFMaterialObjects
 	materialNameList = [getMDFMaterialName(materialObj) for materialObj in iterMDFMaterialObjects(mdfCollection)
 	                    if materialObj != ignoreMaterialObject and materialObj != ignoreMeshObject]
 	return getMaterialNameRenameError(materialNameList, oldMaterialName, newMaterialName)
@@ -220,7 +217,6 @@ def restoreRefusedMaterialRename(request):
 	before its previous object name is put back, because that name is what the MDF writer
 	resolves the material name from - and the property goes back with it, since the panel
 	field's write landed before its callback could refuse it."""
-	from ..blender_utils import setMDFMaterialName, setMDFMaterialObjectName
 	obj = request.renamedMeshObject
 	if obj != None:
 		restoredName = restoreObjectName(obj, replaceREMeshMaterialSuffix(obj.name, request.oldMaterialName))
@@ -252,7 +248,6 @@ def applyMaterialRename(request):
 	renames can't be picked up by a later lookup of the same name."""
 	if isMaterialNameSyncActive() or request.oldMaterialName == request.newMaterialName:
 		return MaterialRenameResult()
-	from ..blender_utils import getMDFMaterialName, iterMDFMaterialObjects, setMDFMaterialName
 	newName = request.newMaterialName.strip()
 	oldKey = request.oldMaterialName.strip().lower()
 	meshObjList = list(iterMeshesUsingMaterialName(request.meshCollection, request.oldMaterialName))
@@ -289,7 +284,6 @@ def getMaterialNameReplacePlan(mdfCollection, findValue, replaceValue):
 	Nothing is changed here, so a bulk rename can be refused as a whole instead of leaving half
 	of the materials renamed. Returns (planList, errorMessage), where planList holds
 	(materialObject, oldName, newName) for the materials the replacement actually changes."""
-	from ..blender_utils import getMDFMaterialName, iterMDFMaterialObjects
 	materialObjList = list(iterMDFMaterialObjects(mdfCollection))
 	planList, error = planMaterialNameReplacement([getMDFMaterialName(materialObj) for materialObj in materialObjList],
 	                                              findValue, replaceValue)
@@ -304,7 +298,6 @@ def replaceMaterialNameText(meshCollection, mdfCollection, findValue, replaceVal
 	MDF. Names are taken as they are otherwise: no reindexing, no prefix changes. Returns
 	(renamedMaterialCount, renamedMeshCount, errorMessage); nothing is renamed when the pass is
 	refused (see getMaterialNameReplacePlan)."""
-	from ..blender_utils import setMDFMaterialName
 	planList, error = getMaterialNameReplacePlan(mdfCollection, findValue, replaceValue)
 	if error != None:
 		return 0, 0, error

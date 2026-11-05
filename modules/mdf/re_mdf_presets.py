@@ -4,11 +4,10 @@ import os
 import re
 import bpy
 
-from ..gen_functions import textColors,raiseWarning,PRESET_DIR
+from ..gen_functions import textColors,PRESET_DIR
 from ..naming import formatREMaterialObjectName
-from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE
-from .file_re_mdf import getMDFVersionToGameName
-from .blender_re_mdf import checkNameUsage
+from ..blender_utils import showErrorMessageBox,createEmpty,MDF_MATERIAL_TYPE,checkNameUsage
+from ..game_versions import getMDFVersionToGameName
 from .blender_re_mdf_texture_files import setTextureBindingPath
 
 from .mdf_value import getPropValueJSON,setPropValue

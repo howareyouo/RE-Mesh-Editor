@@ -16,12 +16,11 @@ import bpy
 
 from ..blender_utils import (findMDFCollectionForMaterialObject, findMDFCollectionForMesh,
                              findMeshCollectionForMDF, findMeshCollectionForObject, getMDFMaterialName,
-                             getMDFMaterialNameConflict, getToolPanelFlag, iterAllMDFMaterialObjects,
-                             setMDFMaterialObjectName)
+                             getToolPanelFlag, iterAllMDFMaterialObjects, setMDFMaterialObjectName)
 from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName
 from .material_name import (MaterialRenameRequest, applyMaterialRename, clearNameSnapshot,
-                            getSnapshotObjectName, hasNameSnapshot, refreshNameSnapshot,
-                            restoreRefusedMaterialRename)
+                            getMDFMaterialNameConflict, getSnapshotObjectName, hasNameSnapshot,
+                            refreshNameSnapshot, restoreRefusedMaterialRename)
 
 POLL_INTERVAL = 0.5
 

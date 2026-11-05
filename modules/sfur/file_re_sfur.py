@@ -1,7 +1,6 @@
 #Author: NSA Cloud
-import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_unicode_string,write_unicode_string,parseFileVersion,StringTableBuilder
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,read_unicode_string,parseFileVersion,StringTableBuilder
 from ..binary_struct import BinaryStruct,u32,u64,f32,u8,u16,arr
 
 class SIZEDATA():

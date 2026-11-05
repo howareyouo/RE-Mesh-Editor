@@ -6,15 +6,6 @@ from mathutils import Matrix
 from .gen_functions import textColors, splitNativesPath, raiseWarning
 from .naming import formatREMaterialObjectName, getREMeshMaterialName, parseMDFObjectNameMaterialName
 import os
-from collections import OrderedDict
-from itertools import repeat
-
-#The material rename engine lives in mesh/material_name.py and is re-exported here, so the
-#mesh and MDF modules keep importing its public names from this module.
-from .mesh.material_name import (MaterialRenameRequest, MaterialRenameResult, applyMaterialRename,
-                                 getMDFMaterialNameConflict, getMaterialNameReplacePlan,
-                                 isMaterialNameSyncActive, iterMeshesUsingMaterialName, materialNameSync,
-                                 renameMeshObjectsToMaterialName, replaceMaterialNameText)
 
 # Shared rotation matrices (X-axis ±90°) for RE Engine import/export
 rotate90Matrix = Matrix.Rotation(radians(90.0), 4, 'X')
@@ -254,17 +245,6 @@ def getMeshMaterialNames(meshCollection, useBlenderMaterialName = False, selecte
 			meshMaterialNameSet.add(materialName)
 	return meshMaterialNameSet
 
-def normalizeMaterialNameFilter(onlyMaterialNames):
-	"""Normalise a material-name filter so an empty set means the same as no filter.
-
-	The mesh-exclude-unused filter may legitimately be empty (the mesh uses no exportable
-	materials). An empty set must behave identically to None - "export every material" -
-	wherever it is consumed, otherwise the MDF checks and the per-material filter disagree.
-	Returns a fresh set, or None when empty."""
-	if onlyMaterialNames:
-		return set(onlyMaterialNames)
-	return None
-
 def findMDFCollectionForMaterialObject(materialObj):
 	"""Return the MDF collection a material object is linked from, or None.
 
@@ -456,44 +436,27 @@ def nodes_iterate(ntree, arrange=True):
 	nodeoutput = outputnode_search(ntree)
 	if nodeoutput is None:
 		return None
-	a = []
-	a.append([])
-	for i in nodeoutput:
-		a[0].append(i)
+	seen = set(i.as_pointer() for i in nodeoutput)
+	a = [list(nodeoutput)]
 
 	level = 0
 	while a[level]:
 		a.append([])
 		for node in a[level]:
-			inputlist = [i for i in node.inputs if i.is_linked]
-			if inputlist:
-				for input in inputlist:
-					for nlinks in input.links:
-						node1 = nlinks.from_node
-						a[level + 1].append(node1)
-			else:
-				pass
+			for input in node.inputs:
+				if not input.is_linked:
+					continue
+				for nlinks in input.links:
+					node1 = nlinks.from_node
+					if node1.as_pointer() in seen:
+						continue
+					seen.add(node1.as_pointer())
+					a[level + 1].append(node1)
 
 		level += 1
 
 	del a[level]
 	level -= 1
-
-	#remove duplicate nodes at the same level, first wins
-	for x, nodes in enumerate(a):
-		a[x] = list(OrderedDict(zip(a[x], repeat(None))))
-
-	#remove duplicate nodes in all levels, last wins
-	top = level
-	seen = set()
-	for row in range(top, 0, -1):
-		kept = []
-		for node in a[row]:
-			if node in seen:
-				continue
-			seen.add(node)
-			kept.append(node)
-		a[row] = kept
 
 	if not arrange:
 		nodelist = [j for i in a for j in i]
@@ -537,6 +500,8 @@ def nodes_center(ntree):
 			node.location.x -= center_x
 			node.location.y += -center_y
 
+_arrangedGroupTreeSet = set()
+
 def arrangeNodeTree(ntree,margin_x = 100,margin_y = 20,centerNodes = True):
 	#TODO Fix, blender doesn't initialize node dimensions unless the shader editor is open
 
@@ -548,11 +513,12 @@ def arrangeNodeTree(ntree,margin_x = 100,margin_y = 20,centerNodes = True):
 	n_groups = [n for n in ntree.nodes if n.type == 'GROUP']
 
 	while n_groups:
-		j = n_groups.pop(0)
-		nodes_iterate(j.node_tree)
-		for i in j.node_tree.nodes:
-			if i.type == 'GROUP':
-				n_groups.append(i)
+		groupTree = n_groups.pop().node_tree
+		if groupTree.as_pointer() in _arrangedGroupTreeSet:
+			continue
+		_arrangedGroupTreeSet.add(groupTree.as_pointer())
+		nodes_iterate(groupTree)
+		n_groups.extend(i for i in groupTree.nodes if i.type == 'GROUP')
 
 	nodes_iterate(ntree)
 

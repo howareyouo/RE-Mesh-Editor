@@ -15,8 +15,7 @@ from ..gen_functions import (getPaddedPos, raiseWarning, read_float, read_null_t
 
 # Games using MPLY - version values come from mesh_versions.py (single source of
 # truth; mply previously carried a stale copy where VERSION_RE9 conflicted).
-from .mesh_versions import (MPLY_FILE_MAGIC, VERSION_DD2, VERSION_KG, VERSION_DD2NEW,
-                            VERSION_MHWILDS, VERSION_RE9)
+from .mesh_versions import MPLY_FILE_MAGIC, VERSION_MHWILDS, VERSION_RE9
 
 c_uint64 = ctypes.c_uint64
 c_uint32 = ctypes.c_uint32
@@ -256,7 +255,7 @@ class FileHeader():
 			file.seek(currentPos)
 
 	def write(self, file, version):
-		pass  # TODO
+		raise NotImplementedError("MPLY FileHeader write is not implemented")
 
 
 class MeshletHeader():
@@ -288,7 +287,7 @@ class MeshletHeader():
 		                               read_uint(file), read_uint(file), read_uint(file), read_uint(file)]
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY MeshletHeader write is not implemented")
 
 
 class MeshletLayout():
@@ -315,7 +314,7 @@ class MeshletLayout():
 		file.seek(currentPos)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY MeshletLayout write is not implemented")
 
 
 class MeshletCompactedClusterHeaderBitField_bits(ctypes.LittleEndianStructure):
@@ -350,14 +349,11 @@ class MeshletCompactedClusterHeader():
 
 	def read(self, file):
 		self.bitfield.asUInt64 = read_uint64(file)
-		# print("Cluster Info")
-		# for field in self.bitfield.fields._fields_:
-		# print(field[0], getattr(self.bitfield.fields, field[0]))
 		self.vertexOffsetBytes = read_uint(file)
 		self.indexOffsetBytes = read_uint(file)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY MeshletCompactedClusterHeader write is not implemented")
 
 
 class QuantizeAABBCenter():
@@ -372,7 +368,7 @@ class QuantizeAABBCenter():
 		self.Z = read_ushort(file)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY QuantizeAABBCenter write is not implemented")
 
 
 class ClusterEntry():
@@ -387,7 +383,7 @@ class ClusterEntry():
 		self.unkn1 = read_ubyte(file)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY ClusterEntry write is not implemented")
 
 
 class MeshletBVH():
@@ -459,7 +455,7 @@ class MeshletBVH():
 		file.seek(currentPos)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY MeshletBVH write is not implemented")
 
 
 class MeshletPartsLayout():
@@ -480,7 +476,7 @@ class MeshletPartsLayout():
 		file.seek(currentPos)
 
 	def write(self, file):
-		pass  # TODO
+		raise NotImplementedError("MPLY MeshletPartsLayout write is not implemented")
 
 
 class StreamingInfoEntry():
@@ -660,7 +656,7 @@ class ClusterInfo():
 			self.weightBuffer = None
 
 	def write(self, file):
-		pass
+		raise NotImplementedError("MPLY ClusterInfo write is not implemented")
 
 
 class ClusterLODEntry():
@@ -702,7 +698,7 @@ class ClusterInfoLayout():
 				self.lodList.append(entry)
 
 	def write(self, file):
-		pass
+		raise NotImplementedError("MPLY ClusterInfoLayout write is not implemented")
 
 
 class REMeshMPLY():
@@ -745,10 +741,6 @@ class REMeshMPLY():
 			file.seek(self.fileHeader.meshletPartsOffset)
 			self.meshletPartsLayout.read(file)
 
-		# if self.fileHeader.materialNameRemapOffset:
-		# file.seek(self.fileHeader.materialNameRemapOffset)
-		# for _ in range(0,self.fileHeader.stringCount):
-		# self.materialNameRemapList.append(read_ushort(file))
 		if self.fileHeader.stringCount:
 			file.seek(self.fileHeader.stringTableOffset)
 			raw_offsets = file.read(self.fileHeader.stringCount * 8)
@@ -773,13 +765,7 @@ class REMeshMPLY():
 			self.clusterInfoLayout.read(file, self.meshletLayout.gpuMeshletOffset,
 			                            self.meshletLayout.gpuMeshletHeader.lodClustersOffset, version)
 
-	# file.seek(self.fileHeader.gpuMeshletOffset)
-	# self.gpuData = file.read(self.meshletLayout.gpuDataSize)
-
-	# for field in self.fileHeader.contentFlagsA.flags._fields_:
-	# print(field[0], getattr(self.fileHeader.contentFlagsA.flags, field[0]))
-
 	def write(self, file, version):
-		pass  # TODO
+		raise NotImplementedError("MPLY mesh write is not implemented")
 
 

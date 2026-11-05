@@ -35,7 +35,7 @@ from ..gen_functions import (ClampNameList, formatMs, getBit, getPaddedPos, getP
                              read_float, read_null_terminated_names, read_ubyte, read_uint, read_uint64,
                              read_uint64_array, read_ushort, read_ushort_array, setBit, splitNativesPath,
                              write_float, write_ubyte, write_uint, write_uint64, write_ushort)
-from .file_re_mesh_mply import REMeshMPLY, StreamingInfo, StreamingInfoEntry
+from .file_re_mesh_mply import REMeshMPLY, StreamingInfo
 from ..binary_struct import BinaryStruct, i16, nested, u16, u32, u64
 
 # Version numbers and remap tables live in mesh_versions.py (single source of truth,
@@ -44,11 +44,10 @@ from ..binary_struct import BinaryStruct, i16, nested, u16, u32, u64
 # gen_functions' old star export (fixed 2026-09) and prevented static analysis.
 # meshFileVersionToGameNameDict + SIX_WEIGHT_MESH_FILE_VERSIONS are re-exported
 # for blender_re_mesh_import/export/utils which import them FROM this module.
-from .game_profile import ALL_PROFILES, DEFAULT_SKIN_WEIGHT_COUNT
-from .mesh_versions import (MESH_FILE_MAGIC, MPLY_FILE_MAGIC, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS,
-                            SIX_WEIGHT_GAMES,
+from .game_profile import ALL_PROFILES, DEFAULT_SKIN_WEIGHT_COUNT, VERSION_DD2, VERSION_DD2NEW
+from .mesh_versions import (MESH_FILE_MAGIC, MPLY_FILE_MAGIC, SIX_WEIGHT_GAMES,
                             SIX_WEIGHT_MESH_FILE_VERSIONS,
-                            VERSION_DD2, VERSION_DD2NEW, VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
+                            VERSION_DR, VERSION_MHWILDS, VERSION_ONI2,
                             VERSION_PRAG, VERSION_RE8, VERSION_RE9, VERSION_SF6,
                             getNearestRemapVersion, isPragmataMeshFileVersion,
                             meshFileVersionToGameNameDict,
@@ -164,6 +163,8 @@ class MaterialSubdivision():
 		if version >= VERSION_DD2NEW:
 			fields.append(read_uint(file))
 		idx = 0
+		if version >= VERSION_DR:
+			self.dr_unkn0 = fields[0]; idx = 1
 		self.faceCount = fields[idx]; idx += 1
 		self.faceStartIndex = fields[idx]; idx += 1
 		self.vertexStartIndex = fields[idx]; idx += 1
@@ -2175,16 +2176,16 @@ def assembleMeshBuffers(parsedMesh, reMesh, version, sd, currentOffset, blendDel
 	vertexBufferChunks = []
 	vertexElementTuples = []
 	currentBufferOffset = 0
-	# (buffer, element typing, size) per declared vertex element, in buffer layout order.
-	for buffer, typing, elementSize in ((vertexPosBuffer, 0, 12), (norTanBuffer, 1, 8),
-	                                    (UVBuffer, 2, 4), (UV2Buffer, 3, 4),
-	                                    (weightBuffer, 4, 16), (colorBuffer, 5, 4),
-	                                    (extraWeightBuffer, 7, 16)):
-		bufferSize = buffer.tell()
-		if bufferSize != 0:
-			vertexElementTuples.append((typing, elementSize, currentBufferOffset))
-			currentBufferOffset += bufferSize
-			vertexBufferChunks.append(buffer.getvalue())
+	from .re_mesh_parse import VERTEX_ELEMENTS
+	vertexElementStreams = {"vertexPos": vertexPosBuffer, "norTan": norTanBuffer, "uv": UVBuffer,
+	                        "uv2": UV2Buffer, "weight": weightBuffer, "color": colorBuffer,
+	                        "extraWeight": extraWeightBuffer}
+	for typing, _, elementStride, _, streamKey, _ in VERTEX_ELEMENTS:
+		elementBuffer = vertexElementStreams.get(streamKey)
+		if elementBuffer is not None and elementBuffer.tell() != 0:
+			vertexElementTuples.append((typing, elementStride, currentBufferOffset))
+			currentBufferOffset += elementBuffer.tell()
+			vertexBufferChunks.append(elementBuffer.getvalue())
 	
 	# Pragmata typing-2 tail: after declared vertex elements the buffer is
 	#   [aux 16*nverts][extra 896][u32 vert map][float16 xyz deltas]
@@ -2503,8 +2504,10 @@ def readMesh(source, lodTarget=None, versionIdentifier=None, streamingBuffer=Non
 
 
 def writeMesh(reMeshFile, destination, versionIdentifier=None):
-	"""Write a REMesh/REMeshMPLY to a file path or to an open binary stream.
+	"""Write a REMesh to a file path or to an open binary stream.
 
+	MPLY meshes are read-only here: the write path raises NotImplementedError before the
+	destination is opened, so an unsupported export leaves no empty file behind.
 	For a path the version is taken from the file extension, so an unversioned path is
 	written as MHRSB (MeshVersion.fallbackReason "unversioned"). For a stream pass
 	`versionIdentifier` (any of the three namespaces); without one the version is taken
@@ -2512,6 +2515,8 @@ def writeMesh(reMeshFile, destination, versionIdentifier=None):
 	file -- a mesh built by ParsedREMeshToREMesh carries 0 and needs one. A path is
 	opened and closed here; a stream is written from its current position and left open.
 	"""
+	if reMeshFile.isMPLY:
+		raise NotImplementedError("MPLY mesh export is not supported")
 	if isinstance(destination, (str, bytes, os.PathLike)):
 		filepath = destination
 		print("Writing to " + filepath)

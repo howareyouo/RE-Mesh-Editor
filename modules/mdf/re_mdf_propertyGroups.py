@@ -12,8 +12,6 @@ from bpy.props import (StringProperty,
 					   CollectionProperty
 					   )
 
-from .file_re_mdf import gameNameMDFVersionDict
-from .blender_re_mesh_mdf import importMDF
 from .re_mdf_presets import reloadPresets
 from ..blender_utils import (isMDFCollection, isMeshCollection, isSFurCollection, getMeshCollectionNameFromMDFName,
                              getMDFMaterialName, setMDFMaterialObjectName, findMDFCollectionForMaterialObject,
@@ -69,11 +67,6 @@ def filterSFurCollection(self, collection):
 
 flags = MDFFlags()#Bitflag struct
 flagsB = MDFFlagsB()#Bitflag struct
-def _stripBlenderSuffix(name):
-	#Fast equivalent of stripBlenderUserSuffix (trailing ".NNN" only)
-	if len(name) > 4 and name[-4] == "." and name[-3:].isdigit():
-		return name[:-4]
-	return name
 
 
 _materialNameIndex = {}
@@ -88,7 +81,7 @@ def _getMaterialNameIndex():
 		_materialNameIndexSize = size
 		index = {}
 		for mat in bpy.data.materials:
-			index.setdefault(_stripBlenderSuffix(mat.name), []).append(mat.name)
+			index.setdefault(stripBlenderUserSuffix(mat.name), []).append(mat.name)
 		_materialNameIndex = index
 	return _materialNameIndex
 
@@ -122,7 +115,7 @@ def linkBlenderMaterial(materialObj,materialName):
 						break
 			if meshObj != None:
 				for material in meshObj.data.materials:
-					if _stripBlenderSuffix(material.name) == materialName:
+					if stripBlenderUserSuffix(material.name) == materialName:
 						materialObj.re_mdf_material.linkedMaterial = material
 						#print(f"Linked {materialObj.name} to {material} (Slow)")
 						break						

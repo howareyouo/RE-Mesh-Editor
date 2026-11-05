@@ -6,7 +6,8 @@ import math
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mathutils import Vector
-from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict, PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
+from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
+from .mesh_versions import PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton, BlendShape
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
 from ..gen_functions import raiseWarning, y, printElapsed, formatMs, parseFileVersion, ENABLE_EXPORT_WARNINGS
@@ -687,9 +688,6 @@ def _export_process_lods(meshLODCollectionList, options, profile, parsedMesh, er
 
 				evaluatedSubMeshData.transform(subMeshWorldMatrix)
 				# evaluatedSubMeshData.normals_split_custom_set_from_vertices([vert.normal for vert in evaluatedSubMeshData.vertices])
-				if bpy.app.version < (4, 0, 0):
-					evaluatedSubMeshData.use_auto_smooth = True
-					evaluatedSubMeshData.calc_normals_split()
 				if len(evaluatedSubMeshData.uv_layers) > 0:
 					try:
 						evaluatedSubMeshData.calc_tangents()

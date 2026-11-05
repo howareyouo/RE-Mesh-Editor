@@ -2,7 +2,7 @@ import os
 import bpy
 from mathutils import Vector,Quaternion,Matrix
 from ..blender_utils import setAssetPathFromFilePath, rotate90Matrix, rotateNeg90Matrix
-from ..gen_functions import textColors,raiseWarning,parseFileVersion
+from ..gen_functions import parseFileVersion
 from .file_re_fbxskel import readFBXSkel,writeFBXSkel,FBXSkelFile,BoneEntry
 
 #FBXSKEL IMPORT

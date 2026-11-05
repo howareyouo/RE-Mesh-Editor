@@ -65,6 +65,11 @@ class GameProfile(NamedTuple):
 	weightPacking: tuple
 	# Pragmata retail typing-2 blend shape layout (docs/PRAGMATA.md).
 	pragmataBlendShape: bool
+	# In the name side of the MDF alias table in modules/game_versions.py. Build
+	# variants (DD2NEW, MHWILDSBETA) stay out of it.
+	mdfAlias: bool
+	# The row a numeric MDF version resolves to in that table.
+	mdfAliasWinner: bool
 
 	@property
 	def padWithLastWeightIndex(self):
@@ -77,31 +82,33 @@ class GameProfile(NamedTuple):
 
 # name: (meshFileVersion, mdfVersion, texVersion, remapVersion, internalVersion,
 #        sixWeight, skinWeightCount, padWithLastWeightIndex, extendedWeights,
-#        pragmataBlendShape, reportedName)
+#        pragmataBlendShape, reportedName, mdfAlias, mdfAliasWinner)
 _GAME_ROWS = {
-	"DMC5":        (1808282334, 10, 11,        VERSION_DMC5, 386270720, False, 18, False, False, False, None),
-	"RE2":         (1808312334, 10, 10,        VERSION_RE2, 386270720, False, 18, False, False, False, None),
-	"RE3":         (1902042334, 13, 190820018, VERSION_RE3, 21011200, False, 18, False, False, False, None),
-	"RE8":         (2101050001, 19, 30,        VERSION_RE8, 2020091500, False, 18, False, False, False, None),
-	"RE2RT":       (2109108288, 21, 34,        VERSION_RERT, 21041600, False, 18, False, False, False, None),
-	"RE7RT":       (220128762, 21, 35,         VERSION_RE7RT, None, False, 18, False, False, False, None),
-	"MHRSB":       (2109148288, 23, 28,        VERSION_MHRSB, 21091000, False, 18, False, False, False, None),
-	"SF6":         (230110883, 31, 241101895,  VERSION_SF6, 220705151, True, 9, False, False, False, None),
-	"RE4":         (221108797, 32, 143221013,  VERSION_RE4, 220822879, False, 18, False, False, False, None),
-	"DD2":         (231011879, 40, 760230703,  VERSION_DD2, 230517984, False, 18, False, False, False, None),
-	"KG":          (240306278, 40, 231106777,  VERSION_KG, 230727984, False, 18, False, False, False, None),
-	"DD2NEW":      (240423143, 40, 760230703,  VERSION_DD2NEW, 230517984, False, 18, False, False, False, "DD2"),
-	"DR":          (240424828, 40, 240606151,  VERSION_DR, 240423829, False, 18, False, False, False, None),
-	"MHWILDSBETA": (240820143, 45, 241106027,  VERSION_MHWILDS, 240704828, True, 25, False, True, False, "MHWILDS"),
-	"MHWILDS":     (241111606, 45, 241106027,  VERSION_MHWILDS, 240704828, True, 25, False, True, False, None),
-	"ONI2":        (240827123, 46, 240701001,  VERSION_ONI2, 240704828, False, 18, False, False, False, None),
-	"MHS3":        (250604100, 49, 251111100,  VERSION_MHS3, 250203152, True, 18, True, True, False, None),
-	"PRAG":        (251121828, 51, 251111100,  VERSION_PRAG, 250707828, True, 27, True, True, True, None),
-	"RE9":         (250925211, 51, 250813143,  VERSION_RE9, 250904410, False, 18, True, False, False, None),
+	"DMC5":        (1808282334, 10, 11,        VERSION_DMC5, 386270720, False, 18, False, False, False, None, True, False),
+	"RE2":         (1808312334, 10, 10,        VERSION_RE2, 386270720, False, 18, False, False, False, None, True, True),
+	"RE3":         (1902042334, 13, 190820018, VERSION_RE3, 21011200, False, 18, False, False, False, None, True, True),
+	"RE8":         (2101050001, 19, 30,        VERSION_RE8, 2020091500, False, 18, False, False, False, None, True, True),
+	"RE2RT":       (2109108288, 21, 34,        VERSION_RERT, 21041600, False, 18, False, False, False, None, True, True),
+	"RE7RT":       (220128762, 21, 35,         VERSION_RE7RT, None, False, 18, False, False, False, None, True, False),
+	"MHRSB":       (2109148288, 23, 28,        VERSION_MHRSB, 21091000, False, 18, False, False, False, None, True, True),
+	"SF6":         (230110883, 31, 241101895,  VERSION_SF6, 220705151, True, 9, False, False, False, None, True, True),
+	"RE4":         (221108797, 32, 143221013,  VERSION_RE4, 220822879, False, 18, False, False, False, None, True, True),
+	"DD2":         (231011879, 40, 760230703,  VERSION_DD2, 230517984, False, 18, False, False, False, None, True, True),
+	"KG":          (240306278, 40, 231106777,  VERSION_KG, 230727984, False, 18, False, False, False, None, True, False),
+	"DD2NEW":      (240423143, 40, 760230703,  VERSION_DD2NEW, 230517984, False, 18, False, False, False, "DD2", False, False),
+	"DR":          (240424828, 40, 240606151,  VERSION_DR, 240423829, False, 18, False, False, False, None, True, False),
+	"MHWILDSBETA": (240820143, 45, 241106027,  VERSION_MHWILDS, 240704828, True, 25, False, True, False, "MHWILDS", False, False),
+	"MHWILDS":     (241111606, 45, 241106027,  VERSION_MHWILDS, 240704828, True, 25, False, True, False, None, True, True),
+	"ONI2":        (240827123, 46, 240701001,  VERSION_ONI2, 240704828, False, 18, False, False, False, None, True, True),
+	# mdf2.49 has no parser, so MHS3 has no alias entry.
+	"MHS3":        (250604100, 49, 251111100,  VERSION_MHS3, 250203152, True, 18, True, True, False, None, False, False),
+	# PRAG shares mdf 51 with RE9, which wins the numeric lookup.
+	"PRAG":        (251121828, 51, 251111100,  VERSION_PRAG, 250707828, True, 27, True, True, True, None, True, False),
+	"RE9":         (250925211, 51, 250813143,  VERSION_RE9, 250904410, False, 18, True, False, False, None, True, True),
 	# Name-only rows: appear in the MDF / tex lookup tables but ship no mesh row of
 	# their own here (RE3RT shares RE2RT's remap, MHRise has no mesh file version).
-	"RE3RT":       (None, 21, 34, None, None, False, 18, False, False, False, None),
-	"MHR":         (None, None, 28, None, None, False, 18, False, False, False, None),
+	"RE3RT":       (None, 21, 34, None, None, False, 18, False, False, False, None, True, False),
+	"MHR":         (None, None, 28, None, None, False, 18, False, False, False, None, False, False),
 }
 
 # Mesh file versions that belong to a game row but carry their own MDF / tex version.
@@ -139,10 +146,12 @@ ALL_PROFILES = tuple(
 		skinWeightCount=skinWeightCount,
 		weightPacking=_weightPacking(padWithLastWeightIndex, extendedWeights),
 		pragmataBlendShape=pragmataBlendShape,
+		mdfAlias=mdfAlias,
+		mdfAliasWinner=mdfAliasWinner,
 	)
 	for name, (meshFileVersion, mdfVersion, texVersion, remapVersion, internalVersion,
 	           sixWeight, skinWeightCount, padWithLastWeightIndex, extendedWeights,
-	           pragmataBlendShape, reportedName) in _GAME_ROWS.items()
+	           pragmataBlendShape, reportedName, mdfAlias, mdfAliasWinner) in _GAME_ROWS.items()
 )
 
 profilesByName = {gameProfile.name: gameProfile for gameProfile in ALL_PROFILES}
@@ -187,6 +196,8 @@ UNKNOWN_PROFILE = GameProfile(
 	skinWeightCount=DEFAULT_SKIN_WEIGHT_COUNT,
 	weightPacking=DEFAULT_WEIGHT_PACKING,
 	pragmataBlendShape=False,
+	mdfAlias=False,
+	mdfAliasWinner=False,
 )
 
 

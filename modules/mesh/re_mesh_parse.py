@@ -4,15 +4,6 @@ from .mesh_versions import (MESH_FILE_VERSION_SF6, PRAGMATA_INTERNAL_MESH_VERSIO
                             SIX_WEIGHT_MESH_FILE_VERSIONS, isPragmataMeshFileVersion)
 from .file_re_mesh_mply import computePosDecode
 
-typeNameMapping = ["Position", "NorTan", "UV", "UV2", "Weight", "Color", "SF6UnknownVertexDataType",
-                   "ExtraWeight"]
-
-blendShapeNameMapping = ["BlendShapeByte", "BlendShapeShort"]
-blendShapeStrideDict = {
-	"BlendShapeByte": 4,
-	"BlendShapeShort": 8,
-}
-
 
 def ReadPosBuffer(vertexPosBuffer, tags):
 	return np.frombuffer(vertexPosBuffer, dtype="<3f")
@@ -125,17 +116,19 @@ def ReadCompressedPosBuffer(vertexPosBuffer, bitFlag, center, relOffset, posDeco
 	return posArray
 
 
-BufferReadDict = {
-	"Position": ReadPosBuffer,
-	"NorTan": ReadNorTanBuffer,
-	"UV": ReadUVBuffer,
-	"UV2": ReadUVBuffer,
-	"Weight": ReadWeightBuffer,
-	"Color": ReadColorBuffer,
-	"SF6UnknownVertexDataType": ReadColorBuffer,
-	# Read as color data for now until what it is can be determined
-	"ExtraWeight": ReadWeightBuffer,
-}
+# (typing, name, stride, reader, writer stream key, SubMesh fields in reader-output order)
+VERTEX_ELEMENTS = (
+	(0, "Position", 12, ReadPosBuffer, "vertexPos", ("vertexPosList",)),
+	(1, "NorTan", 8, ReadNorTanBuffer, "norTan", ("normalList", "tangentList")),
+	(2, "UV", 4, ReadUVBuffer, "uv", ("uvList",)),
+	(3, "UV2", 4, ReadUVBuffer, "uv2", ("uv2List",)),
+	(4, "Weight", 16, ReadWeightBuffer, "weight", ("weightIndicesList", "weightList")),
+	(5, "Color", 4, ReadColorBuffer, "color", ("colorList",)),
+	(6, "SF6UnknownVertexDataType", 4, ReadColorBuffer, None, ()),
+	(7, "ExtraWeight", 16, ReadWeightBuffer, "extraWeight", ("extraWeightIndicesList", "extraWeightList")),
+)
+SECONDARY_WEIGHT_ELEMENT = (None, "SecondaryWeight", None, ReadWeightBuffer, None,
+                            ("secondaryWeightIndicesList", "secondaryWeightList"))
 
 
 def ReadBlendShapeByteBuffer(blendShapeBuffer, tags):
@@ -158,24 +151,14 @@ def ReadBlendShapeShortBuffer(blendShapeBuffer, tags):
 	return blendShapeArray
 
 
-BlendShapeBufferReadDict = {
-	"BlendShapeByte": ReadBlendShapeByteBuffer,
-	"BlendShapeShort": ReadBlendShapeShortBuffer,
-}
+BLEND_SHAPE_ELEMENTS = (
+	(4, ReadBlendShapeByteBuffer),
+	(8, ReadBlendShapeShortBuffer),
+)
 
 
 def ReadVertexElementBuffers(vertexElementList, vertexBuffer, tagSet):
-	vertexDict = {
-		"Position": None,
-		"NorTan": None,
-		"UV": None,
-		"UV2": None,
-		"Weight": None,
-		"Color": None,
-		"SF6UnknownVertexDataType": None,
-		"ExtraWeight": None,
-		"SecondaryWeight": None,
-	}
+	vertexDict = dict.fromkeys(element[1] for element in VERTEX_ELEMENTS + (SECONDARY_WEIGHT_ELEMENT,))
 	lastIndex = len(vertexElementList) - 1
 	importedElementsSet = set()
 	for index, vertexElement in enumerate(vertexElementList):
@@ -186,7 +169,7 @@ def ReadVertexElementBuffers(vertexElementList, vertexBuffer, tagSet):
 			bufferEnd = posOffset + (stride * len(vertexDict["Position"]))
 		else:
 			bufferEnd = int(vertexElementList[index + 1]['posStartOffset'])
-		elementName = typeNameMapping[int(vertexElement['typing'])]
+		_, elementName, _, readElement, _, _ = VERTEX_ELEMENTS[int(vertexElement['typing'])]
 		# print(f"{elementName} start {str(posOffset)} end {str(bufferEnd)} size {str(bufferEnd-posOffset)}")
 		# print(elementName)
 
@@ -194,11 +177,11 @@ def ReadVertexElementBuffers(vertexElementList, vertexBuffer, tagSet):
 			# I suspect the doubled vertex elements are for when the shadow meshes have their own unique LODs
 			# TODO Make shadowVertexDict
 			if "shadowLOD" not in tagSet:  # Skip reading the first vertex element entry of a type if reading unique shadow LOD
-				vertexDict[elementName] = BufferReadDict[elementName](
+				vertexDict[elementName] = readElement(
 					vertexBuffer[posOffset:bufferEnd], tagSet)
 			importedElementsSet.add(elementName)
 		elif "shadowLOD" in tagSet:
-			vertexDict[elementName] = BufferReadDict[elementName](
+			vertexDict[elementName] = readElement(
 				vertexBuffer[posOffset:bufferEnd], tagSet)
 	return vertexDict
 
@@ -411,12 +394,11 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 		currentBlendDeltaOffset = 0
 		if blendShapeLODData != None:
 			blendShapeTags = set()  # Unused currently but there if needed in the future
-			bufferType = blendShapeNameMapping[blendShapeLODData.typing]
-			bufferStride = blendShapeStrideDict[bufferType]
+			bufferStride, readBlendShape = BLEND_SHAPE_ELEMENTS[blendShapeLODData.typing]
 
 			# Only parse current LOD's blend shape data instead of the whole buffer
 			endOffset = currentBlendShapeOffset + (blendShapeLODData.vertCount * bufferStride)
-			blendShapeDeltas = BlendShapeBufferReadDict[bufferType](
+			blendShapeDeltas = readBlendShape(
 				blendShapeBuffer[currentBlendShapeOffset:endOffset], tags=blendShapeTags)
 			currentBlendShapeOffset = endOffset
 
@@ -492,8 +474,6 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 				submesh.meshVertexOffset = meshInfo.vertexStartIndex
 
 				vertexDict = vertexDictList[meshInfo.vertexBufferIndex]
-				if vertexDict["Position"] is not None:
-					submesh.vertexPosList = vertexDict["Position"][meshInfo.vertexStartIndex:bufferEnd]
 
 				# Precompute face buffer slice
 				faceStart = meshInfo.faceStartIndex * indexMultiplier
@@ -502,30 +482,12 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 					submesh.faceList = ReadIntFaceBuffer(faceBuffer[faceStart:faceEnd])
 				else:
 					submesh.faceList = ReadFaceBuffer(faceBuffer[faceStart:faceEnd])
-				if vertexDict["NorTan"] is not None:
-					submesh.normalList = vertexDict["NorTan"][0][meshInfo.vertexStartIndex:bufferEnd]
-					submesh.tangentList = vertexDict["NorTan"][1][meshInfo.vertexStartIndex:bufferEnd]
-				if vertexDict["UV"] is not None:
-					submesh.uvList = vertexDict["UV"][meshInfo.vertexStartIndex:bufferEnd]
-				if vertexDict["UV2"] is not None:
-					submesh.uv2List = vertexDict["UV2"][meshInfo.vertexStartIndex:bufferEnd]
-				if vertexDict["Weight"] is not None:
-					submesh.weightIndicesList = vertexDict["Weight"][0][meshInfo.vertexStartIndex:bufferEnd]
-					submesh.weightList = vertexDict["Weight"][1][meshInfo.vertexStartIndex:bufferEnd]
-				if vertexDict["ExtraWeight"] is not None:
-					submesh.extraWeightIndicesList = vertexDict["ExtraWeight"][0][
-						meshInfo.vertexStartIndex:bufferEnd]
-					submesh.extraWeightList = vertexDict["ExtraWeight"][1][
-						meshInfo.vertexStartIndex:bufferEnd]
-
-				if vertexDict["Color"] is not None:
-					submesh.colorList = vertexDict["Color"][meshInfo.vertexStartIndex:bufferEnd]
-
-				if vertexDict["SecondaryWeight"] is not None:
-					submesh.secondaryWeightIndicesList = vertexDict["SecondaryWeight"][0][
-						meshInfo.vertexStartIndex:bufferEnd]
-					submesh.secondaryWeightList = vertexDict["SecondaryWeight"][1][
-						meshInfo.vertexStartIndex:bufferEnd]
+				for _, elementName, _, _, _, subMeshFields in VERTEX_ELEMENTS + (SECONDARY_WEIGHT_ELEMENT,):
+					elementValues = vertexDict.get(elementName)
+					if elementValues is not None:
+						elementValues = elementValues if isinstance(elementValues, tuple) else (elementValues,)
+						for fieldName, fieldValues in zip(subMeshFields, elementValues):
+							setattr(submesh, fieldName, fieldValues[meshInfo.vertexStartIndex:bufferEnd])
 
 				# if blendShapeLODData != None:
 				if meshInfo.vertexStartIndex in blendShapeDict:

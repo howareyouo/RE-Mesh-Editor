@@ -1,13 +1,11 @@
 #Author: NSA Cloud
 import bpy
-import os
 
 from bpy.types import Operator
 
-from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection,checkNameUsage
+from .blender_re_sfur import createCurveEmpty,reindexEntries,createSFurCollection
 from ..naming import formatREMaterialObjectName
-from ..blender_utils import MDF_MATERIAL_TYPE
-from .ui_re_sfur_panels import tag_redraw
+from ..blender_utils import MDF_MATERIAL_TYPE,checkNameUsage,tag_redraw
 
 class WM_OT_NewSFurHeader(Operator):
 	bl_label = "Create SFur Collection"

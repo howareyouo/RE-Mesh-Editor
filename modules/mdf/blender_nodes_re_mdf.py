@@ -54,22 +54,12 @@ def getOrCreateNodeGroup(groupName):
 	return bpy.data.node_groups.new(type="ShaderNodeTree", name=groupName), True
 
 def addNodeGroupSockets(nodeGroup, inSockets, outSockets):
-	"""Create a node group's interface sockets, handling the pre/post Blender 4.0 API split.
-	Each socket is (name, socketType), or (name, socketType, legacySocketType) when the
-	legacy (pre-4.0) socket type differs."""
-	legacy = bpy.app.version < (4,0,0)
-	def socketType(socket):
-		return socket[2] if len(socket) > 2 and legacy else socket[1]
-	if legacy:
-		for socket in inSockets:
-			nodeGroup.inputs.new(socketType(socket),socket[0])
-		for socket in outSockets:
-			nodeGroup.outputs.new(socketType(socket),socket[0])
-	else:
-		for socket in inSockets:
-			nodeGroup.interface.new_socket(name=socket[0],description="",in_out ="INPUT", socket_type=socket[1])
-		for socket in outSockets:
-			nodeGroup.interface.new_socket(name=socket[0],description="",in_out ="OUTPUT", socket_type=socket[1])
+	"""Create a node group's interface sockets.
+	Each socket is (name, socketType)."""
+	for socket in inSockets:
+		nodeGroup.interface.new_socket(name=socket[0],description="",in_out ="INPUT", socket_type=socket[1])
+	for socket in outSockets:
+		nodeGroup.interface.new_socket(name=socket[0],description="",in_out ="OUTPUT", socket_type=socket[1])
 
 def getPassThroughGroupNode(nodeTree, groupName, sockets):
 	"""Create a node group that passes every named socket straight through and

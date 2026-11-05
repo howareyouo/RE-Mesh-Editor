@@ -128,15 +128,8 @@ def bounding_sphere_ritter(points):
 
 
 def joinObjects(objList):
-	if bpy.app.version < (3, 2, 0):
-		ctx = bpy.context.copy()
-		# one of the objects to join
-		ctx['active_object'] = objList[0]
-		ctx['selected_editable_objects'] = objList
-		bpy.ops.object.join(ctx)
-	else:
-		with bpy.context.temp_override(active_object=objList[0], selected_editable_objects=objList):
-			bpy.ops.object.join()
+	with bpy.context.temp_override(active_object=objList[0], selected_editable_objects=objList):
+		bpy.ops.object.join()
 	return bpy.context.active_object
 
 

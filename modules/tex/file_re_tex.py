@@ -7,9 +7,8 @@ from ..gen_functions import read_uint, read_int, read_uint64,\
     write_uint, write_int, write_uint64, write_float,\
     write_short, write_ushort, write_ubyte, write_byte,\
     write_unicode_string
-from ..gen_functions import textColors, raiseWarning, getPaddingAmount
 from ..gdeflate.gdeflate import GDeflate
-from .enums.game_version_enum import gameNameToTexVersionDict
+from ..game_versions import gameNameToTexVersionDict
 from .format_ops import packetSizeData
 from .enums.tex_format_enum import texFormatToDXGIStringDict
 from . import tex_math as tmath

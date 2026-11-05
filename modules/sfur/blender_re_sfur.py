@@ -1,9 +1,9 @@
 import os
 import bpy
 import glob
-from ..blender_utils import createRECollection,setAssetPathFromFilePath,checkNameUsage
+from ..blender_utils import createRECollection,setAssetPathFromFilePath
 from ..game_versions import sfurVersionDict
-from ..gen_functions import textColors,parseFileVersion
+from ..gen_functions import parseFileVersion
 from ..naming import parseMDFObjectNameMaterialName,formatREMaterialObjectName
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 

@@ -6,9 +6,9 @@ from bpy.types import (
 	Operator,
 	PropertyGroup,
 )
-from ..blender_utils import (MDF_MATERIAL_TYPE, findMeshCollectionForMDF, getMaterialNameReplacePlan,
-                             iterMeshesUsingMaterialName, tag_redraw)
-from .file_re_mdf import getMDFVersionToGameName
+from ..blender_utils import MDF_MATERIAL_TYPE, findMeshCollectionForMDF
+from ..mesh.material_name import getMaterialNameReplacePlan, iterMeshesUsingMaterialName
+from ..game_versions import getMDFVersionToGameName
 
 
 #Renames the "Find and Replace Material Names" panel lists before it switches to "...and N more."

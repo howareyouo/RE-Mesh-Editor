@@ -1,10 +1,10 @@
 import ctypes
 from ctypes import c_bool, c_uint8, c_uint32, c_uint64, POINTER, byref
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union
 from enum import IntEnum
 import platform
-from ..gen_functions import IS_WINDOWS, IS_LINUX, IS_MAC
+from ..gen_functions import IS_WINDOWS, IS_LINUX
 
 class GDeflateCompressionLevel(IntEnum):
     """

@@ -622,9 +622,8 @@ baseUVTilingList = set([#Node types that use UV_Tiling property
 ])
 
 
-from ..gen_functions import raiseWarning,getBit,wildCardFileSearch
-from ..game_versions import mdfVersionDict, texVersionDict, gameTexVersionDict
-from .file_re_mdf import readMDF,getMDFVersionToGameName
+from ..gen_functions import raiseWarning,wildCardFileSearch
+from ..game_versions import mdfVersionDict, texVersionDict, getTexVersion, getMDFVersionToGameName, TEX_VERSION_UNCONFIRMED_MDF
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
 from ..ddsconv.directx.texconv import Texconv
@@ -768,7 +767,10 @@ def _listTexDir(dirPath):
 
 def getTexPath(baseTexturePath,chunkPathList,mdfVersion,gameName=None):
 	"""Return the texture file of a binding path, or None when no chunk has it."""
-	texVersion = gameTexVersionDict.get(gameName, texVersionDict.get(mdfVersion,""))
+	texVersion = texVersionDict.get(mdfVersion,"")
+	#A game row only speaks for the mdf version it ships (RE Verse shares RE8's row, mdf2.20).
+	if mdfVersion not in TEX_VERSION_UNCONFIRMED_MDF and getMDFVersionToGameName(gameName) == mdfVersion:
+		texVersion = f".{getTexVersion(gameName)}"
 	return findTextureFile(baseTexturePath + TEX_EXTENSION,
 	                       [SearchRoot(chunkPath) for chunkPath in chunkPathList],
 	                       texVersion = texVersion, matchMode = TEX_MATCH_VERSION,
@@ -1148,6 +1150,48 @@ def setupMaterialNodeTree(blenderMaterial, mdfMaterial, gameName, materialName, 
 	return matInfo, textureNodeError
 
 
+def addMaskMappingNode(matInfo, nodeTree, uvNode, maskNode, position, scale = None, scalePropName = None):
+	"""Place a UV1 mapping node left of a mask/overlay texture and feed its Vector
+	input. scale is the fixed Scale default; scalePropName drives Scale from that
+	material property instead when the material has it."""
+	mappingNode = nodeTree.nodes.new("ShaderNodeMapping")
+	mappingNode.location = position
+	if scalePropName is not None and scalePropName in matInfo["mPropDict"]:
+		uvPropNode = addPropertyNode(matInfo["mPropDict"][scalePropName], matInfo["currentPropPos"], nodeTree)
+		nodeTree.links.new(uvPropNode.outputs[0],mappingNode.inputs["Scale"])
+	if scale is not None:
+		mappingNode.inputs["Scale"].default_value = scale
+	nodeTree.links.new(uvNode.outputs["UV"],mappingNode.inputs["Vector"])
+	nodeTree.links.new(mappingNode.outputs["Vector"],maskNode.inputs["Vector"])
+
+
+def addMaskedDetailMultiply(matInfo, nodeTree, position, maskSocket, propName):
+	"""Scale a detail property by the mask map's red channel and pass it through a
+	distance multiply fixed at 1.0. Advances position one slot per node and returns
+	the distance multiply node."""
+	position[1]-= 300
+	detailPropNode = addPropertyNode(matInfo["mPropDict"][propName], matInfo["currentPropPos"], nodeTree)
+	maskPropNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = position)
+	nodeTree.links.new(detailPropNode.outputs["Value"],maskPropNode.inputs[0])
+	nodeTree.links.new(maskSocket,maskPropNode.inputs[1])
+	position[0]+= 300
+	distanceMultiplyNode = addMathNode(nodeTree.nodes, "MULTIPLY", location = position)
+	nodeTree.links.new(maskPropNode.outputs["Value"],distanceMultiplyNode.inputs[0])
+	distanceMultiplyNode.inputs[1].default_value = 1.0
+	position[0]+= 300
+	return distanceMultiplyNode
+
+
+def linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, propName, socketName, outputName = "Value", skipMissingSocket = False):
+	"""Drive one BSDF input from the property node of propName. The property node is
+	always created; skipMissingSocket leaves out the link when the shader has no such
+	socket instead of letting the lookup fail."""
+	propNode = addPropertyNode(matInfo["mPropDict"][propName], matInfo["currentPropPos"], nodeTree)
+	if skipMissingSocket and socketName not in nodeBSDF.inputs:
+		return
+	nodeTree.links.new(propNode.outputs[outputName], nodeBSDF.inputs[socketName])
+
+
 def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProps, arrangeNodes):
 	#Game/shader specific node wiring for one material: a linear sequence of independently
 	#gated feature blocks communicating through matInfo and the node tree. The frame names
@@ -1500,38 +1544,14 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 			currentPos[0]+= 300
 						
 			if "Detail_RoughnessBlend" in matInfo["mPropDict"]:
-				currentPos[1]-= 300
-				detailRoughnessBlendNode = addPropertyNode(matInfo["mPropDict"]["Detail_RoughnessBlend"], matInfo["currentPropPos"], nodeTree)
-							
-				multiplyRoughnessBlendNode = addMathNode(nodes, "MULTIPLY", location = currentPos)
-				links.new(detailRoughnessBlendNode.outputs["Value"],multiplyRoughnessBlendNode.inputs[0])
-				links.new(MaskMapSeparateNode.outputs["Red"],multiplyRoughnessBlendNode.inputs[1])
-				currentPos[0]+= 300
-							
-				roughnessDistanceMulitplyNode = addMathNode(nodes, "MULTIPLY", location = currentPos)
-				links.new(multiplyRoughnessBlendNode.outputs["Value"],roughnessDistanceMulitplyNode.inputs[0])
-				roughnessDistanceMulitplyNode.inputs[1].default_value = 1.0
-				currentPos[0]+= 300
-							
+				roughnessDistanceMulitplyNode = addMaskedDetailMultiply(matInfo, nodeTree, currentPos, MaskMapSeparateNode.outputs["Red"], "Detail_RoughnessBlend")
 				roughnessCorrectionNode = addMathNode(nodes, "ADD", location = currentPos, clamp = True)#Can't seem to get roughness values to match in game, so an approximation is used here
 				links.new(detailMapNode.outputs["Alpha"],roughnessCorrectionNode.inputs[0])
 				roughnessCorrectionNode.inputs[1].default_value = 0.4
 				currentPos[0]+= 300
 				matInfo["roughnessNodeLayerGroup"].addMixLayer(roughnessCorrectionNode.outputs["Value"],factorOutSocket = roughnessDistanceMulitplyNode.outputs["Value"],mixType = "MULTIPLY",mixFactor = 1.0)
 			if "Detail_Cavity" in matInfo["mPropDict"]:
-				currentPos[1]-= 300
-				detailCavityNode = addPropertyNode(matInfo["mPropDict"]["Detail_Cavity"], matInfo["currentPropPos"], nodeTree)
-							
-				multiplyCavityNode = addMathNode(nodes, "MULTIPLY", location = currentPos)
-				links.new(detailCavityNode.outputs["Value"],multiplyCavityNode.inputs[0])
-				links.new(MaskMapSeparateNode.outputs["Red"],multiplyCavityNode.inputs[1])
-							
-				currentPos[0]+= 300
-							
-				cavityDistanceMulitplyNode = addMathNode(nodes, "MULTIPLY", location = currentPos)
-				links.new(multiplyCavityNode.outputs["Value"],cavityDistanceMulitplyNode.inputs[0])
-				cavityDistanceMulitplyNode.inputs[1].default_value = 1.0
-				currentPos[0]+= 300
+				cavityDistanceMulitplyNode = addMaskedDetailMultiply(matInfo, nodeTree, currentPos, MaskMapSeparateNode.outputs["Red"], "Detail_Cavity")
 							
 				matInfo["cavityNodeLayerGroup"].addMixLayer(MaskMapSeparateNode.outputs["Blue"],factorOutSocket = cavityDistanceMulitplyNode.outputs["Value"],mixType = "MULTIPLY",mixFactor = 1.0)
 						
@@ -1650,11 +1670,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 					colorAdjustNode.location = currentPos
 					matInfo["albedoNodeLayerGroup"].addMixLayer(colorAdjustNode.outputs["Color"],factorOutSocket = None,mixType = "BURN",mixFactor = 1.0)
 								
-					currentMappingNode = nodes.new("ShaderNodeMapping")
-					currentMappingNode.location = currentPos
-					currentMappingNode.inputs["Scale"].default_value = (10.0,10.0,1.0)
-					links.new(UVMap1Node.outputs["UV"],currentMappingNode.inputs["Vector"])
-					links.new(currentMappingNode.outputs["Vector"],currentMaskNode.inputs["Vector"])
+					addMaskMappingNode(matInfo, nodeTree, UVMap1Node, currentMaskNode, currentPos, (10.0,10.0,1.0))
 					currentPos[0] += 600
 								
 					currentMaskSepNode = addSeparateColor(nodes, links, location = currentPos, sourceSocket = currentMaskNode.outputs["Color"])
@@ -1686,35 +1702,21 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 						currentMaskNode = matInfo["textureNodeDict"]["tex_noise"]
 						currentPos = [currentMaskNode.location[0]-300,currentMaskNode.location[1]]
 									
-						currentMappingNode = nodes.new("ShaderNodeMapping")
-						currentMappingNode.location = currentPos
-						currentMappingNode.inputs["Scale"].default_value = (10.0,10.0,1.0)
-						links.new(UVMap1Node.outputs["UV"],currentMappingNode.inputs["Vector"])
-						links.new(currentMappingNode.outputs["Vector"],currentMaskNode.inputs["Vector"])
-							
+						addMaskMappingNode(matInfo, nodeTree, UVMap1Node, currentMaskNode, currentPos, (10.0,10.0,1.0))
 						matInfo["albedoNodeLayerGroup"].addMixLayer(currentMaskNode.outputs["Color"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 0.3)
 								
 					if "Tex_Normal" in matInfo["textureNodeDict"]:
 						currentMaskNode = matInfo["textureNodeDict"]["Tex_Normal"]
 						currentPos = [currentMaskNode.location[0]-300,currentMaskNode.location[1]]
 									
-						currentMappingNode = nodes.new("ShaderNodeMapping")
-						currentMappingNode.location = currentPos
-						currentMappingNode.inputs["Scale"].default_value = (10.0,10.0,1.0)
-						links.new(UVMap1Node.outputs["UV"],currentMappingNode.inputs["Vector"])
-						links.new(currentMappingNode.outputs["Vector"],currentMaskNode.inputs["Vector"])
-							
+						addMaskMappingNode(matInfo, nodeTree, UVMap1Node, currentMaskNode, currentPos, (10.0,10.0,1.0))
 						matInfo["albedoNodeLayerGroup"].addMixLayer(currentMaskNode.outputs["Alpha"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 0.3)
 									
 					if blenderMaterial.name.startswith("mainOther00"):#Shallow Water Material
 						currentMaskNode = matInfo["textureNodeDict"]["Tex_Effect"]
 						currentPos = [currentMaskNode.location[0]-300,currentMaskNode.location[1]]
 									
-						currentMappingNode = nodes.new("ShaderNodeMapping")
-						currentMappingNode.location = currentPos
-						currentMappingNode.inputs["Scale"].default_value = (100.0,100.0,1.0)
-						links.new(UVMap1Node.outputs["UV"],currentMappingNode.inputs["Vector"])
-						links.new(currentMappingNode.outputs["Vector"],currentMaskNode.inputs["Vector"])
+						addMaskMappingNode(matInfo, nodeTree, UVMap1Node, currentMaskNode, currentPos, (100.0,100.0,1.0))
 						currentPos[0] += 600
 						currentMaskSepNode = addSeparateColor(nodes, links, location = currentPos, sourceSocket = currentMaskNode.outputs["Color"])
 						currentPos[0] += 300
@@ -1737,13 +1739,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 					currentMaskNode = matInfo["textureNodeDict"]["Tex2D_0"]
 					currentPos = [currentMaskNode.location[0]-300,currentMaskNode.location[1]]
 								
-					currentMappingNode = nodes.new("ShaderNodeMapping")
-					currentMappingNode.location = currentPos
-					if "UV" in matInfo["mPropDict"]:
-						uvPropNode = addPropertyNode(matInfo["mPropDict"]["UV"], matInfo["currentPropPos"], nodeTree)
-						links.new(uvPropNode.outputs[0],currentMappingNode.inputs["Scale"])
-					links.new(UVMap1Node.outputs["UV"],currentMappingNode.inputs["Vector"])
-					links.new(currentMappingNode.outputs["Vector"],currentMaskNode.inputs["Vector"])
+					addMaskMappingNode(matInfo, nodeTree, UVMap1Node, currentMaskNode, currentPos, scalePropName = "UV")
 						
 					currentMaskSepNode = addSeparateColor(nodes, links, location = currentPos, sourceSocket = currentMaskNode.outputs["Color"])
 								
@@ -1818,12 +1814,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 			anisoInputName = getAnisoInputName(nodeBSDF)
 
 			if "Primaly_Anisotropy" in matInfo["mPropDict"]:
-				anisoNode = addPropertyNode(
-					matInfo["mPropDict"]["Primaly_Anisotropy"],
-					matInfo["currentPropPos"],
-					nodeTree
-				)
-				links.new(anisoNode.outputs["Value"], nodeBSDF.inputs[anisoInputName])
+				linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "Primaly_Anisotropy", anisoInputName)
 			else:
 				nodeBSDF.inputs[anisoInputName].default_value = 1.0
 						
@@ -1831,20 +1822,10 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 				links.new(shiftNode.outputs["Alpha"], nodeBSDF.inputs["Anisotropic Rotation"])
 						
 			if ("SpecularIntensity" in matInfo["mPropDict"] and "Specular IOR Level" in nodeBSDF.inputs):
-				specularNode = addPropertyNode(
-					matInfo["mPropDict"]["SpecularIntensity"],
-					matInfo["currentPropPos"],
-					nodeTree
-				)
-				links.new(specularNode.outputs["Value"], nodeBSDF.inputs["Specular IOR Level"])
+				linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "SpecularIntensity", "Specular IOR Level")
 						
 			if ("SpecularIntensity" in matInfo["mPropDict"] and "Coat Weight" in nodeBSDF.inputs):
-				coatWeightNode = addPropertyNode(
-					matInfo["mPropDict"]["SpecularIntensity"],
-					matInfo["currentPropPos"],
-					nodeTree
-				)
-				links.new(coatWeightNode.outputs["Value"], nodeBSDF.inputs["Coat Weight"])
+				linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "SpecularIntensity", "Coat Weight")
 
 		else:
 			fresnelNode = nodes.new("ShaderNodeFresnel")
@@ -1891,22 +1872,10 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 
 		links.new(hairTangentNode.outputs["Tangent"], nodeBSDF.inputs["Tangent"])
 
-		hairAnisotropyNode = addPropertyNode(
-			matInfo["mPropDict"]["Aniso1_PrimalyAnisotropy"],
-			matInfo["currentPropPos"],
-			nodeTree
-		)
-
-		links.new(hairAnisotropyNode.outputs["Value"], nodeBSDF.inputs[getAnisoInputName(nodeBSDF)])
+		linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "Aniso1_PrimalyAnisotropy", getAnisoInputName(nodeBSDF))
 
 		if "AnisoSpecular1_Intensity" in matInfo["mPropDict"]:
-			hairSpecularNode = addPropertyNode(
-				matInfo["mPropDict"]["AnisoSpecular1_Intensity"],
-				matInfo["currentPropPos"],
-				nodeTree
-			)
-
-			links.new(hairSpecularNode.outputs["Value"], nodeBSDF.inputs["Specular IOR Level"])
+			linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "AnisoSpecular1_Intensity", "Specular IOR Level")
 
 		if "AnisoSpecular1_Sharpness" in matInfo["mPropDict"]:
 			hairSharpnessNode = addPropertyNode(
@@ -1963,12 +1932,8 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 				
 	if matInfo["emissionColorNodeLayerGroup"].currentOutSocket != None:
 					
-		if bpy.app.version < (4,0,0):
-			links.new(matInfo["emissionColorNodeLayerGroup"].currentOutSocket,nodeBSDF.inputs["Emission"])
-				
-		else:#I swear Blender changes things just to break addon compatibility
 		#I had to dig through the source code just to find the actual name of this socket since it's not listed anywhere and Blender only gives you it's index :/
-			links.new(matInfo["emissionColorNodeLayerGroup"].currentOutSocket,nodeBSDF.inputs["Emission Color"])
+		links.new(matInfo["emissionColorNodeLayerGroup"].currentOutSocket,nodeBSDF.inputs["Emission Color"])
 				
 						
 	if matInfo["emissionStrengthNodeLayerGroup"].currentOutSocket != None:
@@ -2049,46 +2014,16 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 		#blenderMaterial.shadow_method = "CLIP"
 				
 	if (matInfo["gameName"] == "SF6" and "ClothAniso_PrimalyAnisotropy" in matInfo["mPropDict"]):
-		anisoNode = addPropertyNode(
-			matInfo["mPropDict"]["ClothAniso_PrimalyAnisotropy"],
-			matInfo["currentPropPos"],
-			nodeTree
-		)
-
-		anisoInputName = getAnisoInputName(
-			nodeBSDF
-						
-						
-		)
-
-		links.new(anisoNode.outputs["Value"], nodeBSDF.inputs[anisoInputName])
+		linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "ClothAniso_PrimalyAnisotropy", getAnisoInputName(nodeBSDF))
 
 		if ("ClothAniso_SpecularShiftOffset" in matInfo["mPropDict"] and "Anisotropic Rotation" in nodeBSDF.inputs):
-			rotationNode = addPropertyNode(
-				matInfo["mPropDict"]["ClothAniso_SpecularShiftOffset"],
-				matInfo["currentPropPos"],
-				nodeTree
-			)
-			links.new(rotationNode.outputs["Value"], nodeBSDF.inputs["Anisotropic Rotation"])
+			linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "ClothAniso_SpecularShiftOffset", "Anisotropic Rotation")
 
 	if (matInfo["gameName"] == "SF6" and "ClothAniso_ColorRate" in matInfo["mPropDict"]):
-		colorRateNode = addPropertyNode(
-			matInfo["mPropDict"]["ClothAniso_ColorRate"],
-			matInfo["currentPropPos"],
-			nodeTree
-		) 
-
-		if "Sheen Weight" in nodeBSDF.inputs:
-			links.new(colorRateNode.outputs["Value"], nodeBSDF.inputs["Sheen Weight"])
+		linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "ClothAniso_ColorRate", "Sheen Weight", skipMissingSocket = True)
 					
 		if ("ClothAniso_PrimalySpecularColor" in matInfo["mPropDict"] and "Sheen Tint" in nodeBSDF.inputs):
-			specularColorNode = addPropertyNode(
-				matInfo["mPropDict"]["ClothAniso_PrimalySpecularColor"],
-				matInfo["currentPropPos"],
-				nodeTree
-			)
-
-			links.new(specularColorNode.outputs["Color"], nodeBSDF.inputs["Sheen Tint"])
+			linkPropertyToBSDF(matInfo, nodeTree, nodeBSDF, "ClothAniso_PrimalySpecularColor", "Sheen Tint", "Color")
 					
 		if ("ClothAniso_PrimalySpecSharpness" in matInfo["mPropDict"] and "Sheen Roughness" in nodeBSDF.inputs):
 			sharpnessNode = addPropertyNode(
@@ -2107,10 +2042,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 			links.new(divideNode.outputs["Value"], nodeBSDF.inputs["Sheen Roughness"])
 
 	if matInfo["sheenSocket"] != None:
-		if bpy.app.version < (4,0,0):
-			links.new(matInfo["sheenSocket"],nodeBSDF.inputs["Sheen"])
-		else:
-			links.new(matInfo["sheenSocket"],nodeBSDF.inputs["Sheen Weight"])
+		links.new(matInfo["sheenSocket"],nodeBSDF.inputs["Sheen Weight"])
 				
 	if matInfo["subsurfaceSocket"] != None:
 		if matInfo["gameName"] == "MHWILDS":

@@ -7,13 +7,11 @@ from bpy.types import Operator, PropertyGroup
 from bpy.props import CollectionProperty, IntProperty, StringProperty, BoolProperty
 from ..gen_functions import raiseWarning,openFolder,PRESET_DIR
 from ..naming import parseREMeshObjectMaterialName,stripBlenderUserSuffix
-from ..blender_utils import (showErrorMessageBox, createEmpty, findMeshCollectionForMDF,
-                             MDF_MATERIAL_TYPE, replaceMaterialNameText)
+from ..blender_utils import findMeshCollectionForMDF, MDF_MATERIAL_TYPE, tag_redraw
+from ..mesh.material_name import replaceMaterialNameText
 from .blender_re_mdf import reindexMaterials,createMDFCollection,buildMDF,iterMDFMaterialObjects
 from .blender_re_mesh_mdf import importMDF
-from .ui_re_mdf_panels import tag_redraw
 from .re_mdf_presets import saveAsPreset,readPresetJSON
-from .file_re_mdf import getMDFVersionToGameName
 from ..tex.tex_paths import getTextureFileBaseName, normalizeTexturePath
 from .blender_re_mdf_texture_files import (getMDFSourceFolder, getTextureRenameWarning,
                                            isAutoRenameTextureFilesEnabled, iterAllTextureBindings,

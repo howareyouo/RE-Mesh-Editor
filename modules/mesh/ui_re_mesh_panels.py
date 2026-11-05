@@ -1,7 +1,6 @@
 import bpy
 
 from bpy.types import Panel
-from ..blender_utils import tag_redraw
 
 
 class OBJECT_PT_MeshObjectModePanel(Panel):

@@ -10,7 +10,6 @@ Notes:
 import ctypes as c
 from enum import IntEnum
 
-from . import util
 from .dxgi_format import DXGI_FORMAT, FOURCC_TO_DXGI, BITMASK_TO_DXGI
 
 

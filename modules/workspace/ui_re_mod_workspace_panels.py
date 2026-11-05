@@ -1,7 +1,6 @@
 import bpy
 
-from bpy.types import (Panel, Menu, Operator, PropertyGroup)
-from ..blender_utils import tag_redraw
+from bpy.types import Panel
 
 
 class OBJECT_PT_REModWorkspacePanel(Panel):

@@ -1342,7 +1342,7 @@ def setReplaceText(findValue, replaceValue):
 
 def getReplacePreview():
     """Return (planList, error) for what the panel shows before the replace is run."""
-    from modules.blender_utils import getMaterialNameReplacePlan
+    from modules.mesh.material_name import getMaterialNameReplacePlan
     re_mdf_toolpanel = bpy.context.scene.re_mdf_toolpanel
     return getMaterialNameReplacePlan(re_mdf_toolpanel.mdfCollection,
                                       re_mdf_toolpanel.materialNameFindValue,

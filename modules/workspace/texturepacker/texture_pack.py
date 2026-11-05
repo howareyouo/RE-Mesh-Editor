@@ -1,4 +1,3 @@
-import bpy
 import os
 
 from .re_texture_types import getTexturePacker

@@ -4,7 +4,7 @@ import numpy as np
 
 from types import SimpleNamespace
 
-from modules.mdf.file_re_mdf import getMDFVersionToGameName
+from modules.game_versions import getMDFVersionToGameName
 from modules.mesh.file_re_mesh import (
     AABB,
     SIX_WEIGHT_GAMES,
@@ -15,7 +15,7 @@ from modules.mesh.file_re_mesh import (
     meshFileVersionToNewVersionDict
 )
 from modules.mesh.re_mesh_parse import _decodePragBlendShapes
-from modules.tex.enums.game_version_enum import gameNameToTexVersionDict
+from modules.game_versions import gameNameToTexVersionDict
 
 def make_pragmata_blend_mesh(payload, padding, target, aabbs=None, names=None):
     names = names or []
