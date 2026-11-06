@@ -138,6 +138,18 @@ class REMeshPreferences(AddonPreferences):
 		description = "When converting a tex file, convert it to a .png file instead of .dds",
 		default = False
 	)
+	texGDeflateLevel: EnumProperty(
+		name="Tex Compression Level",
+		description = "GDeflate compression level used when creating .tex files for games that support it.\n"
+					+ "Higher levels compress slower while only slightly shrinking the file; the game loads the tex file at the same speed regardless of this setting.\n"
+					+ "Balanced converts 1.7-2x faster than Best Ratio with nearly identical file sizes",
+		items = [
+			("FASTEST", "Fast (Largest Files)", "Fastest conversion, 3-10% larger tex files"),
+			("DEFAULT", "Balanced (Recommended)", "Fast conversion, file sizes within ~1% of Best Ratio"),
+			("BEST_RATIO", "Best Ratio (Slowest)", "Smallest tex files, slowest conversion"),
+		],
+		default = "DEFAULT",
+	)
 	modFileTrackingPollingRate: IntProperty(
 		name = "Mod File Tracking Polling Rate",
 		description = "Amount of seconds between checking for changes made to files when mod file tracking is enabled",
@@ -211,6 +223,7 @@ class REMeshPreferences(AddonPreferences):
 		layout.prop(self, "showConsole")
 		layout.prop(self, "useDDS")
 		layout.prop(self, "convertTexToPNG")
+		layout.prop(self, "texGDeflateLevel")
 		layout.prop(self, "modFileTrackingPollingRate")
 		layout.prop(self, "autoRenameTextureFiles")
 		

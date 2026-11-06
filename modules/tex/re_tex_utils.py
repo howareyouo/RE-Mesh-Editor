@@ -20,6 +20,20 @@ import numpy as np
 # parallel DDSToTex conversion path) never shares ctypes wrapper state.
 _gdeflateThreadLocal = threading.local()
 
+# Default GDeflate level when a caller doesn't pass one. The old hardcoded
+# BEST_RATIO (12) compresses 1.7-2.1x slower than DEFAULT (9) while only
+# saving 0.1-1.2% file size (measured on 4K BC7 textures); FASTEST (1) is
+# another ~4x faster at the cost of 3-10% larger files. The game's decoder
+# is level-agnostic, so the level is purely an export time/size tradeoff.
+DEFAULT_GDEFLATE_LEVEL = GDeflateCompressionLevel.DEFAULT
+
+# Identifier -> level mapping for the addon preference's enum items.
+GDEFLATE_LEVELS = {
+    "FASTEST": GDeflateCompressionLevel.FASTEST,
+    "DEFAULT": GDeflateCompressionLevel.DEFAULT,
+    "BEST_RATIO": GDeflateCompressionLevel.BEST_RATIO,
+}
+
 def _getGDeflateCompressor():
     compressor = getattr(_gdeflateThreadLocal, 'compressor', None)
     if compressor is None:
@@ -151,9 +165,11 @@ def padding(image, ddsSl, capSl, linecount):
     return out.tobytes()
 
 
-def packageTextures(ddsHeader, ddsList, compress, formatData, mipStart=0, mipEnd=None):
+def packageTextures(ddsHeader, ddsList, compress, formatData, mipStart=0, mipEnd=None, compressionLevel=None):
     """Pads and compresses textures aas needed, stores information relative to their size for header generation"""
     compressor = _getGDeflateCompressor()
+    if compressionLevel is None:
+        compressionLevel = DEFAULT_GDEFLATE_LEVEL
     if mipEnd == None:
         mipEnd = ddsHeader.dwMipMapCount
 
@@ -191,7 +207,7 @@ def packageTextures(ddsHeader, ddsList, compress, formatData, mipStart=0, mipEnd
             if x * y >= 64 and compress:
                 try:
                     compressedPaddedMipmap = compressor.compress(
-                        paddedMipmap, GDeflateCompressionLevel.BEST_RATIO)
+                        paddedMipmap, compressionLevel)
                     s = compressor.get_uncompressed_size(compressedPaddedMipmap)
                     if len(compressedPaddedMipmap) > s:
                         compressedPaddedMipmap = paddedMipmap
@@ -246,12 +262,12 @@ def storeTextures(ddsHeader, texFile, miptex, compress):
     return texFile
 
 
-def getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=None):
+def getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=None, compressionLevel=None):
     ddsHeader = ddsList[0].header
     isGDeflate = texVersion in GDEFLATE_VERSIONS
     newTexFile = makeTexHeader(texVersion, ddsHeader, len(ddsList), mipStart, mipEnd)
     formatData = format_ops.packetSizeData(newTexFile.tex.header.formatString)
-    miptex = packageTextures(ddsHeader, ddsList, isGDeflate, formatData, mipStart, mipEnd)
+    miptex = packageTextures(ddsHeader, ddsList, isGDeflate, formatData, mipStart, mipEnd, compressionLevel)
     return storeTextures(ddsHeader, newTexFile, miptex, isGDeflate)
 
 
@@ -276,18 +292,18 @@ def getStreamingMipCount(ddsHeader):
     return min(count, ddsHeader.dwMipMapCount - 1)  # The main tex file always keeps at least one mip
 
 
-def writeStreamingTexFiles(ddsList, texVersion, mainOutPath, streamingOutPath, streamingMipCount):
+def writeStreamingTexFiles(ddsList, texVersion, mainOutPath, streamingOutPath, streamingMipCount, compressionLevel=None):
     """Writes a tex file pair. The streaming tex keeps the full resolution header
     and holds the high resolution mips, the main tex holds the remaining low
     resolution mips with its header sized to the largest mip it contains."""
     mipCount = ddsList[0].header.dwMipMapCount
-    streamingTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=streamingMipCount)
+    streamingTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=0, mipEnd=streamingMipCount, compressionLevel=compressionLevel)
     streamingTexFile.write(streamingOutPath)
-    mainTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=streamingMipCount, mipEnd=mipCount)
+    mainTexFile = getTexFileFromDDS(ddsList, texVersion, mipStart=streamingMipCount, mipEnd=mipCount, compressionLevel=compressionLevel)
     mainTexFile.write(mainOutPath)
 
 
-def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOutPath=None):
+def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOutPath=None, compressionLevel=None):
     # The first file's header is read at most once and shared by the streaming
     # mip count and the array base header. It is read lazily so the common
     # single-file, non-streaming path stays free of the extra file access.
@@ -301,9 +317,9 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
         ddsFile = DDSFile()
         ddsFile.read(ddsPathList[0])
         if streamingMipCount > 0:
-            writeStreamingTexFiles([ddsFile.dds], texVersion, outPath, streamingOutPath, streamingMipCount)
+            writeStreamingTexFiles([ddsFile.dds], texVersion, outPath, streamingOutPath, streamingMipCount, compressionLevel)
         else:
-            texFile = getTexFileFromDDS([ddsFile.dds], texVersion)
+            texFile = getTexFileFromDDS([ddsFile.dds], texVersion, compressionLevel=compressionLevel)
             texFile.write(outPath)
     else:  # Array texture
         baseHeader = firstHeader if firstHeader != None else getDDSHeader(ddsPathList[0])
@@ -352,9 +368,9 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
                 ddsList.append(ddsFile.dds)
 
             if streamingMipCount > 0:
-                writeStreamingTexFiles(ddsList, texVersion, outPath, streamingOutPath, streamingMipCount)
+                writeStreamingTexFiles(ddsList, texVersion, outPath, streamingOutPath, streamingMipCount, compressionLevel)
             else:
-                texFile = getTexFileFromDDS(ddsList, texVersion)
+                texFile = getTexFileFromDDS(ddsList, texVersion, compressionLevel=compressionLevel)
                 texFile.write(outPath)
 
 def ImageListToDDS(imageConvertList,outDir,generateMipMaps):

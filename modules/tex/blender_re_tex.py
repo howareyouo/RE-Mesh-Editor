@@ -4,13 +4,23 @@ import os
 import concurrent.futures
 from..gen_functions import raiseWarning,wildCardFileSearchList
 from .file_re_tex import getTexVersionFromGameName
-from .re_tex_utils import DDSToTex,convertTexFileToDDS
+from .re_tex_utils import DDSToTex,convertTexFileToDDS,DEFAULT_GDEFLATE_LEVEL,GDEFLATE_LEVELS
 from ..ddsconv.directx.texconv import Texconv
 DELETE_DDS = True
 BLENDER_MAX_IMAGE_ARRAY_SIZE = 16#Blender can't handle much more mix nodes than this
 
 
-def _convertSingleDDSToTex(ddsPath, texVersion, outDir, createStreamingTex):
+def _getPreferredGDeflateLevel():
+	"""Read the tex compression level preference. Must be called on the main
+	thread; callers pass the value down to worker threads instead of touching
+	preferences there."""
+	try:
+		return GDEFLATE_LEVELS.get(getAddonPreferences().texGDeflateLevel, DEFAULT_GDEFLATE_LEVEL)
+	except Exception:
+		return DEFAULT_GDEFLATE_LEVEL
+
+
+def _convertSingleDDSToTex(ddsPath, texVersion, outDir, createStreamingTex, compressionLevel):
 	"""Convert a single DDS file to .tex inside a worker thread (GDeflate-heavy path)."""
 	baseName = os.path.splitext(os.path.split(ddsPath)[1])[0]
 	texPath = os.path.join(outDir,baseName)+f".tex.{str(texVersion)}"
@@ -18,7 +28,7 @@ def _convertSingleDDSToTex(ddsPath, texVersion, outDir, createStreamingTex):
 	# The streaming tex holds the high resolution mips, the copy operator
 	# recognizes it by the #STREAMING marker and places it in the streaming folder
 	streamingOutPath = os.path.join(outDir,baseName+" #STREAMING")+f".tex.{str(texVersion)}" if createStreamingTex else None
-	DDSToTex([ddsPath],texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
+	DDSToTex([ddsPath],texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath,compressionLevel = compressionLevel)
 
 def loadTex(texPath,outputPath,texConv,reloadCachedTextures,useDDS):
 	ddsPath = os.path.splitext(outputPath)[0]+".dds"
@@ -126,10 +136,12 @@ def convertTexDDSList (fileNameList,inDir,outDir,gameName,createStreamingTex = F
 	
 	if ddsConversionList != [] or ddsArrayConversionDict != {}:
 		os.makedirs(outDir,exist_ok = True)
-		
+		# Read the compression level once here (main thread) and hand it to the workers
+		compressionLevel = _getPreferredGDeflateLevel()
+
 		#Single Texture Conversion
 		with concurrent.futures.ThreadPoolExecutor(max_workers = min(4,os.cpu_count() or 1)) as executor:
-			futureToPath = {executor.submit(_convertSingleDDSToTex, ddsPath, texVersion, outDir, createStreamingTex): ddsPath for ddsPath in ddsConversionList}
+			futureToPath = {executor.submit(_convertSingleDDSToTex, ddsPath, texVersion, outDir, createStreamingTex, compressionLevel): ddsPath for ddsPath in ddsConversionList}
 			for future in concurrent.futures.as_completed(futureToPath):
 				try:
 					future.result()
@@ -146,7 +158,7 @@ def convertTexDDSList (fileNameList,inDir,outDir,gameName,createStreamingTex = F
 			#print(ddsPathList)
 			texPath = os.path.join(outDir,key+f".tex.{str(texVersion)}")
 			streamingOutPath = os.path.join(outDir,key+" #STREAMING"+f".tex.{str(texVersion)}") if createStreamingTex else None
-			DDSToTex(ddsPathList,texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath)
+			DDSToTex(ddsPathList,texVersion,texPath,streamingFlag = createStreamingTex,streamingOutPath = streamingOutPath,compressionLevel = compressionLevel)
 			conversionCount += 1
 	
 	ddsToPNGConversionList = []

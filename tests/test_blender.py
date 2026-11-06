@@ -57,6 +57,13 @@ def test_addon_props():
     except Exception as err:
         check("filenameExtensions", False, str(err))
 
+    try:
+        preferences = bpy.context.preferences.addons["RE-Mesh-Editor"].preferences
+        check("Tex compression level preference defaults to Balanced",
+              preferences.texGDeflateLevel == "DEFAULT", preferences.texGDeflateLevel)
+    except Exception as err:
+        check("texGDeflateLevel preference", False, str(err))
+
 
 # ---------------------------------------------------------------- 2. Export warnings
 def buildScene():
@@ -955,6 +962,21 @@ def test_streaming_tex(tmpDir):
     check("streaming tex holds high mips", streamTex.tex.header.width == 256
           and len(streamTex.tex.imageMipDataList[0]) == 2,
           f"width={streamTex.tex.header.width} mips={len(streamTex.tex.imageMipDataList[0])}")
+
+    # The compression level is an encoder-side tradeoff only: every level must
+    # decode to the same texture data the game sees.
+    from modules.tex.re_tex_utils import DDSToTex, GDEFLATE_LEVELS
+    fastPath = os.path.join(outDir, "test_fast.tex." + texVersion)
+    DDSToTex([os.path.join(inDir, "test.dds")], int(texVersion), fastPath,
+             compressionLevel=GDEFLATE_LEVELS["FASTEST"])
+    fastTex = RE_TexFile()
+    fastTex.read(fastPath)
+    DDSToTex([os.path.join(inDir, "test.dds")], int(texVersion),
+             os.path.join(outDir, "test_default.tex." + texVersion))
+    defaultTex = RE_TexFile()
+    defaultTex.read(os.path.join(outDir, "test_default.tex." + texVersion))
+    check("explicit compression level decodes identically to the default",
+          fastTex.tex.GetTextureData(0) == defaultTex.tex.GetTextureData(0))
 
 
 # ---------------------------------------------------------------- 4. Occlusion import branch
