@@ -58,11 +58,6 @@ def getNearestRemapVersion(meshVersion):  # Returns the remapped version number 
 # Named differently from the remapped VERSION_* values above on purpose: the two
 # namespaces were previously confused (re_mesh_parse had VERSION_SF6 = file version).
 MESH_FILE_VERSION_SF6 = profilesByName["SF6"].meshFileVersion
-MESH_FILE_VERSION_MHWILDS_BETA = profilesByName["MHWILDSBETA"].meshFileVersion
-MESH_FILE_VERSION_MHWILDS = profilesByName["MHWILDS"].meshFileVersion
-MESH_FILE_VERSION_MHS3 = profilesByName["MHS3"].meshFileVersion
-MESH_FILE_VERSION_PRAG = profilesByName["PRAG"].meshFileVersion
-MESH_FILE_VERSION_RE9 = profilesByName["RE9"].meshFileVersion
 
 # Pragmata retail mesh extension (file .mesh.251121828). Not MH Wilds: typing 2, float16 xyz
 # deltas, aux+map prefix, sunbreakSecondUnknown = (mapOffset, deltaOffset). See docs/PRAGMATA.md.

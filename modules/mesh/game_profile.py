@@ -3,7 +3,7 @@
 # One row per game in _GAME_ROWS below; every other version table derives from it:
 #   - modules/mesh/mesh_versions.py: remapped versions, mesh file version / remap /
 #     internal version maps, six weight and Pragmata blend shape sets
-#   - modules/game_versions.py: GAME_INFO, mdfVersionDict, texVersionDict, tex by game
+#   - modules/game_versions.py: mdfVersionDict, texVersionDict, tex/mdf <-> game name
 #   - modules/mesh/blender_re_mesh_utils.py: _GAME_PROFILES weight packing
 # Adding a game means adding one row here.
 
@@ -176,6 +176,8 @@ profilesByRemapVersion = {
 }
 
 profilesByInternalVersion = {}
+# MHWILDSBETA, MHWILDS and ONI2 share 240704828, so an internal version resolves to
+# MHWILDS and must not be used to identify ONI2 or the MHWILDS beta build.
 for _gameProfile in ALL_PROFILES:
 	if _gameProfile.internalVersion is None:
 		continue
@@ -215,12 +217,3 @@ def profile(key):
 	if gameProfile is not None:
 		return gameProfile
 	return profilesByRemapVersion.get(key, UNKNOWN_PROFILE)
-
-
-def profileByInternalVersion(internalVersion):
-	"""Return the GameProfile for a mesh fileHeader.version.
-
-	MHWILDSBETA, MHWILDS and ONI2 share 240704828, so this resolves to MHWILDS and
-	must not be used to identify ONI2 or the MHWILDS beta build.
-	"""
-	return profilesByInternalVersion.get(internalVersion, UNKNOWN_PROFILE)

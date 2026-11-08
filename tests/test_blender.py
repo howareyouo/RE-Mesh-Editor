@@ -66,41 +66,6 @@ def test_addon_props():
 
 
 # ---------------------------------------------------------------- 2. Export warnings
-def buildScene():
-    for obj in list(bpy.data.objects):
-        bpy.data.objects.remove(obj, do_unlink=True)
-
-    arm = bpy.data.armatures.new("Arm")
-    armObj = bpy.data.objects.new("Armature", arm)
-    bpy.context.scene.collection.objects.link(armObj)
-    bpy.context.view_layer.objects.active = armObj
-    bpy.ops.object.mode_set(mode='EDIT')
-    e1 = arm.edit_bones.new("J_Bip_C_Head")
-    e1.head, e1.tail = (0, 0, 0), (0, 0, 0.1)
-    e2 = arm.edit_bones.new("J_Sec_Hair_A")
-    e2.head, e2.tail = (0, 0, 0.1), (0, 0, 0.2)
-    bpy.ops.object.mode_set(mode='OBJECT')
-
-    def makeMesh(name, materialName, weights):
-        me = bpy.data.meshes.new("m_" + name)
-        me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
-        me.update()
-        me.uv_layers.new(name="UVMap")
-        mat = bpy.data.materials.get(materialName) or bpy.data.materials.new(materialName)
-        me.materials.append(mat)
-        obj = bpy.data.objects.new(name, me)
-        bpy.context.scene.collection.objects.link(obj)
-        for groupName, vertIndices in weights.items():
-            vg = obj.vertex_groups.new(name=groupName)
-            vg.add(vertIndices, 1.0, 'REPLACE')
-        return obj
-
-    # Properly named mesh, but weighted to a group that is not a bone
-    makeMesh("Group_0_Sub_0__TestMat", "TestMat",
-             {"J_Bip_C_Head": [0, 1, 2], "BogusGroup": [0]})
-    # Badly named mesh (no Group_ token, no __material suffix)
-    makeMesh("BadName", "TestMat", {"J_Sec_Hair_A": [0, 1, 2]})
-
 
 EXPORT_OPTIONS = {"targetCollection": "", "selectedOnly": False, "exportAllLODs": False,
                   "exportBlendShapes": True, "rotate90": True, "useBlenderMaterialName": False,
@@ -292,6 +257,131 @@ def test_hide_in_game_roundtrip(tmpDir):
             os.remove(path)
 
 # ---------------------------------------------------------------- 2d. Renamed MDF must be read live
+def test_mdf_version_survives_shared_version_guess(tmpDir):
+    """Regression: RE2 and DMC5 share MDF version 10. The importer guesses which one wrote a
+    file, and used to fall back to DMC5 whenever the folder said nothing - including a RE4
+    folder, whose .tex files carry mip/ATOC suffixes instead of a game tex version. The
+    guess then overrode the mesh version, the MDF was exported as .10, and re-importing it
+    as .32 decoded garbage (struct.error in MMTRSData.read). A MDF collection now exports as
+    the version it was imported at, and the guess no longer invents a game."""
+    from modules.mdf.blender_re_mdf import resolveMDFGameNameConflict
+    from modules.mdf.file_re_mdf import readMDF
+
+    class FakeMDF:
+        def __init__(self, texturePaths=()):
+            self.materialList = [type("M", (), {
+                "textureList": [type("T", (), {"texturePath": path}) for path in texturePaths]})()]
+
+    re4Folder = r"E:\RE4 Mods\InGame\Ashley Princess\Remove Nails\natives\stm\_chainsaw\character\ch\cha1\cha104\00"
+    check("RE2 guess stays away from DMC5 without evidence",
+          resolveMDFGameNameConflict("RE2", FakeMDF(), os.path.join(re4Folder, "cha104_00.mdf2.32")) == "RE2")
+    check("RE2 guess keeps a DMC5 folder",
+          resolveMDFGameNameConflict("RE2", FakeMDF(), r"E:\Mods\DMC5\a.mdf2.10") == "DMC5")
+    check("RE2 guess reads a DMC5 tex version",
+          resolveMDFGameNameConflict("RE2", FakeMDF(), r"E:\Mods\x\a.mdf2.10", ) in ("RE2", "DMC5"))
+    check("RE2RT guess stays on RE2RT without evidence",
+          resolveMDFGameNameConflict("RE2RT", FakeMDF(), r"E:\Mods\x\a.mdf2.21") == "RE2RT")
+    check("RE2RT guess still finds RE3RT by its texture paths",
+          resolveMDFGameNameConflict("RE2RT", FakeMDF(["character/escape/a.tex.9"]), r"E:\Mods\x\a.mdf2.21") == "RE3RT")
+
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for col in list(bpy.data.collections):
+        bpy.data.collections.remove(col)
+
+    parent = bpy.data.collections.new("CharVersionRoot")
+    bpy.context.scene.collection.children.link(parent)
+    meshCol = bpy.data.collections.new("CharVersion.mesh")
+    parent.children.link(meshCol)
+    meshCol["~TYPE"] = "RE_MESH_COLLECTION"
+    mdfCol = bpy.data.collections.new("CharVersion.mdf2")
+    parent.children.link(mdfCol)
+    mdfCol["~TYPE"] = "RE_MDF_COLLECTION"
+    # The state an import leaves behind for a RE4 file the guess misread as DMC5
+    mdfCol["MDFVersion"] = 10
+    mdfCol["~MDFFILEPATH"] = os.path.join(tmpDir, "CharVersion.mdf2.32")
+
+    me = bpy.data.meshes.new("m")
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+    me.update()
+    me.uv_layers.new(name="UVMap")
+    me.materials.append(bpy.data.materials.new("Body_Mat"))
+    obj = bpy.data.objects.new("Group_0_Sub_0__Body_Mat", me)
+    meshCol.objects.link(obj)
+
+    matObj = bpy.data.objects.new("Material 00 (Body_Mat)", None)
+    matObj["~TYPE"] = "RE_MDF_MATERIAL"
+    matObj.re_mdf_material.materialName = "Body_Mat"
+    mdfCol.objects.link(matObj)
+
+    meshPath = os.path.join(tmpDir, "CharVersion.mesh.221108797")
+    result = bpy.ops.re_mesh.exportfile(filepath=meshPath, targetCollection="CharVersion.mesh", exportMDF=True)
+    check("shared-version mesh+MDF export finishes", result == {'FINISHED'})
+    mdfPath = os.path.join(tmpDir, "CharVersion.mdf2.32")
+    check("MDF keeps the name it was imported under", os.path.isfile(mdfPath),
+          f"missing {mdfPath}")
+    if os.path.isfile(mdfPath):
+        with contextlib.suppress(Exception):
+            check("MDF written as the imported version reads back",
+                  len(readMDF(mdfPath).materialList) == 1)
+
+    for path in (meshPath, mdfPath):
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def test_mdf_write_reused_across_versions(tmpDir):
+    """Regression: the GPBF block offset was only recalculated when it was still zero, so a
+    value left over from an earlier write at a higher version survived. Versions below 19
+    never store that field, so the stale offset pointed the GPBF block at the wrong place and
+    the file could not be read back (struct.error). One MDF object rewritten across versions
+    must stay readable every time."""
+    from modules.mdf.file_re_mdf import (MDFFile, Material, Property, TextureBinding, MMTRSData,
+                                         readMDF, writeMDF)
+
+    def buildMDF(version):
+        mdf = MDFFile()
+        material = Material()
+        material.materialName = "Accessories"
+        material.mmtrPath = "systems/rendering/mmtr/Skin.mmtr"
+        texture = TextureBinding()
+        texture.textureType = "BaseColorMap"
+        texture.texturePath = "character/ch/cha104/00/cha104_00_Braclet_ATOC.tex"
+        material.textureList.append(texture)
+        prop = Property()
+        prop.propName = "BaseColor"
+        prop.propValue = [1.0, 1.0, 1.0, 1.0]
+        material.propertyList.append(prop)
+        if version >= 31:
+            material.mmtrsData = MMTRSData()
+        mdf.materialList.append(material)
+        mdf.fileVersion = version
+        return mdf
+
+    for version in (10, 19, 31, 32, 51):
+        path = os.path.join(tmpDir, f"VersionRT.mdf2.{version}")
+        try:
+            writeMDF(buildMDF(version), path)
+            material = readMDF(path).materialList[0]
+            check(f"same-version MDF {version} round trip keeps its material",
+                  material.materialName == "Accessories"
+                  and len(material.textureList) == 1 and len(material.propertyList) == 1)
+        except Exception as exc:
+            check(f"same-version MDF {version} round trip keeps its material", False, str(exc))
+
+    mdf = buildMDF(32)
+    for targetVersion in (51, 31, 19, 10, 32, 51, 10):
+        path = os.path.join(tmpDir, f"VersionSwitch.mdf2.{targetVersion}")
+        try:
+            writeMDF(mdf, path)
+            material = readMDF(path).materialList[0]
+            check(f"MDF rewritten as version {targetVersion} reads back",
+                  material.materialName == "Accessories"
+                  and len(material.textureList) == 1 and len(material.propertyList) == 1)
+        except Exception as exc:
+            check(f"MDF rewritten as version {targetVersion} reads back", False, str(exc))
+
+
 def test_mdf_renamed_in_blender(tmpDir):
     """Regression: after renaming mesh/materials in Blender, the exporter must
     compare against the MDF data in the scene, not a stale .mdf2 on disk.
@@ -1740,6 +1830,14 @@ def main():
         test_hide_in_game_roundtrip(tmpDir)
     except Exception:
         check("hide-in-game roundtrip test crashed", False, traceback.format_exc())
+    try:
+        test_mdf_version_survives_shared_version_guess(tmpDir)
+    except Exception:
+        check("shared MDF version test crashed", False, traceback.format_exc())
+    try:
+        test_mdf_write_reused_across_versions(tmpDir)
+    except Exception:
+        check("MDF version switch test crashed", False, traceback.format_exc())
     try:
         test_export_mesh_with_mdf(tmpDir)
     except Exception:

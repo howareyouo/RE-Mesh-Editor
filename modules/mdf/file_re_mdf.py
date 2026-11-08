@@ -2,12 +2,11 @@
 import os
 import struct
 
-from ..gen_functions import raiseWarning,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_unicode_string,write_uint,write_int,write_uint64,write_unicode_string
+from ..gen_functions import raiseWarning,openFileRead,openFileWrite,StringTableBuilder,parseFileVersion,read_uint,read_int,read_uint64,read_unicode_string,write_uint,write_int,write_uint64,write_unicode_string,debugprint
 from ..hashing.mmh3.pymmh3 import hashUTF8,hashUTF16
 from ..binary_struct import BinaryStruct,u32,u16,u64,i32,skip
 import ctypes
 
-DEBUG_MODE = False
 class SIZEDATA():
 	def __init__(self,version):
 		self.HEADER_SIZE = 16
@@ -26,6 +25,13 @@ class SIZEDATA():
 		if version >= 51:
 			self.MATERIAL_ENTRY_SIZE = 108
 c_int32 = ctypes.c_int32
+
+#Versions that write distinct material entry sizes, smallest first. A file whose name
+#disagrees with its layout is matched against these (see detectMaterialEntryVersion).
+VERSION_ENTRY_SIZE_CANDIDATES = (10, 19, 31, 51)
+
+#A real material has a few dozen textures and properties; anything larger is a misread entry
+MAX_MATERIAL_ENTRY_COUNT = 10000
 
 
 class MDFFlags_bits(ctypes.LittleEndianStructure):
@@ -80,15 +86,12 @@ class MDFFlagsB_bits(ctypes.LittleEndianStructure):
 				]
 	
 class MDFFlagsB(ctypes.Union):
-	
+
 	_anonymous_ = ("flagValues",)
 	_fields_ =	[
 					("flagValues",    MDFFlagsB_bits ),
 					("asInt32", c_int32)
-				]		
-def debugprint(string):
-	if DEBUG_MODE:
-		print(string)
+				]
 class MDFHeader(BinaryStruct):
 	_fields_ = [
 		u32("magic"),u16("version"),u16("materialCount"),u64("materialFlags"),
@@ -165,9 +168,20 @@ class MMTRSData():
 
 	def read(self,file):
 		#Amount of offsets always seems to be 8, nothing indicates count
+		currentPos = file.tell()
+		file.seek(0,os.SEEK_END)
+		fileSize = file.tell()
+		file.seek(currentPos)
 		for i in range(0,8):
 			self.offsetList.append(read_uint64(file))
 		for offset in self.offsetList:
+			if offset == 0:
+				self.indexDataList.append([])
+				continue
+			if offset < 0 or offset + 4 > fileSize:
+				raiseWarning(f"MMTRS index table offset {offset} is outside the file, skipping it.")
+				self.indexDataList.append([])
+				continue
 			file.seek(offset)
 			indexCount = read_uint(file)
 			indexList = []
@@ -176,12 +190,17 @@ class MMTRSData():
 			self.indexDataList.append(indexList)
 		debugprint(self)
 	def write(self,file):
+		headerPos = file.tell()
 		for offset in self.offsetList:
 			write_uint64(file, offset)
-		for indexList in self.indexDataList:
+		#Each index table sits at its own offsetList entry, so write it there rather than
+		#sequentially: the two layouts only agree when the tables are written back to back.
+		for offset, indexList in zip(self.offsetList, self.indexDataList):
+			file.seek(offset)
 			write_uint(file,len(indexList))
 			for index in indexList:
 				write_uint(file,index)
+		file.seek(headerPos + 8 * 8)
 	def __str__(self):
 		return str(self.__class__) + ": " + str(self.__dict__)
 
@@ -242,7 +261,8 @@ class Material():
 		if not hasattr(self, '_propertyDict') or self._propertyDict is None:
 			self._propertyDict = {prop.propName: prop for prop in self.propertyList}
 		return self._propertyDict
-	def read(self,file,version):
+	def readEntryFields(self,file,version):
+		"""Read just the fixed material entry block, without following its offsets."""
 		self.matNameOffset = read_uint64(file)
 		debugprint("matNameOffset:"+str(self.matNameOffset))
 		self.matNameHash = read_uint(file)
@@ -278,6 +298,8 @@ class Material():
 		self.mmtrPathOffset = read_uint64(file)
 		if version >= 31:
 			self.mmtrsDataOffset = read_uint64(file)
+	def read(self,file,version):
+		self.readEntryFields(file,version)
 		currentPos = file.tell()
 		if self.mmtrsDataOffset != 0:
 			file.seek(self.mmtrsDataOffset)
@@ -494,8 +516,10 @@ class MDFFile():
 			#print(propDataBlockOffsetList[index])
 			material.propHeadersOffset = propertyEntryStartOffset + propHeaderOffsetList[index]
 			material.texHeadersOffset = textureEntryStartOffset + texHeaderOffsetList[index]
-			if material.GPUBufferOffset == 0:
-				material.GPUBufferOffset = currentGPBFOffset
+			#Always the recalculated block position: a value left over from an earlier write at
+			#another version would otherwise survive (versions below 19 never store it) and
+			#point the GPBF block at the wrong place in this file.
+			material.GPUBufferOffset = currentGPBFOffset
 			material.propDataOffset = propDataStartOffset + propDataBlockOffsetList[index]
 			
 		currentMMTRSOffset = currentPropDataBlockOffset + propDataStartOffset
@@ -504,6 +528,9 @@ class MDFFile():
 				material.mmtrsDataOffset = currentMMTRSOffset
 				currentMMTRIndexListOffset =  currentMMTRSOffset + 8 * 8
 				material.mmtrsData.offsetList.clear()
+				#The format always stores 8 offsets, so pad short index lists with empty tables
+				while len(material.mmtrsData.indexDataList) < 8:
+					material.mmtrsData.indexDataList.append([])
 				for i in range(0,8):
 					material.mmtrsData.offsetList.append(currentMMTRIndexListOffset)
 					currentMMTRIndexListOffset +=  4 + 4 * len(material.mmtrsData.indexDataList[i])
@@ -533,6 +560,8 @@ class MDFFile():
 				prop.write(file,version)
 		#Loop to write GPBF
 		for material in self.materialList:
+			if material.GPBFBufferNameCount <= 0:
+				continue
 			file.seek(material.GPUBufferOffset)
 			for i in range(0,material.GPBFBufferNameCount):
 				material.gpbfBufferNameList[i].write(file)
@@ -560,11 +589,86 @@ class MDFFile():
 				file.seek(material.mmtrsDataOffset)
 				#print(material.mmtrsData)
 				material.mmtrsData.write(file)
+def materialEntryFits(filepath,version):
+	"""Whether the file's material entries parse coherently at this version's entry size.
+
+	A file written for one version and renamed to another decodes as garbage from its
+	second material on, because the entries are a different size. Every entry has to name
+	its own material string, texture header block and property header block inside the
+	file, and those offsets only line up under the version that wrote them."""
+	sizeData = SIZEDATA(version)
+	with openFileRead(filepath) as file:
+		header = MDFHeader()
+		header.read(file)
+		if header.materialCount == 0:
+			return True
+		file.seek(0,os.SEEK_END)
+		fileSize = file.tell()
+		if sizeData.HEADER_SIZE + header.materialCount * sizeData.MATERIAL_ENTRY_SIZE > fileSize:
+			return False
+		for i in range(header.materialCount):
+			file.seek(sizeData.HEADER_SIZE + i * sizeData.MATERIAL_ENTRY_SIZE)
+			material = Material()
+			try:
+				material.readEntryFields(file,version)
+			except struct.error:
+				return False
+			if not materialEntryOffsetsAreCoherent(material,fileSize):
+				return False
+	return True
+
+
+def materialEntryOffsetsAreCoherent(material,fileSize):
+	"""Whether one material entry's offsets all point inside the file, at a readable string
+	and at entry blocks of a plausible size. Used only to tell two candidate versions apart."""
+	if not 0 < material.matNameOffset < fileSize:
+		return False
+	if not 0 < material.mmtrPathOffset < fileSize:
+		return False
+	if not 0 < material.propHeadersOffset < fileSize and material.propertyCount > 0:
+		return False
+	if not 0 < material.texHeadersOffset < fileSize and material.textureCount > 0:
+		return False
+	if not 0 < material.propDataOffset < fileSize and material.propertyCount > 0:
+		return False
+	if material.mmtrsDataOffset < 0 or material.mmtrsDataOffset >= fileSize:
+		return False
+	#Counts are signed ints, so garbage decodes as huge or negative values
+	if not 0 <= material.propertyCount <= MAX_MATERIAL_ENTRY_COUNT:
+		return False
+	if not 0 <= material.textureCount <= MAX_MATERIAL_ENTRY_COUNT:
+		return False
+	if not 0 <= material.GPBFBufferNameCount <= MAX_MATERIAL_ENTRY_COUNT:
+		return False
+	if not 0 <= material.propBlockSize <= fileSize:
+		return False
+	return True
+
+
+def detectMaterialEntryVersion(filepath):
+	"""The version whose material entry size the file actually uses, or None when no single
+	version fits. Only the entry size is recoverable from the layout: everything after the
+	entries was written by that same version, so this is enough to read the file back."""
+	for candidate in VERSION_ENTRY_SIZE_CANDIDATES:
+		if materialEntryFits(filepath,candidate):
+			return candidate
+	return None
+
+
 def readMDF(filepath):
 	print("Opening " + filepath)
 	version = parseFileVersion(filepath, 23)
 	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
 		print("No number extension found on mdf file, defaulting to version 23")
+	elif not materialEntryFits(filepath,version):
+		detected = detectMaterialEntryVersion(filepath)
+		if detected == None:
+			raise Exception(f"{os.path.basename(filepath)} does not match the material entry size of version "
+				f"{version}, and no known version fits it. The file is either corrupt or not an MDF.")
+		raiseWarning(f"{os.path.basename(filepath)} is named for MDF version {version} but its material "
+			f"entries are the size version {detected} writes. Reading it as version {detected}.\n"
+			f"Re-export it from the MDF export dialog with the correct MDF Version selected.")
+		version = detected
 	with openFileRead(filepath) as file:
 		mdfFile = MDFFile()
 		mdfFile.fileVersion = version
@@ -576,5 +680,10 @@ def writeMDF(mdfFile,filepath):
 	if version == 23 and not os.path.splitext(filepath)[1][1:].isdigit():
 		version = mdfFile.fileVersion or 23
 		raiseWarning(f"No number extension found on mdf file, defaulting to version {version}")
+	elif mdfFile.fileVersion not in (None, 0, version):
+		#The entries are sized by the version chosen here, so writing one game's layout under
+		#another game's extension produces a file that cannot be read back.
+		raiseWarning(f"MDF was prepared as version {mdfFile.fileVersion} but {os.path.basename(filepath)} "
+			f"names version {version}.\nWriting the version {version} layout, which may not match the game.")
 	with openFileWrite(filepath) as file:
 		mdfFile.write(file,version)

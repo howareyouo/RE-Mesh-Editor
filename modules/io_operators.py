@@ -13,7 +13,7 @@ from .. import bl_info  # defined at the top of __init__.py, which imports this 
 from .gen_functions import parseFileVersion, raiseWarning, splitNativesPath
 from .blender_utils import (printEditorHeader, isMDFCollection, isMeshCollection, isSFurCollection,
                             findMDFCollectionForMesh, getMeshMaterialNames, resolveSourcePath,
-                            getAddonPreferences)
+                            getAddonPreferences, sourceMDFVersion)
 from .game_versions import mdfVersionDict
 from .mesh.file_re_mesh import meshFileVersionToGameNameDict
 from .mesh.blender_re_mesh import importREMeshFile, exportREMeshFile
@@ -30,11 +30,14 @@ def setModDirectoryFromFilePath(filePath):
 			print(f"Set mod directory to {bpy.context.scene.re_mdf_toolpanel.modDirectory}")
 		except:
 			print("ERROR: Failed to set mod directory, exported file path probably does not follow the chunk naming scheme.")
-def collectionSourcePath(collection, sourcePathKey):
-	"""The file this collection was imported from, or "" when that file is gone."""
+def collectionSourcePath(collection, sourcePathKey, checkDirectory = True):
+	"""The file this collection was imported from, or "" when that file is gone.
+
+	checkDirectory = False keeps the name when only the folder is missing: its version
+	extension still says which game the file belongs to."""
 	if collection == None or sourcePathKey == "":
 		return ""
-	return resolveSourcePath(collection.get(sourcePathKey, ""))
+	return resolveSourcePath(collection.get(sourcePathKey, ""), checkDirectory)
 
 
 def collectionExportDirectory(collection, sourcePathKey):
@@ -71,9 +74,13 @@ def filenameExtensions(operator):
 	return {item.identifier for item in propertyEntry.enum_items} if propertyEntry != None else set()
 
 
-def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, fallbackVersionExtension = ""):
+def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection,
+                      fallbackVersionExtension = "", sourceVersionExtension = ""):
 	"""Default the export operator to the collection picked in the tool panel, and to the file
-	name and folder that collection was imported from, or last exported to."""
+	name and folder that collection was imported from, or last exported to.
+
+	sourceVersionExtension is the version extension of the file the collection was imported
+	from. It wins over fallbackVersionExtension, which is only the last resort."""
 	if operator.targetCollection == "":
 		if panelCollection == None:
 			return
@@ -82,8 +89,10 @@ def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, f
 	extensions = filenameExtensions(operator)
 	sourcePath = collectionSourcePath(collection, sourcePathKey)
 	extension = os.path.splitext(sourcePath)[1] if sourcePath != "" else ""
-	if extension not in extensions:#A .mply import, or a version this format cannot write
-		extension = fallbackVersionExtension
+	if extension not in extensions:
+		extension = sourceVersionExtension
+		if extension not in extensions:#A .mply import, or a version this format cannot write
+			extension = fallbackVersionExtension
 	if extension in extensions:
 		operator.filename_ext = extension
 	fileName = collectionBaseName(operator.targetCollection, baseExtension) + baseExtension + extension
@@ -91,11 +100,40 @@ def setExportDefaults(operator, sourcePathKey, baseExtension, panelCollection, f
 	operator.filepath = os.path.join(directory, fileName) if directory != "" else fileName
 
 
+def sourceVersionExtension(collection, sourcePathKey, extensions):
+	"""The version extension of the file a collection was imported from, or "" when that is
+	not one the operator can write.
+
+	The stored version is used when the import folder is gone, since that version is what
+	the exported file has to match. The tool panel's active game is only a guess."""
+	sourcePath = collectionSourcePath(collection, sourcePathKey, checkDirectory = False)
+	extension = os.path.splitext(sourcePath)[1] if sourcePath != "" else ""
+	return extension if extension in extensions else ""
+
+
 def drawExportFolderHint(layout, operator, sourcePathKey):
 	"""Point out that the picked collection has no folder to export back to."""
 	collection = bpy.data.collections.get(operator.targetCollection, None)
 	if collection != None and collectionExportDirectory(collection, sourcePathKey) == "":
 		layout.label(icon="INFO", text="Import folder unavailable, using the browser's current folder.")
+
+
+def reportExportResult(operator, success, label, targetName, targetCollection = True,
+                       setModDir = True, printHeader = True):
+	"""Shared tail of the MDF/FBXSkel/SFur export operators: report the outcome,
+	record the batch-export path on the exported datablock and default the mod
+	directory from the written file. Returns the operator's return value."""
+	if printHeader:
+		printEditorHeader(bl_info)
+	if not success:
+		operator.report({"INFO"}, f"Failed to export RE {label}. Check Window > Toggle System Console for details.")
+		return {"CANCELLED"}
+	operator.report({"INFO"}, f"Exported RE {label} successfully.")
+	if setModDir and bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
+		setModDirectoryFromFilePath(operator.filepath)
+	datablockList = bpy.data.collections if targetCollection else bpy.data.objects
+	datablockList[targetName]["BatchExport_path"] = operator.filepath
+	return {"FINISHED"}
 
 
 def toggleConsole():
@@ -433,6 +471,14 @@ def _fileBrowserParams():
 	return None
 
 
+def setFileBrowserDirectory(params, directory):
+	"""Move the open file browser to a folder. Blender 5.2+ takes the folder as a bytes
+	property (BYTE_STRING), earlier versions take plain text."""
+	if params.bl_rna.properties["directory"].subtype == "BYTE_STRING":
+		directory = os.fsencode(directory)
+	params.directory = directory
+
+
 def syncFileBrowserToCollection(self, propertyName, fileExtension, sourcePathKey = ""):
 	"""Keep the open file browser on the folder and file name of the picked collection, so the
 	browser follows the picker instead of staying on the last browsed folder."""
@@ -443,7 +489,7 @@ def syncFileBrowserToCollection(self, propertyName, fileExtension, sourcePathKey
 	if sourcePathKey != "":
 		directory = collectionExportDirectory(bpy.data.collections.get(collectionName, None), sourcePathKey)
 		if directory != "":
-			params.directory = directory
+			setFileBrowserDirectory(params, directory)
 	if fileExtension in collectionName:
 		params.filename = collectionBaseName(collectionName, fileExtension) + fileExtension + self.filename_ext
 
@@ -538,8 +584,10 @@ class ExportREMesh(Operator, ExportHelper):
 		
 		remapLegacySceneVersion(context.scene, "REMeshLastExportedMeshVersion")
 		
+		meshCollection = bpy.data.collections.get(self.targetCollection, None)
 		setExportDefaults(self, "~MESHFILEPATH", ".mesh", context.scene.re_mdf_toolpanel.meshCollection,
-		                 versionExtension(context.scene.get("REMeshLastImportedMeshVersion", None)))
+		                 versionExtension(context.scene.get("REMeshLastImportedMeshVersion", None)),
+		                 sourceVersionExtension(meshCollection, "~MESHFILEPATH", filenameExtensions(self)))
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	def draw(self, context):
@@ -605,14 +653,30 @@ class ExportREMesh(Operator, ExportHelper):
 			if mdfCollection == None:
 				self.report({"INFO"},"No MDF collection found in the scene collection for this mesh. Only the mesh was exported.")
 			else:
-				# Map the mesh version extension (.221108797) to the matching MDF version (.32)
-				meshVersionExtension = os.path.splitext(self.filepath)[1]
-				mdfVersionExtension = mdfVersionDict.get(meshVersionExtension, None)
-				if mdfVersionExtension == None:
-					self.report({"WARNING"},f"Unable to determine the MDF version for mesh version {meshVersionExtension}. Only the mesh was exported.")
+				# The MDF is written as the version it was imported and prepared at. The mesh
+				# version only decides the layout when the collection never recorded one: a game
+				# sharing an MDF version (DMC5/RE2, KG/DD2/DR) is a guess made on import, and a
+				# wrong guess must not override the version the materials were actually read at.
+				mdfVersion = sourceMDFVersion(mdfCollection)
+				if mdfVersion == None:
+					# Map the mesh version extension (.221108797) to the matching MDF version (.32)
+					meshVersionExtension = os.path.splitext(self.filepath)[1]
+					mdfVersionExtension = mdfVersionDict.get(meshVersionExtension, None)
+					if mdfVersionExtension == None:
+						self.report({"WARNING"},f"Unable to determine the MDF version for mesh version {meshVersionExtension}. Only the mesh was exported.")
+					else:
+						mdfVersionExtension = mdfVersionExtension[1:]
 				else:
-					# Use the MDF collection's own base name, so _Mat / _v00 MDF collections keep their file name
-					mdfFileName = mdfCollection.name.rsplit(".mdf2", 1)[0] + ".mdf2" + mdfVersionExtension
+					mdfVersionExtension = str(mdfVersion)
+				if mdfVersionExtension != None:
+					#The MDF the collection came from keeps its own file name, so a renamed
+					#mesh does not leave the MDF beside it under a name nothing loads
+					sourcePath = collectionSourcePath(mdfCollection, "~MDFFILEPATH", checkDirectory = False)
+					if sourcePath != "":
+						mdfFileName = os.path.basename(sourcePath)
+					else:
+						# Use the MDF collection's own base name, so _Mat / _v00 MDF collections keep their file name
+						mdfFileName = mdfCollection.name.rsplit(".mdf2", 1)[0] + ".mdf2" + "." + mdfVersionExtension
 					mdfPath = os.path.join(os.path.dirname(self.filepath), mdfFileName)
 					print(f"Exporting MDF: {mdfPath}")
 					mdfSuccess = exportMDFFile(mdfPath, mdfCollection.name, onlyMaterialNames, useBlenderMaterialName=self.useBlenderMaterialName, exportAllLODs=self.exportAllLODs)
@@ -628,7 +692,16 @@ class ExportREMesh(Operator, ExportHelper):
 		toggleConsole()
 		return {"FINISHED"}
 
-class ImportREMDF(bpy.types.Operator, ImportHelper):
+class _InvokeFileSelect:
+	"""invoke for the plain multi-file importers: run immediately on a drag-drop
+	(which fills directory), else open the file browser."""
+	def invoke(self, context, event):
+		if self.directory:
+			return self.execute(context)
+		context.window_manager.fileselect_add(self)
+		return {'RUNNING_MODAL'}
+
+class ImportREMDF(_InvokeFileSelect, bpy.types.Operator, ImportHelper):
 	'''Import RE Engine MDF File'''
 	bl_idname = "re_mdf.importfile"
 	bl_label = "Import RE MDF"
@@ -650,11 +723,6 @@ class ImportREMDF(bpy.types.Operator, ImportHelper):
 		if importFileList(self, importMDFFile, "MDF", "MDF"):
 			return {"FINISHED"}
 		return {"CANCELLED"}
-	def invoke(self, context, event):
-		if self.directory:
-			return self.execute(context)
-		context.window_manager.fileselect_add(self)
-		return {'RUNNING_MODAL'}
 
 def update_targetMDFCollection(self,context):
 	syncFileBrowserToCollection(self, "targetCollection", ".mdf2", "~MDFFILEPATH")
@@ -689,8 +757,10 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 	filter_glob: StringProperty(default="*.mdf2*", options={'HIDDEN'})
 	def invoke(self, context, event):
 		gameVersion = gameNameMDFVersionDict.get(context.scene.re_mdf_toolpanel.activeGame, None)
+		mdfCollection = bpy.data.collections.get(self.targetCollection, None)
 		setExportDefaults(self, "~MDFFILEPATH", ".mdf2", context.scene.re_mdf_toolpanel.mdfCollection,
-		                 versionExtension(gameVersion))
+		                 versionExtension(gameVersion),
+		                 sourceVersionExtension(mdfCollection, "~MDFFILEPATH", filenameExtensions(self)))
 		context.window_manager.fileselect_add(self)
 		return {'RUNNING_MODAL'}
 	
@@ -703,21 +773,10 @@ class ExportREMDF(bpy.types.Operator, ExportHelper):
 		drawCollectionWarning(layout, self, "targetCollection", isMDFCollection, "Collection is not a MDF collection.")
 		drawExportFolderHint(layout, self, "~MDFFILEPATH")
 	def execute(self, context):
-		printEditorHeader(bl_info)
 		success = exportMDFFile(self.filepath,self.targetCollection)
-		if success:
-			self.report({"INFO"},"Exported RE MDF successfully.")
-			
-			if bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
-				setModDirectoryFromFilePath(self.filepath)
-			
-			bpy.data.collections[self.targetCollection]["BatchExport_path"] = self.filepath
-			return {"FINISHED"}
-		else:
-			self.report({"INFO"},"Failed to export RE MDF. Check Window > Toggle System Console for details.")
-			return {"CANCELLED"}
+		return reportExportResult(self, success, "MDF", self.targetCollection)
 
-class ImportREFBXSkel(bpy.types.Operator, ImportHelper):
+class ImportREFBXSkel(_InvokeFileSelect, bpy.types.Operator, ImportHelper):
 	'''Import RE Engine FBXSkel File'''
 	bl_idname = "re_fbxskel.importfile"
 	bl_label = "Import RE FBXSkel"
@@ -732,12 +791,7 @@ class ImportREFBXSkel(bpy.types.Operator, ImportHelper):
 			)
 	filename_ext = ".fbxskel.*"
 	filter_glob: StringProperty(default="*.fbxskel.*", options={'HIDDEN'})
-	
-	def invoke(self, context, event):
-		if self.directory:
-			return self.execute(context)
-		context.window_manager.fileselect_add(self)
-		return {'RUNNING_MODAL'}
+
 	def execute(self, context):
 		success = importFBXSkelFile(self.filepath)
 		if success:
@@ -820,15 +874,10 @@ class ExportREFBXSkel(bpy.types.Operator, ExportHelper):
 	
 	def execute(self, context):
 		success = exportFBXSkelFile(self.filepath,self.targetArmature)
-		if success:
-			self.report({"INFO"},"Exported RE FBXSkel successfully.")
-			bpy.data.objects[self.targetArmature]["BatchExport_path"] = self.filepath
-			return {"FINISHED"}
-		else:
-			self.report({"INFO"},"Failed to export RE FBXSkel. Check Window > Toggle System Console for details.")
-			return {"CANCELLED"}
+		return reportExportResult(self, success, "FBXSkel", self.targetArmature,
+		                          targetCollection = False, setModDir = False, printHeader = False)
 
-class ImportRESFur(bpy.types.Operator, ImportHelper):
+class ImportRESFur(_InvokeFileSelect, bpy.types.Operator, ImportHelper):
 	'''Import RE Engine SFur File'''
 	bl_idname = "re_sfur.importfile"
 	bl_label = "Import RE SFur"
@@ -850,11 +899,6 @@ class ImportRESFur(bpy.types.Operator, ImportHelper):
 		if importFileList(self, importSFurFile, "SFur"):
 			return {"FINISHED"}
 		return {"CANCELLED"}
-	def invoke(self, context, event):
-		if self.directory:
-			return self.execute(context)
-		context.window_manager.fileselect_add(self)
-		return {'RUNNING_MODAL'}
 
 def update_targetSFurCollection(self,context):
 	syncFileBrowserToCollection(self, "targetCollection", ".sfur")
@@ -897,19 +941,8 @@ class ExportRESFur(bpy.types.Operator, ExportHelper):
 		layout.prop_search(self, "targetCollection",bpy.data,"collections",icon = "COLLECTION_COLOR_08")
 		drawCollectionWarning(layout, self, "targetCollection", isSFurCollection, "Collection is not a SFUR collection.")
 	def execute(self, context):
-		printEditorHeader(bl_info)
 		success = exportSFurFile(self.filepath,self.targetCollection)
-		if success:
-			self.report({"INFO"},"Exported RE SFur successfully.")
-			
-			if bpy.context.scene.re_mdf_toolpanel.modDirectory == "":
-				setModDirectoryFromFilePath(self.filepath)
-			
-			bpy.data.collections[self.targetCollection]["BatchExport_path"] = self.filepath
-			return {"FINISHED"}
-		else:
-			self.report({"INFO"},"Failed to export RE SFur. Check Window > Toggle System Console for details.")
-			return {"CANCELLED"}
+		return reportExportResult(self, success, "SFur", self.targetCollection)
 
 
 # Registration
