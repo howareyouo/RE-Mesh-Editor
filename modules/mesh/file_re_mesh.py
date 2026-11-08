@@ -83,11 +83,6 @@ class Vec3():
 		self.y = 0.0
 		self.z = 0.0
 
-	def read(self, file):
-		self.x = read_float(file)
-		self.y = read_float(file)
-		self.z = read_float(file)
-
 
 class Vec4():
 	def __init__(self):
@@ -110,19 +105,10 @@ class Sphere():
 		self.z = 0.0
 		self.r = 0.0
 
-	def read(self, file):
-		self.x = read_float(file)
-		self.y = read_float(file)
-		self.z = read_float(file)
-		self.r = read_float(file)
-
 
 class Matrix4x4():
 	def __init__(self):
 		self.matrix = [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]
-
-	def read(self, file):
-		self.matrix = np.frombuffer(file.read(64), dtype='<4f').tolist()
 
 
 class AABB():
@@ -133,6 +119,12 @@ class AABB():
 	def read(self, file):
 		self.min.read(file)
 		self.max.read(file)
+
+
+def setAABB(aabb, minValues, maxValues):
+	"""Fill an AABB's min/max corners from two (x, y, z) indexables."""
+	aabb.min.x, aabb.min.y, aabb.min.z = minValues[0], minValues[1], minValues[2]
+	aabb.max.x, aabb.max.y, aabb.max.z = maxValues[0], maxValues[1], maxValues[2]
 
 
 class MaterialSubdivision():
@@ -423,22 +415,6 @@ class StreamingBufferHeaderEntry():
 		file.write(struct.pack('<11I', self.unpaddedBufferSize, self.unpaddedBufferSize2,
 			self.unkn7, self.unkn8, self.unkn9, self.unkn10, self.unkn11,
 			self.unkn12, self.unkn13, self.nextBufferOffset, self.unkn15))
-
-
-#
-
-class VertexElementStruct():
-	def __init__(self):
-		self.typing = 0
-		self.stride = 0
-		self.posStartOffset = 0
-
-	def read(self, file):
-		raw = file.read(8)
-		self.typing, self.stride, self.posStartOffset = struct.unpack_from('<HHI', raw)
-
-	def write(self, file):
-		file.write(struct.pack('<HHI', self.typing, self.stride, self.posStartOffset))
 
 
 class MeshBufferHeader(BinaryStruct):
@@ -1385,17 +1361,6 @@ class Bone():
 		self.padding0 = 0
 		self.padding1 = 0
 
-	def read(self, file):
-		raw = file.read(16)
-		(self.boneIndex, self.boneParent, self.boneSibling, self.boneChild,
-		 self.boneSymmetric, self.useSecondaryWeight,
-		 self.padding0, self.padding1) = struct.unpack_from('<HhHHHHhh', raw)
-
-	def write(self, file):
-		file.write(struct.pack('<HhHHHHhh', self.boneIndex, self.boneParent, self.boneSibling,
-			self.boneChild, self.boneSymmetric, self.useSecondaryWeight,
-			self.padding0, self.padding1))
-
 
 class Skeleton():
 	def __init__(self):
@@ -1539,6 +1504,12 @@ def checkWriteOffset(file, label, expected):
 	if expected and expected != file.tell():
 		print(f"ERROR IN OFFSET CALCULATION - {label} - expected {expected}, actual {file.tell()}")
 
+def _readUshortRemapList(file, count):
+	"""Read `count` ushort name-remap entries in one call, [] when there are none."""
+	if count > 0:
+		return list(struct.unpack(f'<{count}H', file.read(count * 2)))
+	return []
+
 class REMesh():
 	def __init__(self):
 		self.meshVersion = 0
@@ -1637,27 +1608,17 @@ class REMesh():
 
 		if self.fileHeader.materialNameRemapOffset and self.lodHeader != None:
 			file.seek(self.fileHeader.materialNameRemapOffset)
-			# Batch-read ushort remap entries with numpy (avoids Python loop)
-			if self.lodHeader.materialCount > 0:
-				raw_data = file.read(self.lodHeader.materialCount * 2)
-				self.materialNameRemapList = list(
-					struct.unpack(f'<{self.lodHeader.materialCount}H', raw_data))
+			self.materialNameRemapList = _readUshortRemapList(file, self.lodHeader.materialCount)
 
 		if self.fileHeader.boneNameRemapOffset and self.skeletonHeader != None:
 			file.seek(self.fileHeader.boneNameRemapOffset)
-			# Batch-read ushort remap entries with numpy (avoids Python loop)
-			if self.skeletonHeader.boneCount > 0:
-				raw_data = file.read(self.skeletonHeader.boneCount * 2)
-				self.boneNameRemapList = list(struct.unpack(f'<{self.skeletonHeader.boneCount}H', raw_data))
+			self.boneNameRemapList = _readUshortRemapList(file, self.skeletonHeader.boneCount)
 
 		if self.fileHeader.blendShapeNameOffset and self.blendShapeHeader != None:
 			file.seek(self.fileHeader.blendShapeNameOffset)
 			blendNameCount = self.fileHeader.nameCount - len(self.materialNameRemapList) - len(
 				self.boneNameRemapList)
-			# Batch-read remaining ushort remap entries with numpy (avoids Python loop)
-			if blendNameCount > 0:
-				raw_data = file.read(blendNameCount * 2)
-				self.blendShapeNameRemapList = list(struct.unpack(f'<{blendNameCount}H', raw_data))
+			self.blendShapeNameRemapList = _readUshortRemapList(file, blendNameCount)
 
 	def write(self, file, version):
 		self.fileHeader.write(file, version)

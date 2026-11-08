@@ -75,31 +75,9 @@ class WM_OT_AddFurEntry(Operator):
 			return {'FINISHED'}
 		else:
 			return {'CANCELLED'}
-		
-class WM_OT_ApplySFurToMeshCollection(Operator):
-	bl_label = "Apply Shell Fur Preview"
-	bl_description = "Applies the Active SFur Collection to the specified Mesh Collection.\nThis is for previewing in Blender only and has no effect on the exported file."
-	bl_idname = "re_sfur.apply_sfur"
-
-	@classmethod
-	def poll(self,context):
-		return context.scene.re_mdf_toolpanel.sFurCollection is not None
-	
-	def execute(self, context):
-		#reindexMaterials()
-		sFurCollection = bpy.context.scene.re_mdf_toolpanel.sFurCollection
-		meshCollection = bpy.context.scene.re_mdf_toolpanel.meshCollection
-		
-		if sFurCollection != None and meshCollection != None:
-			
-			self.report({"INFO"},"Applied SFur to mesh collection.")
-		else:
-			self.report({"ERROR"},"Invalid mesh or SFur collection.")
-		return {'FINISHED'}
 
 
 # Registration
-# WM_OT_ApplySFurToMeshCollection exists but is not registered
 classes = (
 	WM_OT_NewSFurHeader,
 	WM_OT_ReindexEntries,

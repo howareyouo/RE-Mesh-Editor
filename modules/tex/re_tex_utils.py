@@ -313,14 +313,17 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
         firstHeader = getDDSHeader(ddsPathList[0])
         streamingMipCount = getStreamingMipCount(firstHeader)
 
+    def writeTexFiles(ddsList):
+        if streamingMipCount > 0:
+            writeStreamingTexFiles(ddsList, texVersion, outPath, streamingOutPath, streamingMipCount, compressionLevel)
+        else:
+            texFile = getTexFileFromDDS(ddsList, texVersion, compressionLevel=compressionLevel)
+            texFile.write(outPath)
+
     if len(ddsPathList) == 1:
         ddsFile = DDSFile()
         ddsFile.read(ddsPathList[0])
-        if streamingMipCount > 0:
-            writeStreamingTexFiles([ddsFile.dds], texVersion, outPath, streamingOutPath, streamingMipCount, compressionLevel)
-        else:
-            texFile = getTexFileFromDDS([ddsFile.dds], texVersion, compressionLevel=compressionLevel)
-            texFile.write(outPath)
+        writeTexFiles([ddsFile.dds])
     else:  # Array texture
         baseHeader = firstHeader if firstHeader != None else getDDSHeader(ddsPathList[0])
         # Preparse dds files to make sure they have the same height,width,format and mip count as the first
@@ -367,11 +370,7 @@ def DDSToTex(ddsPathList, texVersion, outPath, streamingFlag=False, streamingOut
                 ddsFile.read(ddsPath)
                 ddsList.append(ddsFile.dds)
 
-            if streamingMipCount > 0:
-                writeStreamingTexFiles(ddsList, texVersion, outPath, streamingOutPath, streamingMipCount, compressionLevel)
-            else:
-                texFile = getTexFileFromDDS(ddsList, texVersion, compressionLevel=compressionLevel)
-                texFile.write(outPath)
+            writeTexFiles(ddsList)
 
 def ImageListToDDS(imageConvertList,outDir,generateMipMaps):
     # PARALLEL texconv.dll CONVERSION - safety notes (2026-09 audit, DLL v0.6.0 era)

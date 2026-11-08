@@ -6,7 +6,7 @@ import math
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mathutils import Vector
-from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict
+from .file_re_mesh import writeREMesh, ParsedREMeshToREMesh, Sphere, AABB, meshFileVersionToGameNameDict, setAABB
 from .mesh_versions import PRAGMATA_BLEND_SHAPE_FILE_VERSIONS
 from .re_mesh_parse import ParsedREMesh, VisconGroup, LODLevel, SubMesh, ParsedBone, Skeleton, BlendShape
 from .re_mesh_export_errors import addErrorToDict, printErrorDict, showREMeshErrorWindow, printWarningDict
@@ -429,12 +429,7 @@ def _export_read_bounding_boxes(boundingBoxCollection, armatureObj, parsedMesh, 
 						minVert = minVert @ armatureObj.matrix_world.inverted()  # Cancel out the armature rotation
 						maxVert = maxVert @ armatureObj.matrix_world.inverted()
 					boneBBox = AABB()
-					boneBBox.min.x = minVert[0]
-					boneBBox.min.y = minVert[1]
-					boneBBox.min.z = minVert[2]
-					boneBBox.max.x = maxVert[0]
-					boneBBox.max.y = maxVert[1]
-					boneBBox.max.z = maxVert[2]
+					setAABB(boneBBox, minVert, maxVert)
 					importedBoneBoundingBoxes[obj.constraints["BoneName"].subtarget] = boneBBox
 			elif objType == "RE_MESH_BOUNDING_BOX":
 				if obj.data.vertices[0].co[0] < obj.data.vertices[1].co[0] \
@@ -445,12 +440,7 @@ def _export_read_bounding_boxes(boundingBoxCollection, armatureObj, parsedMesh, 
 				else:
 					minVert = obj.data.vertices[1]
 					maxVert = obj.data.vertices[0]
-				parsedMesh.boundingBox.min.x = minVert.co[0]
-				parsedMesh.boundingBox.min.y = minVert.co[1]
-				parsedMesh.boundingBox.min.z = minVert.co[2]
-				parsedMesh.boundingBox.max.x = maxVert.co[0]
-				parsedMesh.boundingBox.max.y = maxVert.co[1]
-				parsedMesh.boundingBox.max.z = maxVert.co[2]
+				setAABB(parsedMesh.boundingBox, minVert.co, maxVert.co)
 			elif objType == "RE_MESH_BOUNDING_SPHERE":
 
 				parsedMesh.boundingSphere.x = obj.location[0]
@@ -949,12 +939,8 @@ def _export_build_bone_bboxes(parsedMesh, armatureObj, options, transform, impor
 					bone.boundingBox = importedBoneBoundingBoxes[bone.boneName]
 				else:
 					bone.boundingBox = AABB()
-					bone.boundingBox.min.x = boneBBoxDict[bone.boneName]["min"][0]
-					bone.boundingBox.min.y = boneBBoxDict[bone.boneName]["min"][1]
-					bone.boundingBox.min.z = boneBBoxDict[bone.boneName]["min"][2]
-					bone.boundingBox.max.x = boneBBoxDict[bone.boneName]["max"][0]
-					bone.boundingBox.max.y = boneBBoxDict[bone.boneName]["max"][1]
-					bone.boundingBox.max.z = boneBBoxDict[bone.boneName]["max"][2]
+					boneBBox = boneBBoxDict[bone.boneName]
+					setAABB(bone.boundingBox, boneBBox["min"], boneBBox["max"])
 		printElapsed("Building bone bounding boxes", weightStartTime)
 
 def _export_calc_mesh_bounds(parsedMesh):
@@ -976,12 +962,7 @@ def _export_calc_mesh_bounds(parsedMesh):
 			minVec = Vector(np.min(fullVertArray, axis=0))
 			maxVec = Vector(np.max(fullVertArray, axis=0))
 			parsedMesh.boundingBox = AABB()
-			parsedMesh.boundingBox.min.x = minVec[0]
-			parsedMesh.boundingBox.min.y = minVec[1]
-			parsedMesh.boundingBox.min.z = minVec[2]
-			parsedMesh.boundingBox.max.x = maxVec[0]
-			parsedMesh.boundingBox.max.y = maxVec[1]
-			parsedMesh.boundingBox.max.z = maxVec[2]
+			setAABB(parsedMesh.boundingBox, minVec, maxVec)
 	printElapsed("Calculating mesh bounding sphere and bounding box", meshBBoxStartTime)
 
 def _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollection, hashedBoneNameDict,

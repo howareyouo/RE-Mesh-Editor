@@ -399,9 +399,6 @@ class DDSHeader(c.LittleEndianStructure):
     def is_signed(self):
         return is_signed(self.dxgi_format.name)
 
-    def is_canonical(self):
-        return self.fourCC not in UNCANONICAL_FOURCC
-
     def is_supported(self):
         if self.dxgi_format not in _VALID_DXGI_VALUES:
             return False

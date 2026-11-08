@@ -6,7 +6,6 @@ from..gen_functions import raiseWarning,wildCardFileSearchList
 from .file_re_tex import getTexVersionFromGameName
 from .re_tex_utils import DDSToTex,convertTexFileToDDS,DEFAULT_GDEFLATE_LEVEL,GDEFLATE_LEVELS
 from ..ddsconv.directx.texconv import Texconv
-DELETE_DDS = True
 BLENDER_MAX_IMAGE_ARRAY_SIZE = 16#Blender can't handle much more mix nodes than this
 
 

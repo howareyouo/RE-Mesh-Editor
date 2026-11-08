@@ -15,14 +15,6 @@ def get_ext(file):
     return file.split('.')[-1].lower()
 
 
-def get_size(f):
-    pos = f.tell()
-    f.seek(0, 2)
-    size = f.tell()
-    f.seek(pos)
-    return size
-
-
 def get_os_name():
     return platform.system()
 

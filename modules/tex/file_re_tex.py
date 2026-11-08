@@ -125,10 +125,6 @@ class CompressedImageHeader():
         self.imageSize = 0
         self.imageOffset = 0
 
-    def read(self, file, expectedMipSize, width, height, ddsBPPs, currentImageDataHeaderOffset, imageDataOffset, texVersion):
-        self.imageSize = read_uint(file)
-        self.imageOffset = read_uint(file)
-
     def write(self, file):
         write_uint(file, self.imageSize)
         write_uint(file, self.imageOffset)

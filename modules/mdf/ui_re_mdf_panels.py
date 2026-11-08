@@ -2,9 +2,6 @@ import bpy
 
 from bpy.types import (
 	Panel,
-	Menu,
-	Operator,
-	PropertyGroup,
 )
 from ..blender_utils import MDF_MATERIAL_TYPE, findMeshCollectionForMDF
 from ..mesh.material_name import getMaterialNameReplacePlan, iterMeshesUsingMaterialName

@@ -1,40 +1,5 @@
 import numpy as np
 import os
-def NRRXToNRMR(NRRXArray):
-
-    NRMRArray = np.empty(len(NRRXArray), dtype=np.float32)
-
-    nx = NRRXArray[1::4] * 2.0 - 1.0
-    ny = -(NRRXArray[3::4] * 2.0 - 1.0)
-
-    nx = np.sign(nx) * (nx ** 2.0)
-    ny = np.sign(ny) * (ny ** 2.0)
-
-    angle = np.pi * 0.25
-    cos_a = np.cos(angle)
-    sin_a = np.sin(angle)
-    x = nx * cos_a - ny * sin_a
-    y = nx * sin_a + ny * cos_a
-
-    z_sq = 1.0 - (x**2 + y**2)
-    z = np.sqrt(np.clip(z_sq, 0.0, None))
-
-    length = np.sqrt(x**2 + y**2 + z**2)
-    x /= length
-    y /= length
-    z /= length
-
-    x = (x + 1.0) * 0.5
-    y = (y + 1.0) * 0.5
-    z = (z + 1.0) * 0.5
-
-    NRMRArray[0::4] = x.ravel()
-    NRMRArray[1::4] = y.ravel()
-    NRMRArray[2::4] = z.ravel()
-    NRMRArray[3::4] = NRRXArray[0::4]
-    return NRMRArray
-
-
 def NRMRToNRRX(NRMRArray):
     NRMRArray = np.asarray(NRMRArray, dtype=np.float32)
     #Result is a bit brighter than the original nrrx but it's close enough that I don't think it matters much

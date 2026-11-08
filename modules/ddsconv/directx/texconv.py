@@ -5,7 +5,6 @@ Notes:
     And put the dll in the same directory as texconv.py.
 """
 import ctypes
-from ctypes.util import find_library
 import os
 import tempfile
 
@@ -13,52 +12,9 @@ from .dds import DDSHeader, is_hdr, is_signed
 from .dxgi_format import DXGI_FORMAT
 from . import util
 
+# The DLL stays loaded for the lifetime of the Blender session; conversions reuse
+# it through this module-level cache (see re_tex_utils.ImageListToDDS).
 DLL = None
-
-
-def get_dll_close_from_lib(lib_name):
-    """Return dll function to unlaod DLL if the library has it."""
-    dlpath = find_library(lib_name)
-    if dlpath is None:
-        # DLL not found.
-        return None
-    try:
-        lib = ctypes.CDLL(dlpath)
-        if hasattr(lib, "dlclose"):
-            return lib.dlclose
-    except OSError:
-        pass
-    # dlclose not found.
-    return None
-
-
-def get_dll_close():
-    """Get dll function to unload DLL."""
-    if util.is_windows():
-        return ctypes.windll.kernel32.FreeLibrary
-    else:
-        # Search libc, libdl, and libSystem
-        for lib_name in ["c", "dl", "System"]:
-            dlclose = get_dll_close_from_lib(lib_name)
-            if dlclose is not None:
-                return dlclose
-    # Failed to find dlclose
-    return None
-
-
-def unload_texconv():
-    global DLL
-    if DLL is None:
-        return
-
-    dll_close = get_dll_close()
-    if dll_close is None:
-        raise RuntimeError("Failed to unload DLL.")
-
-    handle = DLL._handle
-    dll_close.argtypes = [ctypes.c_void_p]
-    dll_close(handle)
-    DLL = None
 
 
 class Texconv:
@@ -94,70 +50,8 @@ class Texconv:
         self.dll = ctypes.cdll.LoadLibrary(dll_path)
         DLL = self.dll
 
-    def unload_dll(self):
-        unload_texconv()
-        self.dll = None
-
-    def convert_to_tga(self, file, out=None, cubemap_layout="h-cross", invert_normals=False, verbose=True):
-        """Convert dds to tga."""
-        if self.dll is None:
-            raise RuntimeError("texconv is unloaded.")
-
-        dds_header = DDSHeader.read_from_file(file)
-
-        if not dds_header.is_supported():
-            raise RuntimeError(
-                f"DDS converter does NOT support {dds_header.get_format_as_str()}.\n"
-                "Use '.dds' as an export format."
-            )
-
-        if dds_header.is_3d() or dds_header.is_array():
-            raise RuntimeError("DDS converter does Not support non-2D textures.")
-
-        if dds_header.is_partial_cube():
-            raise RuntimeError("Partial cubemaps are unsupported.")
-
-        if verbose:
-            print(f'DXGI_FORMAT: {dds_header.get_format_as_str()}')
-
-        args = []
-
-        if dds_header.is_hdr():
-            fmt = 'hdr'
-            if not dds_header.convertible_to_hdr():
-                args += ['-f', 'fp32']
-        else:
-            fmt = 'tga'
-            if not dds_header.convertible_to_tga():
-                args += ['-f', 'rgba']
-
-        if dds_header.is_signed():
-            args += ['-x2bias']
-
-        if dds_header.is_int():
-            msg = f'Int format detected. ({dds_header.get_format_as_str()})\n It might not be converted correctly.'
-            print(msg)
-
-        if not dds_header.is_cube():
-            args += ['-ft', fmt]
-
-            if dds_header.is_bc5():
-                if not dds_header.is_signed():
-                    args += ['-reconstructz']
-                if invert_normals:
-                    args += ['-inverty']
-            #print(args)
-            out = self.__texconv(file, args, out=out, verbose=verbose)
-
-        name = os.path.join(out, os.path.basename(file))
-        name = ".".join(name.split(".")[:-1] + [fmt])
-
-        if dds_header.is_cube():
-            self.__cube_to_image(file, name, args, cubemap_layout=cubemap_layout, verbose=verbose)
-
-        return name
-    def fix_mip_count(self, file, outDir,mipCount):
-        """Convert dds to tga."""
+    def fix_mip_count(self, file, outDir, mipCount):
+        """Re-write a dds file with a fixed mip count."""
         if self.dll is None:
             raise RuntimeError("texconv is unloaded.")
 
@@ -178,7 +72,7 @@ class Texconv:
 
         args = ['-m',str(mipCount),'-ft',"dds"]
 
-        out = self.__texconv(file, args, out=outDir,verbose=False,allow_slow_codec=True)
+        self.__texconv(file, args, out=outDir,verbose=False,allow_slow_codec=True)
 
 
     def convert_to_png(self, file, out=None, cubemap_layout="h-cross", invert_normals=False, verbose=True):
@@ -218,44 +112,7 @@ class Texconv:
             self.__cube_to_image(file, name, args, cubemap_layout=cubemap_layout, verbose=verbose)
 
         return name
-    def convert_to_tif(self, file, out=None, cubemap_layout="h-cross", invert_normals=False, verbose=True):
-        """Convert dds to tif."""
-        if self.dll is None:
-            raise RuntimeError("texconv is unloaded.")
 
-        dds_header = DDSHeader.read_from_file(file)
-
-        if not dds_header.is_supported():
-            raise RuntimeError(
-                f"DDS converter does NOT support {dds_header.get_format_as_str()}.\n"
-                "Use '.dds' as an export format."
-            )
-
-        if dds_header.is_3d() or dds_header.is_array():
-            raise RuntimeError("DDS converter does Not support non-2D textures.")
-
-        if dds_header.is_partial_cube():
-            raise RuntimeError("Partial cubemaps are unsupported.")
-
-        if verbose:
-            print(f'DXGI_FORMAT: {dds_header.get_format_as_str()}')
-        fmt = "tif"
-        args = ['-m','1','-ft',fmt]
-        if "SRGB" in dds_header.get_format_as_str():
-            args += ['-f','R8G8B8A8_UNORM_SRGB']
-        else:
-            args += ['-f','R8G8B8A8_UNORM']
-        	
-        out = self.__texconv(file, args, out=out, verbose=verbose)
-
-        name = os.path.join(out, os.path.basename(file))
-        name = ".".join(name.split(".")[:-1] + [fmt])
-
-        if dds_header.is_cube():
-            self.__cube_to_image(file, name, args, cubemap_layout=cubemap_layout, verbose=verbose)
-
-        return name
-    
     def convert_to_dds(self, file, dds_fmt, out=None,
                        invert_normals=False,
                        premultiplied_alpha=False,

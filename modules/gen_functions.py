@@ -226,42 +226,12 @@ def getPaddingAmount(currentPos,alignment):
 # structs (_struct_ushort etc.) cannot be used here - `unpack_from` on a whole
 # buffer with a single-element format returns only the FIRST value, silently
 # truncating arrays (previously caused bone weights to be dropped on import).
-def read_ubyte_array(file_object, count):
-    return list(struct.unpack_from(f'<{count}B', file_object.read(count)))
 def read_ushort_array(file_object, count):
     raw = file_object.read(count * 2)
     return list(struct.unpack_from(f'<{count}H', raw))
-def read_uint_array(file_object, count):
-    raw = file_object.read(count * 4)
-    return list(struct.unpack_from(f'<{count}I', raw))
 def read_uint64_array(file_object, count):
     raw = file_object.read(count * 8)
     return list(struct.unpack_from(f'<{count}Q', raw))
-def read_short_array(file_object, count):
-    raw = file_object.read(count * 2)
-    return list(struct.unpack_from(f'<{count}h', raw))
-def read_float_array(file_object, count):
-    raw = file_object.read(count * 4)
-    return list(struct.unpack_from(f'<{count}f', raw))
-def read_int_array(file_object, count):
-    raw = file_object.read(count * 4)
-    return list(struct.unpack_from(f'<{count}i', raw))
-
-# Batch write helpers
-def write_ubyte_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}B', *values))
-def write_ushort_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}H', *values))
-def write_uint_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}I', *values))
-def write_uint64_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}Q', *values))
-def write_short_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}h', *values))
-def write_float_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}f', *values))
-def write_int_array(file_object, values):
-    file_object.write(struct.pack(f'<{len(values)}i', *values))
 #bitflag operations
 def getBit(bitFlag, index):#Index starting from rightmost bit
     return bool((bitFlag >> index) & 1)
@@ -293,6 +263,14 @@ def openFileWrite(filepath, buffering=-1):
 
 # Set to True to re-enable the warnings printed after a mesh/MDF export.
 ENABLE_EXPORT_WARNINGS = False
+
+# Set to True for verbose import diagnostics (console import logging in the mdf,
+# fbxskel and tex readers). One shared switch instead of a per-module copy.
+DEBUG_MODE = False
+
+def debugprint(string):
+	if DEBUG_MODE:
+		print(string)
 
 def raiseWarning(warning):
      print(textColors.WARNING + "WARNING: " + warning + textColors.ENDC)

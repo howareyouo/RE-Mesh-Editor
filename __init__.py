@@ -130,6 +130,8 @@ sfurExtensionsString = ".4;.5;"
 SFUR_FH_drag_import = make_file_handler(
 	"SFUR_FH_drag_import", "File handler for RE SFur importing",
 	"re_sfur.importfile", sfurExtensionsString)
+FILE_HANDLERS = (MESH_FH_drag_import, MDF_FH_drag_import, TEX_FH_drag_import,
+                 FBXSKEL_FH_drag_import, SFUR_FH_drag_import)
 
 class IMPORT_MT_re_mesh_editor(bpy.types.Menu):
     bl_label = "RE Mesh Editor"
@@ -181,18 +183,15 @@ def register():
 	bpy.types.TOPBAR_MT_file_export.append(re_mesh_editor_export)
 
 	#Drag and drop operators
-	bpy.utils.register_class(MESH_FH_drag_import)
-	bpy.utils.register_class(MDF_FH_drag_import)
-	bpy.utils.register_class(TEX_FH_drag_import)
-	bpy.utils.register_class(FBXSKEL_FH_drag_import)
-	bpy.utils.register_class(SFUR_FH_drag_import)
+	for fileHandler in FILE_HANDLERS:
+		bpy.utils.register_class(fileHandler)
 
 	#Timer + load handler that keep renamed mesh material names in sync with the MDF
 	blender_re_mesh_name_sync.register()
 	#Undo/redo handler that renames the texture files back when a rename is undone
 	registerUndoHandlers()
-		
-	
+
+
 def unregister():
 	blender_re_mesh_name_sync.unregister()
 	unregisterUndoHandlers()
@@ -205,18 +204,15 @@ def unregister():
 	addon_updater_ops.unregister()
 	for classEntry in reversed(classes):
 		bpy.utils.unregister_class(classEntry)
-		
+
 	bpy.utils.unregister_class(IMPORT_MT_re_mesh_editor)
 	bpy.utils.unregister_class(EXPORT_MT_re_mesh_editor)
-	
-	
+
+
 	bpy.types.TOPBAR_MT_file_import.remove(re_mesh_editor_import)
 	bpy.types.TOPBAR_MT_file_export.remove(re_mesh_editor_export)
-	
-	bpy.utils.unregister_class(MESH_FH_drag_import)
-	bpy.utils.unregister_class(MDF_FH_drag_import)
-	bpy.utils.unregister_class(TEX_FH_drag_import)
-	bpy.utils.unregister_class(FBXSKEL_FH_drag_import)
-	bpy.utils.unregister_class(SFUR_FH_drag_import)
+
+	for fileHandler in reversed(FILE_HANDLERS):
+		bpy.utils.unregister_class(fileHandler)
 if __name__ == '__main__':
 	register()

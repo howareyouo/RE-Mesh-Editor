@@ -3,7 +3,7 @@ import bpy
 
 from ..blender_utils import (showMessageBox, showErrorMessageBox, createRECollection, setAssetPathFromFilePath, createEmpty, tag_redraw,
 	getMeshCollectionNameFromMDFName, iterMDFMaterialObjects, iterExportableMeshObjects, getMDFMaterialName, setMDFMaterialName,
-	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE,
+	MDF_MATERIAL_TYPE, MDF_COLLECTION_TYPE, sourceMDFVersion,
 	)
 from ..gen_functions import textColors,raiseWarning,getAdjacentFileVersion,parseFileVersion,ENABLE_EXPORT_WARNINGS
 from ..game_versions import gameNameMDFVersionDict, getMDFVersionToGameName
@@ -15,9 +15,20 @@ from .blender_re_mdf_texture_files import setTextureBindingPath, texturePathSync
 
 MDFGameNameConflictDict = set(["RE2","RE2RT","DD2"])
 
+#Tex version to the game that ships it, for the games sharing an MDF version. Only these
+#versions say which game a file belongs to: a game folder holds plenty of textures whose
+#name carries a mip, ATOC or other suffix version, and those must not be read as evidence.
+_MDF_GAME_TEX_VERSION_DICT = {
+	"RE2": {10: "RE2", 11: "DMC5"},  #DMC5
+	"RE2RT": {35: "RE7RT"},  #RE3RT is told apart by its texture paths
+	"DD2": {231106777: "KG", 760230703: "DD2", 240606151: "DR"},  #KG, DD2, DR
+}
+
 
 def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 	rootPath = os.path.split(filePath)[0].lower()
+	#The only row the guess below may fall back to: a game that shares this MDF version
+	gameNameDefault = gameName
 	realGameName = None
 	if gameName == "RE2":
 		if "re2" in rootPath:
@@ -31,18 +42,12 @@ def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 			elif meshVersion == 1808282334:
 				realGameName = "DMC5"
 		if realGameName == None:
-			texVersion = getAdjacentFileVersion(rootPath,".tex")
-			if texVersion == 10:
-				realGameName = "RE2"
-			elif texVersion == 11:
-				realGameName = "DMC5"
+			realGameName = _MDF_GAME_TEX_VERSION_DICT["RE2"].get(getAdjacentFileVersion(rootPath,".tex"))
 		if realGameName == None and len(mdfFile.materialList) > 0:
 			for texture in mdfFile.materialList[0].textureList:
 				if "objectroot" in texture.texturePath.lower():
 					realGameName = "RE2"
 					break 
-		if realGameName == None:
-			realGameName = "DMC5"
 	elif gameName == "RE2RT":
 		if "re3" in rootPath:
 			realGameName = "RE3RT"
@@ -51,14 +56,15 @@ def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 		elif "re7" in rootPath:
 			realGameName = "RE7RT"
 		if realGameName == None and len(mdfFile.materialList) > 0:
-			texVersion = getAdjacentFileVersion(rootPath,".tex")
-			if texVersion == 35:
-				realGameName = "RE7RT"
-			else:
+			realGameName = _MDF_GAME_TEX_VERSION_DICT["RE2RT"].get(getAdjacentFileVersion(rootPath,".tex"))
+			if realGameName == None:
 				for texture in mdfFile.materialList[0].textureList:
 					if "escape" in texture.texturePath.lower():
 						realGameName = "RE3RT"
 						break
+		if realGameName == None:
+			#RE3RT only leaves the two marks above; without one the folder's row still stands
+			realGameName = "RE2RT"
 	elif gameName == "DD2":
 		if "dd2" in rootPath:
 			realGameName = "DD2"
@@ -73,16 +79,11 @@ def resolveMDFGameNameConflict(gameName,mdfFile,filePath):
 				elif meshVersion == 240424828:
 					realGameName = "DR"
 		if realGameName == None:
-			texVersion = getAdjacentFileVersion(rootPath,".tex")
-			if texVersion != -1:
-				if texVersion == 231106777:
-					realGameName = "KG"
-				elif texVersion == 760230703:
-					realGameName = "DD2"
-				elif texVersion == 240606151:
-					realGameName = "DR"
+			realGameName = _MDF_GAME_TEX_VERSION_DICT["DD2"].get(getAdjacentFileVersion(rootPath,".tex"))
 	if realGameName == None:
-		realGameName = gameName
+		#Nothing in the folder says which of the games sharing this MDF version wrote the
+		#file, so stay on the row the version resolves to instead of picking another game.
+		realGameName = gameNameDefault
 	return realGameName
 	
 
@@ -142,7 +143,9 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 	if mdfFile is None:
 		mdfFile = readMDF(filePath)
 	mdfFileName = os.path.splitext(os.path.split(filePath)[1])[0]
-	mdfVersion = parseFileVersion(filePath, None)
+	#A file whose extension disagrees with its layout is read as the layout's version, so
+	#the panel has to switch to that version's game too (readMDF warns about the mismatch)
+	mdfVersion = mdfFile.fileVersion or parseFileVersion(filePath, None)
 	if mdfVersion is None:
 		print("Unable to parse mdf version number in file path.")
 		gameName = -1
@@ -159,6 +162,7 @@ def importMDFFile(filePath,parentCollection = None,mdfFile = None):
 	#headerObj = createEmpty("MDF_HEADER ("+os.path.split(filePath)[1]+")",[("~TYPE","RE_MDF_HEADER"),("unknHeaderValue",mdfFile.Header.version),("MDFVersion",os.path.splitext(filePath)[1].split(".")[1])],None,"MDFData")
 	mdfCollection = createMDFCollection(mdfFileName,parentCollection)
 	bpy.context.scene["REMeshLastImportedMDFVersion"] = mdfVersion
+	mdfCollection["MDFVersion"] = mdfVersion #The layout the file was read as, see sourceMDFVersion
 	setAssetPathFromFilePath(filePath, mdfCollection)
 	mdfCollection["~MDFFILEPATH"] = filePath #Store the source file path so operators can locate the MDF folder
 	#MATERIALS IMPORT
@@ -456,6 +460,13 @@ def exportMDFFile(filepath,mdfCollectionName = "",onlyMaterialNames = None,useBl
 	mdfVersion = parseFileVersion(filepath, None)
 	if mdfVersion is None:
 		print("Unable to parse MDF version number in file path.")
+	#The collection remembers the file and the version it was read from, so a MDF prepared
+	#from a mis-detected game is written with the layout it was prepared as (writeMDF warns
+	#about the mismatch). An explicit version in the path still wins when the collection
+	#cannot be resolved.
+	mdfCollection = bpy.data.collections.get(mdfCollectionName)
+	if mdfCollection != None and mdfVersion is None:
+		mdfVersion = sourceMDFVersion(mdfCollection)
 	mdfFile = buildMDF(mdfCollectionName,mdfVersion,onlyMaterialNames,useBlenderMaterialName,exportAllLODs)
 	if mdfFile != None:
 		writeMDF(mdfFile,filepath)

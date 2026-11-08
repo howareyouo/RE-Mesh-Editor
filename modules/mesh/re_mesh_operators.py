@@ -397,6 +397,16 @@ _FILE_VERSION_KEY_PARTS = {
 	"CLSP": ("REChain", "CLSP"),
 }
 
+# Batch export entry -> (operator module, operator name, failure label) of the RE
+# Chain Editor addons. All three run the same arm; they are only reachable when
+# the matching editor addon (they all register OBJECT_PT_chain_object_mode_panel)
+# is installed.
+_CHAIN_EXPORT_OPS = {
+	"CHAIN": ("re_chain", "exportfile", "Chain"),
+	"CHAIN2": ("re_chain2", "exportfile", "Chain2"),
+	"CLSP": ("re_clsp", "exportfile", "CLSP"),
+}
+
 
 def getFileVersionSuffix(exportType, scene):
 	parts = _FILE_VERSION_KEY_PARTS.get(exportType)
@@ -585,41 +595,16 @@ class WM_OT_REBatchExporter(Operator):
 				except Exception as err:
 					print(f"FBXSkel Export Failed: {str(err)}")
 					failCount += 1
-			elif exportItem.exportType == "CHAIN":
+			elif exportItem.exportType in _CHAIN_EXPORT_OPS:
+				chainOpModule, chainOpName, chainLabel = _CHAIN_EXPORT_OPS[exportItem.exportType]
 				if hasattr(bpy.types, "OBJECT_PT_chain_object_mode_panel"):
 					try:
-						bpy.ops.re_chain.exportfile(
+						getattr(getattr(bpy.ops, chainOpModule), chainOpName)(
 							filepath=exportItem.path,
 							targetCollection=exportItem.name,
 						)
 					except Exception as err:
-						print(f"Chain Export Failed: {str(err)}")
-						failCount += 1
-				else:
-					print("RE Chain Editor is not installed. Skipping batch export entry.")
-					failCount += 1
-			elif exportItem.exportType == "CHAIN2":
-				if hasattr(bpy.types, "OBJECT_PT_chain_object_mode_panel"):
-					try:
-						bpy.ops.re_chain2.exportfile(
-							filepath=exportItem.path,
-							targetCollection=exportItem.name,
-						)
-					except Exception as err:
-						print(f"Chain2 Export Failed: {str(err)}")
-						failCount += 1
-				else:
-					print("RE Chain Editor is not installed. Skipping batch export entry.")
-					failCount += 1
-			elif exportItem.exportType == "CLSP":
-				if hasattr(bpy.types, "OBJECT_PT_chain_object_mode_panel"):
-					try:
-						bpy.ops.re_clsp.exportfile(
-							filepath=exportItem.path,
-							targetCollection=exportItem.name,
-						)
-					except Exception as err:
-						print(f"Chain Export Failed: {str(err)}")
+						print(f"{chainLabel} Export Failed: {str(err)}")
 						failCount += 1
 				else:
 					print("RE Chain Editor is not installed. Skipping batch export entry.")

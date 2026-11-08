@@ -115,11 +115,9 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 		return context.scene.re_mdf_toolpanel.mdfCollection is not None and context.scene.re_mdf_toolpanel.meshCollection is not None
 
 	def execute(self, context):
-		#reindexMaterials()
 		mdfCollection = bpy.context.scene.re_mdf_toolpanel.mdfCollection
 		meshCollection = bpy.context.scene.re_mdf_toolpanel.meshCollection
 		modDir = os.path.realpath(bpy.context.scene.re_mdf_toolpanel.modDirectory)
-		#removedMaterialSet = set()
 		if mdfCollection != None and meshCollection != None and os.path.isdir(modDir):
 			mdfFile = buildMDF(mdfCollection.name)
 			meshMaterialDict = dict()
@@ -136,7 +134,6 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 						for material in obj.data.materials:
 							if stripBlenderUserSuffix(material.name) == materialName:
 								meshMaterialDict[materialName] = material
-							#removedMaterialSet.add(material)
 					obj.data.materials.clear()
 					if materialName not in meshMaterialDict:
 						if materialName:
@@ -150,13 +147,6 @@ class WM_OT_ApplyMDFToMeshCollection(Operator):
 							raiseWarning(f"No material in mesh name, cannot apply materials: {obj.name}")
 					else:
 						obj.data.materials.append(meshMaterialDict[materialName])
-			"""						
-			#If the removed materials have no more users, remove them
-			for material in removedMaterialSet:
-				if material.users == 0:
-					print(f"Removed {material.name}")
-					bpy.data.materials.remove(material)
-			"""
 			importMDF(mdfFile, meshMaterialDict,bpy.context.scene.re_mdf_toolpanel.loadUnusedTextures,bpy.context.scene.re_mdf_toolpanel.loadUnusedProps,bpy.context.scene.re_mdf_toolpanel.useBackfaceCulling,bpy.context.scene.re_mdf_toolpanel.reloadCachedTextures,chunkPath = modDir,gameName = bpy.context.scene.re_mdf_toolpanel.activeGame,arrangeNodes = True)
 			self.report({"INFO"},"Applied MDF to mesh collection.")
 		else:

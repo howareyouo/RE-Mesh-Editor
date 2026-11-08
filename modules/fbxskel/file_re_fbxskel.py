@@ -1,11 +1,10 @@
 #Author: NSA Cloud
 import os
 
-from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,parseFileVersion,read_unicode_string,StringTableBuilder
+from ..gen_functions import textColors,raiseWarning,raiseError,openFileRead,openFileWrite,parseFileVersion,read_unicode_string,StringTableBuilder,debugprint
 from ..hashing.mmh3.pymmh3 import hashUTF16
 from ..binary_struct import BinaryStruct,u32,u64,i16,f32x3,f32x4,skip
 
-DEBUG_MODE = False
 class SIZEDATA():
 	def __init__(self):
 		self.HEADER_SIZE = 48
@@ -13,10 +12,7 @@ class SIZEDATA():
 		self.HASH_ENTRY_SIZE = 8
 		self.PROPERTY_ENTRY_SIZE = 24
 		self.PROPERTY_VALUE_SIZE = 4
-		
-def debugprint(string):
-	if DEBUG_MODE:
-		print(string)
+
 class FBXSkelHeader(BinaryStruct):
 	_fields_ = [
 		u32("version"),u32("magic"),skip(8),

@@ -87,17 +87,28 @@ def setAssetPathFromFilePath(filePath, collection):
 	except:
 		print("Failed to set asset path from file path, file is likely not in a natives folder.")
 
-def resolveSourcePath(storedPath):
+def resolveSourcePath(storedPath, checkDirectory = True):
 	"""Normalise a source file path stored on a collection.
 
 	Returns "" when nothing was stored, or when the folder it points at no longer
-	exists, so callers can fall back to another default."""
+	exists, so callers can fall back to another default. checkDirectory = False
+	returns the path regardless, for callers that only read the file name."""
 	if not storedPath:
 		return ""
 	sourcePath = os.path.abspath(bpy.path.abspath(str(storedPath)))
-	if not os.path.isdir(os.path.dirname(sourcePath)):
+	if checkDirectory and not os.path.isdir(os.path.dirname(sourcePath)):
 		return ""
 	return sourcePath
+
+def sourceMDFVersion(collection):
+	"""The MDF version an MDF collection was imported and prepared at, or None when it never
+	recorded one. The import stores the version the file's layout actually uses, so this is
+	the layout the materials have to be written back as.
+
+	Lives here rather than in io_operators so the mdf writer (which io_operators imports)
+	can read the same convention without an import cycle."""
+	version = collection.get("MDFVersion") if collection != None else None
+	return version if isinstance(version, int) and version > 0 else None
 
 # ---------------------------------------------------------------- RE collection helpers
 # Mesh/MDF/SFur collections are identified by a "~TYPE" custom property (set on

@@ -1,5 +1,5 @@
 import numpy as np
-from .file_re_mesh import Matrix4x4, AABB, Sphere, capturePragmataBlendHeader
+from .file_re_mesh import Matrix4x4, AABB, Sphere, capturePragmataBlendHeader, setAABB
 from .mesh_versions import (MESH_FILE_VERSION_SF6, PRAGMATA_INTERNAL_MESH_VERSION,
                             SIX_WEIGHT_MESH_FILE_VERSIONS, isPragmataMeshFileVersion)
 from .file_re_mesh_mply import computePosDecode
@@ -411,33 +411,25 @@ def parseLODStructure(reMesh, targetLODList, vertexDictList, faceBufferList, use
 						reMesh.blendShapeNameRemapList[currentBlendShapeNameIndex + blendNameIndex]]
 
 					# print(blendShapeEntry.blendShapeName)
+					# SF6+ spans several sub meshes per blend target (one range per entry),
+					# legacy files have the single (startIndex, vertCount) pair on the target
 					if blendTarget.subMeshEntryCount != 0:  # If Version >= SF6
-						for subMeshEntry in blendTarget.subMeshEntryList:
-
-							blendShapeEntry = BlendShape()
-							blendShapeEntry.blendShapeName = blendShapeName
-							blendShapeEntry.deltas = blendShapeDeltas[
-								currentBlendDeltaOffset:currentBlendDeltaOffset + subMeshEntry.vertCount]
-							aabb = blendShapeLODData.aabbList[blendTargetIndex]
-							blendShapeEntry.deltas = remapBlendShapeDeltas(
-								blendShapeEntry.deltas, aabb,
-								zeroIsSentinel=reMesh.meshVersion == MESH_FILE_VERSION_SF6)
-
-							currentBlendDeltaOffset += subMeshEntry.vertCount
-							blendShapeDict.setdefault(subMeshEntry.subMeshVertexStartIndex, []).append(blendShapeEntry)
-
+						vertexRanges = [(subMeshEntry.subMeshVertexStartIndex, subMeshEntry.vertCount)
+										for subMeshEntry in blendTarget.subMeshEntryList]
 					else:
+						vertexRanges = [(blendTarget.subMeshVertexStartIndex, blendTarget.vertCount)]
+					for startVertexIndex, vertCount in vertexRanges:
 						blendShapeEntry = BlendShape()
 						blendShapeEntry.blendShapeName = blendShapeName
 						blendShapeEntry.deltas = blendShapeDeltas[
-							currentBlendDeltaOffset:currentBlendDeltaOffset + blendTarget.vertCount]
+							currentBlendDeltaOffset:currentBlendDeltaOffset + vertCount]
 						aabb = blendShapeLODData.aabbList[blendTargetIndex]
 						blendShapeEntry.deltas = remapBlendShapeDeltas(
 							blendShapeEntry.deltas, aabb,
 							zeroIsSentinel=reMesh.meshVersion == MESH_FILE_VERSION_SF6)
 
-						currentBlendDeltaOffset += blendTarget.vertCount
-						blendShapeDict.setdefault(blendTarget.subMeshVertexStartIndex, []).append(blendShapeEntry)
+						currentBlendDeltaOffset += vertCount
+						blendShapeDict.setdefault(startVertexIndex, []).append(blendShapeEntry)
 
 				currentBlendShapeNameIndex += blendTarget.blendShapeNum
 
@@ -715,12 +707,7 @@ class ParsedREMesh:
 
 			minAABB = reMesh.meshletLayout.meshletHeader.minAABB
 			maxAABB = reMesh.meshletLayout.meshletHeader.maxAABB
-			self.boundingBox.min.x = minAABB[0]
-			self.boundingBox.min.y = minAABB[1]
-			self.boundingBox.min.z = minAABB[2]
-			self.boundingBox.max.x = maxAABB[0]
-			self.boundingBox.max.y = maxAABB[1]
-			self.boundingBox.max.z = maxAABB[2]
+			setAABB(self.boundingBox, minAABB, maxAABB)
 
 			AABBCenter = (np.array(minAABB) + np.array(maxAABB)) / 2
 			AABBOffset = np.array(reMesh.meshletBVH.offset)

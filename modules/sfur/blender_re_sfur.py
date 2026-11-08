@@ -3,7 +3,6 @@ import bpy
 import glob
 from ..blender_utils import createRECollection,setAssetPathFromFilePath
 from ..game_versions import sfurVersionDict
-from ..gen_functions import parseFileVersion
 from ..naming import parseMDFObjectNameMaterialName,formatREMaterialObjectName
 from .file_re_sfur import readSFur,writeSFur,SFurFile,SFurEntry
 
@@ -134,11 +133,7 @@ def importSFurFile(filePath,parentCollection = None):
 
 def exportSFurFile(filepath,targetCollection):
 	sFurFile = SFurFile()
-	sfurVersion = parseFileVersion(filepath, None)
-	if sfurVersion is None:
-		print("Unable to parse sfur version number in file path, defaulting to 5.")
-		sfurVersion = 5
-	sFurFile.header.version = sfurVersion
+	#writeSFur resolves the file version (defaulting to 5) and stamps it on the header
 	collection = bpy.data.collections.get(targetCollection,None)
 	if collection != None:
 		reindexEntries(collection)

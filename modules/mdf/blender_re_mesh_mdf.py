@@ -7,7 +7,7 @@ import glob
 import struct
 
 from mathutils import Vector
-from ..gen_functions import isLinux,resolveLinuxPath,fname,readUTF16String
+from ..gen_functions import isLinux,resolveLinuxPath,fname,readUTF16String,DEBUG_MODE,debugprint
 from ..blender_utils import arrangeNodeTree,showErrorMessageBox
 from ..tex.tex_paths import SearchRoot, TEX_EXTENSION, TEX_MATCH_VERSION, findTextureFile
 from .node_factories import addMathNode, addSeparateColor
@@ -18,7 +18,6 @@ def getAnisoInputName(nodeBSDF):
 	return "Anisotropic"
 
 IMPORT_TRANSLUCENT = False # Disabled since it's not quite right yet
-DEBUG_MODE = False#Enables verbose console logging for console import diagnostics
 #RE2 RT frosted glass: a transmission shader with a blur/clear approximation and
 #an optional unscaled FrostMask, replacing the flat principled output (ported from REME v0.73)
 def buildRE2FrostedGlass(matInfo, normalNode):
@@ -368,7 +367,6 @@ albedoTypeSet = set([
 	"BaseShiftMap",
 	"BaseAnisoShiftMap",
 	#"BaseDielectricMapBase",
-	"BaseAlphaMap",
 	"BaseDielectricMap",
 	"BaseDielectricMap1",
 	"BaseDielectricMap2",
@@ -378,7 +376,6 @@ albedoTypeSet = set([
 	#"BaseDielectricMap_B",
 	#"BaseDielectricMap_G",
 	#"BaseDielectricMap_R",
-	"BaseMap",
 	#"CloudMap",
 	"CloudMap_1",
 	"FaceBaseMap",
@@ -420,15 +417,12 @@ normalTypeSet = set([
 	"SnowNormalRoughnessMap",
 	"snowNRMmap",
 	"NormalReflactionMap",
-	"NormalRoughnessMap",
 	#"NormalRoughnessMap_R",
 	"NormalRoughnessCavityMap",
 	#"NormalRoughnessCavityMapBase",
-	"NormalRoughnessOcclusionMap",
 	"NormalRoughnessTranslucencyMap",
 	"NormalRoughnessAlphaMap",
 	"NormalRoughnessHeightMap",
-	"NRRTMap",
 	"Tex_Normal",
 	"IrisNormalMap",
 	"NormalOcclusionCavityMap",
@@ -627,10 +621,6 @@ from ..game_versions import mdfVersionDict, texVersionDict, getTexVersion, getMD
 from ..tex.blender_re_tex import loadTex
 from .blender_nodes_re_mdf import addImageNode,addTextureNode,addPropertyNode,dynamicColorMixLayerNodeGroup,getBentNormalNodeGroup,getDualUVMappingNodeGroup,getMHWildsSkinMappingNodeGroup,setDualUVTilingDefault
 from ..ddsconv.directx.texconv import Texconv
-
-def debugprint(string):
-	if DEBUG_MODE:
-		print(string)
 
 ADDON_NAME = __package__.split(".")[0]
 def getChunkPathList(gameName):
@@ -946,7 +936,6 @@ def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkP
 					textureNodeInfoList.append(("NRM",textureType,imageList,outputPath))
 				else:
 					textureNodeInfoList.append(("NRMR",textureType,imageList,outputPath))
-				detectedNormal = True
 			elif textureType in alphaTypeSet:
 				textureNodeInfoList.append(("ALP",textureType,imageList,outputPath))
 			elif textureType in occlusionTypeSet:
@@ -968,26 +957,10 @@ def loadMaterialTextures(mdfMaterial, mdfVersion, gameName, materialName, chunkP
 				textureNodeInfoList.append(("SCOT",textureType,imageList,outputPath))
 			elif gameName == "SF6" and textureType in sf6FacialWrinkleTypeSet:
 				textureNodeInfoList.append(("SF6WRINKLE", textureType, imageList, outputPath))
-			elif gameName == "SF6" and textureType in sf6DetailMaskTypeSet:
-				if sf6DetailRouting.get(textureType) == "SF6DETAIL":
-					nodeType = "SF6DETAIL"
-				elif sf6DetailRouting.get(textureType) == "SF6BODYDETAIL":
-					nodeType = "SF6BODYDETAIL"
-				elif sf6DetailRouting.get(textureType) == "SF6FACEDETAIL":
-					nodeType = "SF6FACEDETAIL"
-				else:
-					nodeType = "UNKN"
-				textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
-			elif gameName == "SF6" and textureType in sf6DetailNormalTypeSet:
-				if sf6DetailRouting.get(textureType) == "SF6DETAIL":
-					nodeType = "SF6DETAIL"
-				elif sf6DetailRouting.get(textureType) == "SF6BODYDETAIL":
-					nodeType = "SF6BODYDETAIL"
-				elif sf6DetailRouting.get(textureType) == "SF6FACEDETAIL":
-					nodeType = "SF6FACEDETAIL"
-				else:
-					nodeType = "UNKN"
-				textureNodeInfoList.append((nodeType, textureType, imageList, outputPath))
+			elif gameName == "SF6" and textureType in sf6DetailRouting:
+				#sf6DetailMaskTypeSet + sf6DetailNormalTypeSet are exactly this dict's
+				#keys, and its values are the node types (UNKN included) itself
+				textureNodeInfoList.append((sf6DetailRouting[textureType], textureType, imageList, outputPath))
 			elif gameName == "SF6" and textureType in sf6FurTypeSet:
 				textureNodeInfoList.append(("SF6FUR", textureType, imageList, outputPath))
 			elif autoDetectedAlbedo:
@@ -1676,28 +1649,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 					currentMaskSepNode = addSeparateColor(nodes, links, location = currentPos, sourceSocket = currentMaskNode.outputs["Color"])
 					matInfo["albedoNodeLayerGroup"].addMixLayer(currentMaskSepNode.outputs["Green"],factorOutSocket = None,mixType = "MULTIPLY",mixFactor = 0.3)
 					matInfo["roughnessNodeLayerGroup"].addMixLayer(currentMaskNode.outputs["Alpha"],factorOutSocket = None,mixType = "MIX",mixFactor = 1.0)
-								
-					#Add gradation lines
-					"""
-					currentPos[0] += 300
-								
-					geometryNode = nodes.new("ShaderNodeNewGeometry")
-					geometryNode.location = currentPos
-								
-					currentPos[0] += 300
-					sepXYZNode = nodes.new("ShaderNodeSeparateXYZ")
-					sepXYZNode.location = currentPos
-					links.new(geometryNode.outputs["True Normal"],sepXYZNode.inputs["Vector"])
-					currentPos[0] += 300
-								
-					colorRampNode = nodes.new("ShaderNodeValToRGB")
-					colorRampNode.location = currentPos
-					colorRampNode.color_ramp.elements[1].position = 0.0
-					colorRampNode.color_ramp.elements[0].position = 0.85
-					links.new(sepXYZNode.outputs["Z"],colorRampNode.inputs["Fac"])
-								
-					matInfo["albedoNodeLayerGroup"].addMixLayer(currentMaskSepNode.outputs["Blue"],factorOutSocket = colorRampNode.outputs["Color"],mixType = "MULTIPLY",mixFactor = 0.3)
-					"""
+
 					if "tex_noise" in matInfo["textureNodeDict"]:
 						currentMaskNode = matInfo["textureNodeDict"]["tex_noise"]
 						currentPos = [currentMaskNode.location[0]-300,currentMaskNode.location[1]]
@@ -1763,11 +1715,7 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 					
 		normalNode = nodes.new("ShaderNodeNormalMap")
 		normalNode.location = (matInfo["normalNodeLayerGroup"].currentOutSocket.node.location[0] + 300,matInfo["normalNodeLayerGroup"].currentOutSocket.node.location[1])
-		"""
-		if matInfo["isNRRT"]:
-			normalNode.inputs["Strength"].default_value = .4
-		"""
-					
+
 		links.new(matInfo["normalNodeLayerGroup"].currentOutSocket,normalNode.inputs["Color"])
 		if matInfo["detailNormalSocket"] == None:
 			links.new(normalNode.outputs["Normal"],nodeBSDF.inputs["Normal"])
@@ -2170,9 +2118,8 @@ def applyGameSpecificNodes(matInfo, materialName, hasVertexColor, loadUnusedProp
 	for arrayImageNodeName in arrayImageNodeList:
 		arrayImageNode = nodeTree.nodes[arrayImageNodeName]
 		#Get the source of vector input if it's connected and connect it directly to the array images to fix the dependency loop
-		if arrayImageNode.inputs["Vector"].links:	
+		if arrayImageNode.inputs["Vector"].links:
 			linkSource = arrayImageNode.inputs["Vector"].links[0].from_socket
-			#print(arrayImageNode.inputs["Vector"].links[0].from_socket.node.name)
 		else:
 			linkSource = None
 		for link in arrayImageNode.outputs["Vector"].links:

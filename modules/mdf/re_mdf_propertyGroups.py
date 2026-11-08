@@ -571,39 +571,22 @@ class MESH_UL_MDFTextureBindingList(MDFFilterableUIList):
 		"""Filter and order items in the list."""
 		return self._filterByAttr(getattr(data, propname), "textureType")
 
-class MESH_UL_MDFMMTRSDataList(bpy.types.UIList):
-	
+class _MDFFieldUIList(bpy.types.UIList):
+	#Renders one prop of the item full width (the split/column plumbing was left
+	#over from removed per-field columns)
+	itemProp = ""
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        # Display the properties of each item in the UIList
-        #col1.label(text=item.name)
 		layout.ui_units_y = 1.4
-		split = layout.split(factor=0.35)
-		col1 = split.column()
-		col2 = split.column()
-		row = col2.row()
-		col2.alignment='RIGHT'
-		#col1.label(text = item.textureType)
-		layout.prop(item,"indexString")
+		layout.prop(item, self.itemProp)
 	# Disable double-click to rename
 	def invoke(self, context, event):
 		return {'PASS_THROUGH'}
 
-class MESH_UL_MDFGPBFDataList(bpy.types.UIList):
-	
-	def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        # Display the properties of each item in the UIList
-        #col1.label(text=item.name)
-		layout.ui_units_y = 1.4
-		split = layout.split(factor=0.35)
-		col1 = split.column()
-		col2 = split.column()
-		row = col2.row()
-		col2.alignment='RIGHT'
-		#col1.label(text = item.textureType)
-		layout.prop(item,"gpbfDataString")
-	# Disable double-click to rename
-	def invoke(self, context, event):
-		return {'PASS_THROUGH'}
+class MESH_UL_MDFMMTRSDataList(_MDFFieldUIList):
+	itemProp = "indexString"
+
+class MESH_UL_MDFGPBFDataList(_MDFFieldUIList):
+	itemProp = "gpbfDataString"
 
 class MDFMaterialPropertyGroup(bpy.types.PropertyGroup):
 	gameName:StringProperty()

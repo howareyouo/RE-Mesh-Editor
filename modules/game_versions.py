@@ -5,14 +5,6 @@
 
 from .mesh.game_profile import ALL_PROFILES, profilesByFileVersion
 
-# game: (mesh file version, mdf file version, tex file version, remapped mesh version)
-GAME_INFO = {
-	gameProfile.name: (gameProfile.meshFileVersion, gameProfile.mdfVersion,
-	                   gameProfile.texVersion, gameProfile.remapVersion)
-	for gameProfile in ALL_PROFILES
-	if gameProfile.meshFileVersion is not None
-}
-
 # MDF version <-> game name (bidirectional). Aliases share one MDF version: the
 # numeric key resolves to the row flagged mdfAliasWinner and every mdfAlias row
 # appears in the name direction. Built from profilesByFileVersion so RE Verse's

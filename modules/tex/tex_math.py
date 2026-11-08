@@ -5,9 +5,6 @@ Created on Fri Mar  7 17:35:09 2025
 @author: Asterisk
 """
 
-#Size of a texture packet in bytes
-packetSize = 16
-
 #Round up Divide
 def ruD(x,y):
     """ Rounded Up Integer Division
