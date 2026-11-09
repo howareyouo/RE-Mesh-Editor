@@ -472,6 +472,8 @@ def populateCollectionList(itemList, collection, recursionLevel, parentName):
 				try:
 					item.exportAllLODs = collection["BatchExport_exportAllLODs"]
 					item.preserveSharpEdges = collection["BatchExport_preserveSharpEdges"]
+					if "BatchExport_weldSeamNormals" in collection:
+						item.weldSeamNormals = collection["BatchExport_weldSeamNormals"]
 					item.rotate90 = collection["BatchExport_rotate90"]
 					# item.exportBlendShapes = collection["BatchExport_exportBlendShapes"]
 					item.useBlenderMaterialName = collection["BatchExport_useBlenderMaterialName"]
@@ -569,6 +571,7 @@ class WM_OT_REBatchExporter(Operator):
 						exportAllLODs=exportItem.exportAllLODs,
 						autoSolveRepeatedUVs=exportItem.autoSolveRepeatedUVs,
 						preserveSharpEdges=exportItem.preserveSharpEdges,
+						weldSeamNormals=exportItem.weldSeamNormals,
 						rotate90=exportItem.rotate90,
 						useBlenderMaterialName=exportItem.useBlenderMaterialName,
 						preserveBoneMatrices=exportItem.preserveBoneMatrices,
@@ -747,6 +750,7 @@ class WM_OT_REBatchExporter(Operator):
 					# box.prop(self, "exportBlendShapes")
 					box.prop(item, "autoSolveRepeatedUVs")
 					box.prop(item, "preserveSharpEdges")
+					box.prop(item, "weldSeamNormals")
 					box.prop(item, "rotate90")
 					box.prop(item, "useBlenderMaterialName")
 					box.prop(item, "preserveBoneMatrices")

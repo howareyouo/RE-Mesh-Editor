@@ -19,6 +19,7 @@ from ..mdf.blender_re_mesh_mdf import findMDFPathFromMeshPath
 from .blender_re_mesh_utils import (SHAPEKEY_PREFIX, triangulateMesh, bounding_sphere_ritter, getCollection,
                                     _game_settings, _resolve_symmetry_bone_index,
                                     applyPragmataExportOrderAndStreams, assemblePragmataBlendAux)
+from .re_mesh_seam_weld import weldSeamNormals, printSeamWeldStats
 
 
 MIN_WEIGHT = 0.002
@@ -1187,6 +1188,10 @@ def exportREMeshFile(filePath, options):
 		printErrorDict(errorDict)
 		showREMeshErrorWindow(targetCollection.name, armatureObj, errorDict)
 		return False
+
+	if options.get("weldSeamNormals"):
+		print("Welding split normals across UV seams...")
+		printSeamWeldStats(weldSeamNormals(parsedMesh))
 
 	return _export_finalize(parsedMesh, meshVersion, filePath, gameName, targetCollection,
 	                        hashedBoneNameDict, subMeshCount, vertexCount, faceCount,
