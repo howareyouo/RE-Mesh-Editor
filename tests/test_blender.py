@@ -1247,53 +1247,13 @@ def test_rename_meshes_syncs_mdf_materials(tmpDir):
 def test_material_name_sync(tmpDir):
     """A material name lives in two places that have to match: the "__" suffix of every
     mesh object using it and the MDF material entry. The engine splits one material over
-    several meshes, so renaming it in one place has to move every copy - in both
-    directions - and must never let two materials end up with the same name."""
+    several meshes, so renaming a material has to move every mesh piece, and must never
+    let two materials end up with the same name."""
     from modules.mesh import blender_re_mesh_name_sync as nameSync
-    from modules.naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName
+    from modules.naming import parseMDFObjectNameMaterialName
 
-    clearSceneObjectsAndCollections()
-    meshCol, mdfCol = makeMeshCollectionScene("Body")
-    # Imported meshes live in a per-LOD child collection, which is itself named "*.mesh"
-    lodCol = bpy.data.collections.new("Main Mesh LOD0 - Body.mesh")
-    meshCol.children.link(lodCol)
-    pieceA = addOneFaceMesh(lodCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
-    pieceB = addOneFaceMesh(lodCol, "Group_0_Sub_1__Shirts_Mat", "Shirts_Mat", x=2)
-    pieceC = addOneFaceMesh(lodCol, "Group_0_Sub_2__Other_Mat", "Other_Mat", x=4)
-    shirtsMat = addMDFMaterialObject(mdfCol, "Material 00 (Shirts_Mat)", "Shirts_Mat")
-    otherMat = addMDFMaterialObject(mdfCol, "Material 01 (Other_Mat)", "Other_Mat")
-
-    # mesh -> MDF: renaming one piece in the outliner renames its siblings and the material
-    nameSync.refreshNameSnapshot()
-    pieceA.name = "Group_0_Sub_0__Cloth_Mat"
-    syncedCount = nameSync.syncRenamedMaterialNames()
-    check("mesh rename syncs to the MDF material", syncedCount == 1, str(syncedCount))
-    check("mesh sharing the material is renamed too",
-          pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
-    check("mesh sharing the material keeps its numbering",
-          pieceB.name.startswith("Group_0_Sub_1__"), pieceB.name)
-    check("mesh using another material is untouched",
-          pieceC.name == "Group_0_Sub_2__Other_Mat", pieceC.name)
-    check("MDF material follows the mesh rename",
-          shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
-    check("MDF material object name follows the mesh rename",
-          shirtsMat.name == "Material 00 (Cloth_Mat)", shirtsMat.name)
-    check("unrelated MDF material untouched", otherMat.re_mdf_material.materialName == "Other_Mat",
-          otherMat.re_mdf_material.materialName)
-
-    # A rename onto a name another material already holds is refused, and the mesh name
-    # the outliner already accepted is put back.
-    nameSync.refreshNameSnapshot()
-    pieceB.name = "Group_0_Sub_1__Other_Mat"
-    check("conflicting mesh rename is not synced", nameSync.syncRenamedMaterialNames() == 0)
-    check("refused mesh rename is undone", pieceB.name == "Group_0_Sub_1__Cloth_Mat", pieceB.name)
-    check("refused mesh rename leaves the MDF material alone",
-          shirtsMat.re_mdf_material.materialName == "Cloth_Mat", shirtsMat.re_mdf_material.materialName)
-    check("refused mesh rename leaves the sibling alone",
-          pieceA.name == "Group_0_Sub_0__Cloth_Mat", pieceA.name)
-
-    # MDF -> mesh: the MDF panel is the other entry point, and renaming there has to
-    # reach every mesh piece, also when they sit directly in the mesh collection.
+    # MDF -> mesh: the MDF panel is one entry point, and renaming there has to reach every
+    # mesh piece, also when they sit directly in the mesh collection.
     clearSceneObjectsAndCollections()
     meshCol, mdfCol = makeMeshCollectionScene("Body")
     clothA = addOneFaceMesh(meshCol, "Group_0_Sub_0__Shirts_Mat", "Shirts_Mat", x=0)
@@ -1356,38 +1316,6 @@ def test_material_name_sync(tmpDir):
           clothA.name == "Group_0_Sub_0__Denim_Mat" and clothB.name == "Group_1_Sub_0__Denim_Mat",
           f"{clothA.name} / {clothB.name}")
 
-    # The plain case: a material used by a single mesh has no sibling to bring along
-    clearSceneObjectsAndCollections()
-    meshCol, mdfCol = makeMeshCollectionScene("Body")
-    soloObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Solo_Mat", "Solo_Mat")
-    soloMat = addMDFMaterialObject(mdfCol, "Material 00 (Solo_Mat)", "Solo_Mat")
-    nameSync.refreshNameSnapshot()
-    soloObj.name = "Group_0_Sub_0__Single_Mat"
-    check("single-mesh rename is synced", nameSync.syncRenamedMaterialNames() == 1)
-    check("single-mesh rename reaches the MDF material and its object name",
-          soloMat.re_mdf_material.materialName == "Single_Mat" and soloMat.name == "Material 00 (Single_Mat)",
-          f"{soloMat.re_mdf_material.materialName} / {soloMat.name}")
-
-    # A refused rename is undone immediately, and the rollback has to survive Blender's
-    # own name resolution: when another object holds the name to put back, Blender appends
-    # a ".001", which stripBlenderUserSuffix drops from the parsed material name - so the
-    # next pass would read the old suffix as a fresh rename and be refused again, forever.
-    clearSceneObjectsAndCollections()
-    meshCol, mdfCol = makeMeshCollectionScene("Body")
-    takenObj = addOneFaceMesh(meshCol, "Group_0_Sub_0__Taken_Mat", "Taken_Mat", x=0)
-    takenMat = addMDFMaterialObject(mdfCol, "Material 00 (Taken_Mat)", "Taken_Mat")
-    squatterObj = addOneFaceMesh(meshCol, "Group_0_Sub_1__Free_Mat", "Free_Mat", x=2)
-    nameSync.refreshNameSnapshot()
-    squatterObj.name = "Group_0_Sub_1__Taken_Mat"
-    check("conflicting mesh rename is refused", nameSync.syncRenamedMaterialNames() == 0)
-    check("rollback puts the same material name back",
-          parseREMeshObjectMaterialName(squatterObj.name) == "Free_Mat", squatterObj.name)
-    check("rollback leaves the refused material alone",
-          takenMat.re_mdf_material.materialName == "Taken_Mat", takenMat.re_mdf_material.materialName)
-    check("rollback is not a rename on the next pass", nameSync.syncRenamedMaterialNames() == 0)
-    check("rollback keeps the sibling naming", squatterObj.name.startswith("Group_0_Sub_1__"),
-          squatterObj.name)
-
     # Same on the MDF side: the material object is put back on a name that still carries
     # its own material name, even when the old object name was taken in the meantime
     clearSceneObjectsAndCollections()
@@ -1407,38 +1335,6 @@ def test_material_name_sync(tmpDir):
           freeMat.name.startswith("Material 01 (Free_Mat"), freeMat.name)
     check("refused MDF object rename is not a rename on the next pass",
           nameSync.syncRenamedMaterialNames() == 0)
-
-    # The mesh to material sync is off by default, and a duplicate name is refused even
-    # then: the other mesh keeps the name, so this one would be exported under a material
-    # that isn't its own and both meshes would end up bound to one material.
-    clearSceneObjectsAndCollections()
-    meshCol, mdfCol = makeMeshCollectionScene("Body")
-    freePiece = addOneFaceMesh(meshCol, "Group_0_Sub_0__Free_Mat", "Free_Mat", x=0)
-    takenPiece = addOneFaceMesh(meshCol, "Group_0_Sub_1__Taken_Mat", "Taken_Mat", x=2)
-    addMDFMaterialObject(mdfCol, "Material 00 (Free_Mat)", "Free_Mat")
-    takenMat = addMDFMaterialObject(mdfCol, "Material 01 (Taken_Mat)", "Taken_Mat")
-    nameSync.refreshNameSnapshot()
-    freePiece.name = "Group_0_Sub_0__Taken_Mat"
-    check("refused mesh rename is undone with the sync off",
-          nameSync.syncRenamedMaterialNames(syncMeshRenames = False) == 0)
-    check("sync off still refuses a duplicate material name",
-          parseREMeshObjectMaterialName(freePiece.name) == "Free_Mat", freePiece.name)
-    check("sync off leaves the mesh it collided with alone",
-          takenPiece.name == "Group_0_Sub_1__Taken_Mat", takenPiece.name)
-    check("sync off leaves the MDF material alone",
-          takenMat.re_mdf_material.materialName == "Taken_Mat", takenMat.re_mdf_material.materialName)
-    check("sync off rollback is not a rename on the next pass",
-          nameSync.syncRenamedMaterialNames(syncMeshRenames = False) == 0)
-
-    # A name no material holds is not a duplicate: it's the usual way to start a new
-    # material, so it is left alone when the sync is off (and picked up by it when on).
-    nameSync.refreshNameSnapshot()
-    freePiece.name = "Group_0_Sub_0__New_Mat"
-    nameSync.syncRenamedMaterialNames(syncMeshRenames = False)
-    check("sync off keeps a name no material holds",
-          parseREMeshObjectMaterialName(freePiece.name) == "New_Mat", freePiece.name)
-    check("sync off keeps the MDF untouched for a new name",
-          takenMat.re_mdf_material.materialName == "Taken_Mat", takenMat.re_mdf_material.materialName)
 
 
 # ---------------------------------------------------------------- 2g. material name find/replace

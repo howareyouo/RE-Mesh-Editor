@@ -15,7 +15,7 @@ Rules (identical to the reference):
 - Group the submesh's vertices by quantised position.
 - Within a group, vertices that share one UV (wrapped) are a real hard edge: keep.
 - The target normal is the area-weighted average of the faces at that position.
-- Any member further than `thresh` (default 60\u00b0) from the target is a real crease: keep.
+- Any member further than `WELD_THRESH` (60\u00b0) from the target is a real crease: keep.
 - Tangents are re-orthogonalised against the new normal, `w` (handedness) is kept.
 - Only the welded vertices change; every other byte of the export is untouched.
 
@@ -41,8 +41,11 @@ def _angles(a, b):
 
 
 def _uvWrapDistance(a, b):
-	"""Max component distance after UV wrapping, so a 0/1 seam is not mistaken for a gap."""
-	d = np.abs(np.asarray(a, np.float64) - np.asarray(b, np.float64))
+	"""Max component distance after UV wrapping, so a 0/1 seam is not mistaken for a gap.
+
+	Keeps the input dtype: callers pass float32 UVs and the comparison against `UV_EPS`
+	must stay in float32, like the rest of the per-vertex math."""
+	d = np.abs(np.asarray(a) - np.asarray(b))
 	return np.max(np.abs(d - np.round(d)), axis=-1)
 
 
@@ -80,18 +83,22 @@ def _weldSubMesh(subMesh, stats):
 	# Same position -> same quantised id. Keep the division in float32 like the
 	# reference, so duplicate vertices land together with bit-identical rounding.
 	quantised = np.round(positions / POS_QUANT).astype(np.int64)
-	uniquePositions, positionIds = np.unique(quantised, axis=0, return_inverse=True)
+	_, positionIds = np.unique(quantised, axis=0, return_inverse=True)
 	positionIds = positionIds.reshape(-1)
 
 	# Area-weighted face normal accumulated per position. `cross` is exactly
 	# (unit face normal * triangle area), i.e. area weighting without the square.
-	p = positions[triangles]
-	cross = np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]).astype(np.float64)
-	keys = positionIds[triangles.reshape(-1)]
-	order = np.argsort(keys, kind="stable")  # stable: same accumulation order as per-face
-	starts, _ = _runs(keys[order])
-	accumulated = np.add.reduceat(np.repeat(cross, 3, axis=0)[order], starts, axis=0)
-	accumulatedPositions = keys[order][starts]
+	facePositions = positions[triangles]
+	cross = np.cross(
+		facePositions[:, 1] - facePositions[:, 0],
+		facePositions[:, 2] - facePositions[:, 0]).astype(np.float64)
+	cornerIds = positionIds[triangles.reshape(-1)]  # one position id per triangle corner
+	order = np.argsort(cornerIds, kind="stable")  # stable: same accumulation order as per-face
+	starts, _ = _runs(cornerIds[order])
+	# One copy of the face's cross product per corner it touches that position with.
+	crossPerCorner = np.repeat(cross, 3, axis=0)[order]
+	accumulated = np.add.reduceat(crossPerCorner, starts, axis=0)
+	accumulatedPositions = cornerIds[order][starts]
 	accumulatedIndex = {key: index for index, key in enumerate(accumulatedPositions.tolist())}
 
 	# Vertices sharing a position inside this submesh, in stable vertex order.
@@ -99,13 +106,12 @@ def _weldSubMesh(subMesh, stats):
 	groupStarts, groupLengths = _runs(positionIds[groupOrder])
 	vertexIds = np.arange(vertexCount)
 	tangentInt8 = tangents.astype(np.int8)
-	welded = 0
+	changed = False
 
 	for group in np.flatnonzero(groupLengths >= 2):
 		members = vertexIds[groupOrder[groupStarts[group]: groupStarts[group] + groupLengths[group]]]
 		memberUVs = uvs[members]
-		d = np.abs(memberUVs[:, None, :] - memberUVs[None, :, :])
-		if np.max(np.abs(d - np.round(d))) < UV_EPS:
+		if _uvWrapDistance(memberUVs[:, None, :], memberUVs[None, :, :]).max() < UV_EPS:
 			stats["same_uv_hard_edge"] += 1  # one UV on duplicates = real hard edge
 			continue
 
@@ -120,8 +126,7 @@ def _weldSubMesh(subMesh, stats):
 		target = target / length
 
 		memberNormals = normals[members].astype(np.float64)
-		pairwise = np.clip(memberNormals @ memberNormals.T, -1.0, 1.0)
-		if np.degrees(np.arccos(pairwise.min())) <= SPLIT_EPS:
+		if _angles(memberNormals[:, None, :], memberNormals[None, :, :]).max() <= SPLIT_EPS:
 			stats["already_shared"] += 1  # normals already shared: no split to weld
 			continue
 
@@ -148,12 +153,12 @@ def _weldSubMesh(subMesh, stats):
 
 		normals[members] = target32
 		tangents[members] = newTangentBytes
-		welded += len(members)
+		changed = True
 		stats["welded_groups"] += 1
 		stats["welded_verts"] += len(members)
 		stats["max_shift_deg"] = max(stats["max_shift_deg"], float(offsets.max()))
 
-	if welded:
+	if changed:
 		# `asarray` may have copied a plain list; hand the written arrays back.
 		subMesh.normalList = normals
 		subMesh.tangentList = tangents
@@ -176,6 +181,7 @@ def weldSeamNormals(parsedMesh):
 
 
 def printSeamWeldStats(stats):
-	parts = [f"{name}={stats[name]:.1f}deg" if name == "max_shift_deg" else f"{name}={stats[name]}"
-	         for name in stats]
+	parts = []
+	for name, value in stats.items():
+		parts.append(f"{name}={value:.1f}deg" if name == "max_shift_deg" else f"{name}={value}")
 	print("  Seam normal weld: " + ", ".join(parts))

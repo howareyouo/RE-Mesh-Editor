@@ -4,12 +4,12 @@
 #that have to match exactly - the "__" suffix of every mesh object name and the MDF material
 #entries - where a mismatch shows up as a checkerboard texture in game.
 #
-#A rename can come from four doors: the MDF panel field, an outliner rename of a mesh object, an
-#outliner rename of an "Material NN (name)" empty, and the Rename Meshes / find-and-replace
-#passes. All of them end up in applyMaterialRename, so the copies always move together and only
-#the name changes: no Group/Sub/LOD prefix, no NN index, no reindexing. A name that can't be used
-#is refused the same way whichever door it came from, nothing is renamed then, and the part of
-#the rename the user's own edit had already applied is rolled back.
+#A rename can come from three doors: the MDF panel field, an outliner rename of a
+#"Material NN (name)" empty, and the Rename Meshes / find-and-replace passes. All of them end up
+#in applyMaterialRename, so the copies always move together and only the name changes: no
+#Group/Sub/LOD prefix, no NN index, no reindexing. A name that can't be used is refused the same
+#way whichever door it came from, nothing is renamed then, and the part of the rename the user's
+#own edit had already applied is rolled back.
 #
 #Renaming a material while a rename is being applied would start a second sync from the MDF
 #materialName property's update callback, so materialNameSync guards the whole apply.
@@ -52,11 +52,10 @@ def materialNameSync():
 _nameSnapshot = {}
 
 def captureNameSnapshot():
-	"""Record the current name of every object a material name lives on.
+	"""Record the current name of every "Material NN (name)" object.
 
-	Both sides are needed: the "__" suffix of the mesh objects and the "Material NN (name)" name
-	of the MDF material objects, which is where a user can rename a material without touching
-	any property (see findRenamedMDFMaterialObjects)."""
+	That object name is where a user can rename a material without touching any
+	property (see findRenamedMDFMaterialObjects)."""
 	#bpy.data is a _RestrictData stub while an addon loads, and an empty snapshot only means
 	#"no baseline yet" - the first timer tick captures the real one.
 	objectList = getattr(bpy.data, "objects", None)
@@ -64,7 +63,7 @@ def captureNameSnapshot():
 		return {}
 	snapshot = {}
 	for obj in objectList:
-		if obj.type == "MESH" or obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
+		if obj.get("~TYPE", None) == MDF_MATERIAL_TYPE:
 			snapshot[obj.as_pointer()] = obj.name
 	return snapshot
 
@@ -85,39 +84,13 @@ def hasNameSnapshot():
 	"""True when there is a baseline to compare names against (see captureNameSnapshot)."""
 	return bool(_nameSnapshot)
 
-def clearSnapshotEntry(obj):
-	"""Drop one object from the baseline, so what happens to its name next - including
-	being renamed by someone else - is new state and not a user rename."""
-	_nameSnapshot.pop(obj.as_pointer(), None)
-
 def restoreObjectName(obj, restoreName):
-	"""Put a name a rename was refused on back onto the object.
+	"""Put the name a rename was refused on back onto the object.
 
-	Blender doesn't just give the old name back: a .NNN suffix is appended when another object
-	has taken it in the meantime (e.g. a duplicated mesh in the same tick), and the data-block
-	name is refused outright while its mesh datablock still holds it. Both cases are handled
-	here - the exception is the datablock case, where a different name is the only way to get
-	the object back off the refused one. Returns the name it ended up with (see
-	stripBlenderUserSuffix, which keeps ".NNN" suffixes out of the material name)."""
-	try:
-		obj.name = restoreName
-	except Exception:
-		#Blender refuses the name only while the object's own mesh datablock still holds it
-		#(the rest of the collision cases are resolved with a suffix instead), which is the
-		#datablock case: release the name there and try again.
-		meshData = getattr(obj, "data", None)
-		if meshData == None:
-			raise
-		meshData.name = getattr(meshData, "name", "") + "_mesh"
-		obj.name = restoreName
-	#The object is clean again, so the rollback inside the next tick must not be taken for a
-	#fresh rename - of the material name or of any sibling that was let go to restore it
-	for otherObj in bpy.data.objects:
-		previousName = _nameSnapshot.get(otherObj.as_pointer())
-		if previousName == None or otherObj.name in (previousName, restoreName):
-			continue
-		if parseREMeshObjectMaterialName(otherObj.name) == parseREMeshObjectMaterialName(restoreName):
-			clearSnapshotEntry(otherObj)
+	Blender doesn't just give the old name back: a .NNN suffix is appended when another
+	object has taken it in the meantime, which parseMDFObjectNameMaterialName ignores, so
+	the material name still resolves the same way. Returns the name it ended up with."""
+	obj.name = restoreName
 	return obj.name
 
 # ------------------ rename ------------------
@@ -135,18 +108,15 @@ def iterMeshesUsingMaterialName(meshCollection, materialName):
 		if parseREMeshObjectMaterialName(obj.name).lower() == targetName:
 			yield obj
 
-def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None,
-                               ignoreMeshObject = None):
+def getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMaterialObject = None):
 	"""Return a reason when a material can't be renamed to newMaterialName, else None.
 
-	Only the MDF entries are compared: mesh objects already carrying the new name are the very
-	pieces this rename brings together (and the one the user just typed it into), so they can't
-	count as a conflict. ignoreMaterialObject skips the entry being renamed, which the MDF panel
-	has already updated by the time its callback runs - ignoreMeshObject is the outliner rename
-	that already happened, which is the same situation one step on: the object carries the new
-	name but the material behind it is not there yet."""
+	Only the MDF entries are compared: the mesh objects this rename brings along already
+	carry the new name, so they can't count as a conflict. ignoreMaterialObject skips the
+	entry being renamed, which the MDF panel has already updated by the time its callback
+	runs."""
 	materialNameList = [getMDFMaterialName(materialObj) for materialObj in iterMDFMaterialObjects(mdfCollection)
-	                    if materialObj != ignoreMaterialObject and materialObj != ignoreMeshObject]
+	                    if materialObj != ignoreMaterialObject]
 	return getMaterialNameRenameError(materialNameList, oldMaterialName, newMaterialName)
 
 def renameMeshObjectsToMaterialName(meshObjList, newMaterialName):
@@ -170,23 +140,21 @@ class MaterialRenameRequest:
 	isn't known, and that side is then left alone. oldMaterialName is the name the material had
 	and newMaterialName the one it should get.
 
-	renamedMeshObject is a mesh object an outliner rename has already moved onto the new name,
-	renamedMaterialObject the MDF material object the same has happened to (the panel field or
-	the outliner), and previousObjectName the name that object had before. Those objects are the
-	source of the rename: they no longer carry the old name, the rest of the material follows
-	the name they do carry, and they are put back when the rename is refused (see
+	renamedMaterialObject is the MDF material object the panel field or an outliner rename has
+	already moved onto the new name, and previousObjectName the name that object had before.
+	That object is the source of the rename: it no longer carries the old name, the rest of the
+	material follows the name it does carry, and it is put back when the rename is refused (see
 	restoreRefusedMaterialRename)."""
 
 	__slots__ = ("meshCollection", "mdfCollection", "oldMaterialName", "newMaterialName",
-	             "renamedMeshObject", "renamedMaterialObject", "previousObjectName")
+	             "renamedMaterialObject", "previousObjectName")
 
 	def __init__(self, meshCollection = None, mdfCollection = None, oldMaterialName = "", newMaterialName = "",
-	             renamedMeshObject = None, renamedMaterialObject = None, previousObjectName = None):
+	             renamedMaterialObject = None, previousObjectName = None):
 		self.meshCollection = meshCollection
 		self.mdfCollection = mdfCollection
 		self.oldMaterialName = oldMaterialName
 		self.newMaterialName = newMaterialName
-		self.renamedMeshObject = renamedMeshObject
 		self.renamedMaterialObject = renamedMaterialObject
 		self.previousObjectName = previousObjectName
 
@@ -217,13 +185,6 @@ def restoreRefusedMaterialRename(request):
 	before its previous object name is put back, because that name is what the MDF writer
 	resolves the material name from - and the property goes back with it, since the panel
 	field's write landed before its callback could refuse it."""
-	obj = request.renamedMeshObject
-	if obj != None:
-		restoredName = restoreObjectName(obj, replaceREMeshMaterialSuffix(obj.name, request.oldMaterialName))
-		if parseREMeshObjectMaterialName(restoredName) != request.oldMaterialName:
-			print(f"RE Mesh Editor: \"{obj.name}\" was renamed back to \"{restoredName}\", "
-			      f"\"{request.oldMaterialName}\" was taken")
-		return restoredName
 	obj = request.renamedMaterialObject
 	if obj == None:
 		return None
@@ -258,10 +219,10 @@ def applyMaterialRename(request):
 	#name being taken is not a conflict for this rename. An object already carrying the new name
 	#is the exception - it is the rename itself, and its new name has to be checked like any
 	#other before the rest of the material is moved onto it.
-	if not meshObjList and not materialObjList and request.renamedMeshObject == None and request.renamedMaterialObject == None:
+	if not meshObjList and not materialObjList and request.renamedMaterialObject == None:
 		return MaterialRenameResult()
 	error = getMDFMaterialNameConflict(request.mdfCollection, request.oldMaterialName, newName,
-	                                   request.renamedMaterialObject, ignoreMeshObject = request.renamedMaterialObject)
+	                                   request.renamedMaterialObject)
 	if error != None:
 		return MaterialRenameResult(error = error, restoredName = restoreRefusedMaterialRename(request))
 	with materialNameSync():
@@ -277,7 +238,6 @@ def applyMaterialRename(request):
 	return MaterialRenameResult(renamedObjList, renamedCount)
 
 # ------------------ find and replace ------------------
-
 def getMaterialNameReplacePlan(mdfCollection, findValue, replaceValue):
 	"""Plan replacing text in the name of every material of an MDF collection.
 

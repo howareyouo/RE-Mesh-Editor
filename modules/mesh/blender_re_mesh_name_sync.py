@@ -1,6 +1,7 @@
 #Author: NSA Cloud
-#Keeps the material name inside a mesh object name in sync with the MDF material of
-#the same name, in both directions, when an object is renamed in the outliner.
+#Pushes a material rename made in the outliner onto the meshes that use the material: the
+#"Material NN (name)" empty carries the material name in its object name, and the meshes carry
+#it in the "__" suffix of their names, so renaming the empty has to move every mesh piece.
 #
 #Blender has no callback for data-block renames (and bpy.msgbus doesn't deliver them
 #either), so the only way to notice a rename is to compare the current names against a
@@ -14,81 +15,13 @@
 
 import bpy
 
-from ..blender_utils import (findMDFCollectionForMaterialObject, findMDFCollectionForMesh,
-                             findMeshCollectionForMDF, findMeshCollectionForObject, getMDFMaterialName,
-                             getToolPanelFlag, iterAllMDFMaterialObjects, setMDFMaterialObjectName)
-from ..naming import parseMDFObjectNameMaterialName, parseREMeshObjectMaterialName
+from ..blender_utils import (findMDFCollectionForMaterialObject, findMeshCollectionForMDF,
+                             getMDFMaterialName, iterAllMDFMaterialObjects, setMDFMaterialObjectName)
+from ..naming import parseMDFObjectNameMaterialName
 from .material_name import (MaterialRenameRequest, applyMaterialRename, clearNameSnapshot,
-                            getMDFMaterialNameConflict, getSnapshotObjectName, hasNameSnapshot,
-                            refreshNameSnapshot, restoreRefusedMaterialRename)
+                            getSnapshotObjectName, hasNameSnapshot, refreshNameSnapshot)
 
 POLL_INTERVAL = 0.5
-
-
-def findRenamedMeshMaterials():
-	"""Return (object, oldMaterialName, newMaterialName) for mesh renames since the baseline.
-
-	Reads the snapshot without touching it, so a caller can decide what to do first."""
-	renameList = []
-	for obj in bpy.data.objects:
-		if obj.type != "MESH":
-			continue
-		oldObjectName = getSnapshotObjectName(obj)
-		if oldObjectName == None or oldObjectName == obj.name:
-			continue
-		oldMaterialName = parseREMeshObjectMaterialName(oldObjectName)
-		newMaterialName = parseREMeshObjectMaterialName(obj.name)
-		#Renaming the Group/Sub/LOD prefix doesn't touch the material name
-		if oldMaterialName == "" or newMaterialName == "" or oldMaterialName == newMaterialName:
-			continue
-		renameList.append((obj, oldMaterialName, newMaterialName))
-	return renameList
-
-
-def getMeshRenameConflict(obj, oldMaterialName, newMaterialName):
-	"""Return a reason when a mesh rename can't become a material, else None.
-
-	Only renames the mesh side can push along need a material to land on: a mesh name
-	whose suffix names no material at all is taken as a request to create one, which is
-	the same case as a mesh imported under a name the MDF doesn't hold yet (see
-	MDFErrorCheck, which reports it without refusing the rename)."""
-	mdfCollection = findMDFCollectionForMesh(findMeshCollectionForObject(obj))
-	return getMDFMaterialNameConflict(mdfCollection, oldMaterialName, newMaterialName, ignoreMeshObject = obj)
-
-
-def syncRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
-	"""Push a material rename made by renaming a mesh object onto the rest of its material.
-
-	The outliner rename has already moved obj onto the new material name, so it is passed
-	along: the name it now carries is what has to be checked for a conflict, and the rest
-	of the material follows it. A refused rename is undone by the rename itself, and the
-	rename count decides whether anything happened - the object itself is always already
-	renamed."""
-	meshCollection = findMeshCollectionForObject(obj)
-	if meshCollection == None:
-		return False
-	result = applyMaterialRename(MaterialRenameRequest(meshCollection, findMDFCollectionForMesh(meshCollection),
-	                                                   oldMaterialName, newMaterialName, renamedMeshObject = obj))
-	if result.error != None:
-		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {result.error}")
-		return False
-	return bool(result.renamedMeshObjects or result.renamedMDFMaterialCount)
-
-
-def refuseRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
-	"""Undo a mesh rename that would give a used name to a second mesh.
-
-	The mesh to material direction is off by default, but a name that is already used is
-	not a sync the option should be able to switch off: the other mesh keeps it, so this
-	one would end up bound to a material it doesn't own and both meshes would be exported
-	under one name. Only a rename onto a name the MDF holds is checked - see
-	getMeshRenameConflict. Returns True when the rename was undone."""
-	error = getMeshRenameConflict(obj, oldMaterialName, newMaterialName)
-	if error == None:
-		return False
-	print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {error}")
-	restoreRefusedMaterialRename(MaterialRenameRequest(oldMaterialName = oldMaterialName, renamedMeshObject = obj))
-	return True
 
 
 def findRenamedMDFMaterialObjects():
@@ -120,10 +53,10 @@ def findRenamedMDFMaterialObjects():
 def syncRenamedMDFMaterialObject(obj, oldObjectName, oldMaterialName, newMaterialName):
 	"""Push a material rename made by renaming an MDF material object onto the meshes.
 
-	This is the third way to rename a material, next to the MDF panel field and the mesh
-	name: renaming the "Material NN (name)" empty in the outliner. The MDF writer resolves
-	the name from that object name (see getMDFMaterialName), so the property and the
-	meshes have to follow it. Returns 1 when a rename was applied, else 0."""
+	This is the second way to rename a material, next to the MDF panel field: renaming the
+	"Material NN (name)" empty in the outliner. The MDF writer resolves the name from that
+	object name (see getMDFMaterialName), so the property and the meshes have to follow it.
+	Returns 1 when a rename was applied, else 0."""
 	if newMaterialName == None:
 		#Not the "Material NN (name)" form, so this is not a material name: the property
 		#still is, and putting the convention back keeps the object name readable - the
@@ -144,32 +77,19 @@ def syncRenamedMDFMaterialObject(obj, oldObjectName, oldMaterialName, newMateria
 	if result.error != None:
 		print(f"RE Mesh Editor: material name not synced from \"{obj.name}\": {result.error}")
 		return 0
-	#Nothing left to change means the rename was already applied - e.g. by the mesh pass
-	#of the same tick, which renames the MDF material of a renamed mesh
+	#Nothing left to change means the rename was already applied
 	return 1 if (result.renamedMeshObjects or result.renamedMDFMaterialCount) else 0
 
 
-def syncRenamedMaterialNames(syncMeshRenames = True):
-	"""Apply material name changes made by renames in the outliner to the whole pair.
+def syncRenamedMaterialNames():
+	"""Apply material name changes made by renames of "Material NN (name)" objects to the meshes.
 
-	Both directions are read from the same snapshot before anything is renamed, because
-	a rename on one side renames the other side too - reading again between the passes
-	would see our own writes as new user renames. Returns the number of synced renames.
-
-	syncMeshRenames is the "Auto Sync Material Names" option in the RE MDF Tools panel:
-	renaming a material always renames the meshes, the option only controls the mesh to
-	material direction. Turning it off stops the sync, not the duplicate name check: a
-	rename onto a material name another mesh already uses is undone either way."""
+	The renames are read from the snapshot before anything is renamed, because a rename
+	renames the meshes too - reading again between the objects would see our own writes as
+	new user renames. Returns the number of synced renames."""
 	syncedCount = 0
-	meshRenameList = findRenamedMeshMaterials()
 	materialRenameList = findRenamedMDFMaterialObjects()
 	try:
-		for obj, oldMaterialName, newMaterialName in meshRenameList:
-			if syncMeshRenames:
-				if syncRenamedMeshMaterial(obj, oldMaterialName, newMaterialName):
-					syncedCount += 1
-				continue
-			refuseRenamedMeshMaterial(obj, oldMaterialName, newMaterialName)
 		for obj, oldObjectName, oldMaterialName, newMaterialName in materialRenameList:
 			syncedCount += syncRenamedMDFMaterialObject(obj, oldObjectName, oldMaterialName, newMaterialName)
 	finally:
@@ -184,8 +104,7 @@ def _pollMaterialNameRenames():
 		if not hasNameSnapshot():
 			refreshNameSnapshot()
 		else:
-			#The mesh to material direction is the only one the option controls, and it is off by default
-			syncRenamedMaterialNames(getToolPanelFlag("autoSyncMaterialNames", default = False))
+			syncRenamedMaterialNames()
 	except Exception as error:
 		#A failing timer would be unregistered by Blender, so keep it alive and report
 		print(f"RE Mesh Editor: material name sync failed - {error}")
